@@ -1,273 +1,209 @@
-# 🏠 HomeScore - Système de Scoring d'Appartements
+# 🏠 HomeScore - AI-Powered Apartment Scoring System
 
-Un système intelligent pour scraper, analyser et scorer des appartements sur Jinka selon des critères personnalisés.
+[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://python.org)
+[![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4-green.svg)](https://openai.com)
+[![Playwright](https://img.shields.io/badge/Playwright-Web%20Automation-orange.svg)](https://playwright.dev)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## 📋 Vue d'ensemble
+**HomeScore** is an intelligent AI-powered apartment scoring system designed to automatically analyze and evaluate apartment listings from Jinka alerts. It combines web scraping, computer vision, and AI to provide comprehensive apartment assessments with detailed scoring and visual reports.
 
-HomeScore est un système automatisé qui :
-- **Scrape** les offres d'appartements depuis vos alertes Jinka
-- **Extrait** automatiquement les données clés (prix, surface, localisation, etc.)
-- **Score** chaque appartement sur 100 points selon vos critères
-- **Génère** des rapports HTML visuels
-- **Identifie** automatiquement le quartier via analyse de carte
+## ✨ Key Features
 
-## 🎯 Critères de Scoring
+### 🤖 AI-Powered Scoring
+- **6 Evaluation Criteria**: Location, Price, Style, Exposure, Open Kitchen, Floor
+- **100-Point Scoring System** with tier-based classification (Excellent/Good/Average)
+- **OpenAI Integration** for contextual analysis and score justification
+- **Smart Exposure Analysis**: Textual + Photo analysis with Vision API
 
-| Critère | Points | Description |
-|---------|--------|-------------|
-| **Localisation** | 20pts | Arrondissement, quartier, proximité transports |
-| **Style** | 20pts | Éléments haussmanniens, caractère architectural |
-| **Prix** | 20pts | Prix total et prix au m² |
-| **Ensoleillement** | 10pts | Luminosité, orientation |
-| **Cuisine ouverte** | 10pts | Type de cuisine (américaine, ouverte, fermée) |
-| **Étage** | 10pts | Étage, ascenseur, vue |
-| **Vue** | 5pts | Vue dégagée, balcon, terrasse |
-| **Surface** | 5pts | Surface habitable, pièces |
+### 🏠 Data Extraction
+- **Automated Jinka Scraping** with Playwright browser automation
+- **Complete Data Extraction**: Price, surface, location, features, photos
+- **Photo Download**: 3-4 photos per apartment stored locally
+- **Metro Station Analysis**: Automatic extraction for location context
 
-## 🚀 Fonctionnalités
+### 📸 Visual Analysis
+- **Photo Analysis** with OpenAI Vision API
+- **Style Detection**: Haussmannian, 70s, modern architecture
+- **Open Kitchen Detection**: Automatic identification
+- **Luminosity Assessment**: Natural lighting analysis
 
-### ✅ Scraping Automatique
-- **Connexion Jinka** via Google OAuth
-- **Extraction des URLs** d'appartements depuis les alertes
-- **Scraping des données** détaillées de chaque appartement
-- **Mode headless** pour l'efficacité
+### 📊 Report Generation
+- **Professional HTML Reports** with modern design
+- **Two Styles**: Fitscore (3-column grid) and Original layout
+- **Integrated Photos**: Apartment images in reports
+- **Detailed Scores**: Justification for each criterion
 
-### ✅ Extraction de Données Avancée
-- **Prix et prix/m²** : Extraction automatique
-- **Surface et pièces** : Détection via regex
-- **Étage** : Identification automatique
-- **Localisation** : Arrondissement + analyse de carte
-- **Description complète** : Texte intégral
-- **Caractéristiques** : Parking, ascenseur, balcon, etc.
-- **Photos** : URLs des images
-- **Agence** : Nom de l'agence
+## 🚀 Quick Start
 
-### ✅ Analyse de Carte Intelligente
-- **Screenshots automatiques** de la carte Jinka
-- **Identification du quartier** basée sur les rues visibles
-- **Coordonnées GPS** (en développement)
-- **Proximité des transports** et points d'intérêt
+### Prerequisites
+- Python 3.8+
+- Playwright
+- OpenAI API Key
 
-### ✅ Scoring Haussmannien
-- **Détection automatique** des éléments architecturaux
-- **Mots-clés étendus** : moulures, parquet, cheminée, etc.
-- **Scoring par catégorie** : architectural, caractère, matériaux, détails
-- **Score final** calculé automatiquement
-
-### ✅ Rapports Visuels
-- **Génération HTML** avec cartes d'appartements
-- **Scores détaillés** par critère
-- **Photos et descriptions** intégrées
-- **Interface moderne** et responsive
-
-## 📁 Structure du Projet
-
-```
-HomeScore/
-├── README.md                    # Documentation
-├── requirements.txt             # Dépendances Python
-├── .env                        # Variables d'environnement
-├── config.json                 # Configuration générale
-├── scoring_config.json         # Critères de scoring
-├── scoring_prompt.txt          # Prompt OpenAI
-├── scrape_jinka.py             # Scraper principal
-├── score_appartement.py        # Module de scoring
-├── generate_html_report.py     # Générateur de rapports
-├── run_daily_scrape.py         # Automatisation quotidienne
-├── test_homescore.py           # Tests du système
-├── quick_start.py              # Démarrage rapide
-├── data/
-│   ├── appartements/           # Données scrapées (JSON)
-│   └── screenshots/            # Screenshots de cartes
-└── output/
-    └── rapport_appartements.html  # Rapport final
-```
-
-## 🛠️ Installation
-
-### 1. Cloner le projet
+### Installation
 ```bash
-git clone <repository>
+# Clone the repository
+git clone https://github.com/maxouheil/HomeScore.git
 cd HomeScore
-```
 
-### 2. Installer les dépendances
-```bash
+# Install dependencies
 pip install -r requirements.txt
-playwright install chromium
-```
 
-### 3. Configuration
-```bash
-# Copier le fichier d'environnement
+# Install Playwright
+playwright install
+
+# Configure environment variables
 cp .env.example .env
-
-# Éditer les variables
-nano .env
+# Edit .env with your API keys
 ```
 
-### 4. Variables d'environnement
+### Configuration
+Create a `.env` file with your credentials:
 ```env
-JINKA_EMAIL=votre_email@gmail.com
-JINKA_PASSWORD=votre_mot_de_passe
-OPENAI_API_KEY=votre_cle_openai
+JINKA_EMAIL=your_email@example.com
+JINKA_PASSWORD=your_password
+OPENAI_API_KEY=your_openai_api_key
 ```
 
-## 🚀 Utilisation
+## 🎯 Usage
 
-### Démarrage rapide
+### Quick Demo
 ```bash
-python quick_start.py
+python demo_final_complete.py
 ```
 
-### Scraping manuel
+### Scrape Apartments
 ```bash
-python scrape_jinka.py "URL_DE_VOTRE_ALERTE_JINKA"
-```
-
-### Scoring des appartements
-```bash
-python score_appartement.py
-```
-
-### Génération de rapport
-```bash
-python generate_html_report.py
-```
-
-### Test complet
-```bash
-python test_homescore.py
-```
-
-## 📊 Exemple de Résultats
-
-### Données Extraites
-```json
-{
-  "id": "90931157",
-  "prix": "775 000 €",
-  "surface": "70 m²",
-  "pieces": "3 pièces - 2 chambres",
-  "etage": "4e étage",
-  "localisation": "Paris 19e (75019)",
-  "quartier": "Place des Fêtes (score: 8)",
-  "description": "Magnifique duplex...",
-  "style_haussmannien": {
-    "score": 30,
-    "elements": {
-      "caractère": ["restauré"]
-    }
-  }
-}
-```
-
-### Score Final
-- **Prix** : 15/20
-- **Localisation** : 15/20
-- **Surface** : 15/20
-- **Style** : 6/20
-- **Total** : 51/100
-
-## 🔧 Configuration Avancée
-
-### Critères de Scoring
-Éditez `scoring_config.json` pour personnaliser :
-- Poids des critères
-- Descriptions détaillées
-- Niveaux de scoring (excellent, bon, moyen)
-- Bonus et malus
-
-### Prompt OpenAI
-Modifiez `scoring_prompt.txt` pour ajuster :
-- Instructions de scoring
-- Contexte et critères
-- Format de réponse
-
-## 📈 Améliorations Futures
-
-### 🎯 Court terme
-- [ ] Correction des coordonnées GPS
-- [ ] Extraction d'adresses exactes
-- [ ] Amélioration de l'OCR sur les cartes
-- [ ] Interface web pour visualisation
-
-### 🚀 Long terme
-- [ ] Machine Learning pour scoring automatique
-- [ ] Intégration d'autres sites immobiliers
-- [ ] Notifications push pour nouvelles offres
-- [ ] API REST pour intégration externe
-
-## 🐛 Dépannage
-
-### Problèmes courants
-
-**Erreur de connexion Jinka**
-```bash
-# Vérifier les credentials
-cat .env
-# Relancer le scraping
 python scrape_jinka.py
 ```
 
-**Screenshots non générés**
+### Batch Processing
 ```bash
-# Vérifier les permissions
-ls -la data/screenshots/
-# Relancer avec debug
-python scrape_jinka.py --debug
+python batch_scrape_known_urls.py
 ```
 
-**Scoring OpenAI échoue**
-```bash
-# Vérifier la clé API
-echo $OPENAI_API_KEY
-# Tester la connexion
-python score_appartement.py --test
+## 📁 Project Structure
+
+```
+HomeScore/
+├── 📄 scrape_jinka.py              # Main Jinka scraper
+├── 📄 score_appartement.py         # AI scoring module
+├── 📄 generate_scorecard_html.py   # HTML report generator
+├── 📄 extract_exposition.py        # Exposure analysis
+├── 📄 analyze_apartment_style.py   # Photo analysis
+├── 📄 batch_scrape_known_urls.py   # Batch processing
+├── 📄 demo_final_complete.py       # Complete demonstration
+├── 📁 data/                        # Scraped data
+│   ├── 📁 appartements/            # Apartment JSON files
+│   └── 📁 photos/                  # Downloaded photos
+├── 📁 output/                      # Generated HTML reports
+└── 📄 requirements.txt             # Python dependencies
 ```
 
-## 📝 Logs et Debug
+## 🎯 Scoring Criteria
 
-### Niveaux de log
-- `INFO` : Informations générales
-- `DEBUG` : Détails techniques
-- `ERROR` : Erreurs critiques
+The system evaluates apartments on 6 key criteria:
 
-### Fichiers de log
+| Criterion | Weight | Description |
+|-----------|--------|-------------|
+| **Location** | 20pts | Preferred neighborhoods, metro proximity |
+| **Price** | 20pts | Price per m² with customizable thresholds |
+| **Style** | 20pts | Haussmannian architecture, modernity |
+| **Exposure** | 10pts | Orientation, luminosity, view quality |
+| **Open Kitchen** | 10pts | Presence and opening possibilities |
+| **Floor** | 10pts | Optimal height, elevator access |
+
+## 📊 Current Performance
+
+- **18 apartments** successfully processed
+- **55 photos** downloaded and analyzed
+- **Average score**: 77.2/100
+- **Processing time**: ~2-3 minutes per apartment
+
+### Sample Results
+- **Apartment 1**: 90/100 (EXCELLENT) - Haussmannian, 4th floor, open kitchen
+- **Apartment 2**: 85/100 (EXCELLENT) - Prime location, good price
+- **Apartment 3**: 53/100 (AVERAGE) - Exposure and floor issues
+
+## 🔧 Advanced Features
+
+### Intelligent Exposure Analysis
+- **Phase 1**: Textual analysis of descriptions
+- **Phase 2**: Photo analysis with Vision API
+- **Phase 3**: Contextual analysis (neighborhood, architecture)
+- **Combination**: Final score based on all sources
+
+### Tier System
+- **Tier 1 (Excellent)**: 8-10 points
+- **Tier 2 (Good)**: 6-7 points  
+- **Tier 3 (Average/Problematic)**: 0-5 points
+
+### Automation
+- **Daily Scraping**: Automatic detection of new listings
+- **Automatic Scoring**: AI evaluation of new apartments
+- **Automatic Reports**: Daily HTML generation
+
+## 🛠️ Development
+
+### Testing
 ```bash
-tail -f logs/homescore.log
+# Complete system test
+python test_homescore.py
+
+# Exposure extraction test
+python test_exposition_complete.py
+
+# Scoring test
+python test_new_scoring.py
 ```
 
-## 🤝 Contribution
+### Debugging
+```bash
+# Scraping debug
+python debug_html.py
 
-### Ajouter de nouveaux critères
-1. Modifier `scoring_config.json`
-2. Mettre à jour `scoring_prompt.txt`
-3. Tester avec `python test_homescore.py`
+# Jinka connection test
+python test_connection.py
+```
 
-### Améliorer l'extraction
-1. Identifier les nouveaux sélecteurs CSS
-2. Modifier `scrape_jinka.py`
-3. Ajouter des tests unitaires
+## 📈 Roadmap
 
-## 📄 Licence
+### Version 1.1
+- [ ] Web interface for visualization
+- [ ] Email notifications for new apartments
+- [ ] CSV/Excel data export
+- [ ] Advanced scoring filters
 
-MIT License - Voir `LICENSE` pour plus de détails.
+### Version 1.2
+- [ ] Integration with other real estate platforms
+- [ ] Machine Learning for score improvement
+- [ ] REST API for external integration
+- [ ] Monitoring dashboard
 
-## 🙏 Remerciements
+## 🤝 Contributing
 
-- **Jinka** pour la plateforme immobilière
-- **Playwright** pour l'automatisation web
-- **OpenAI** pour l'IA de scoring
-- **CandidaturesPlum** pour l'inspiration du système de scoring
+Contributions are welcome! To contribute:
 
----
+1. Fork the project
+2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License. See the `LICENSE` file for details.
 
 ## 📞 Support
 
-Pour toute question ou problème :
-- Ouvrir une issue sur GitHub
-- Consulter la documentation
-- Vérifier les logs d'erreur
+For questions or issues:
+- Open an issue on GitHub
+- Contact: souheil.medaghri@gmail.com
 
-**HomeScore - Trouvez votre appartement idéal ! 🏠✨**
+---
+
+**HomeScore** - Transform your Jinka alerts into intelligent insights! 🏠✨
+
+## 🌟 Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=maxouheil/HomeScore&type=Date)](https://star-history.com/#maxouheil/HomeScore&Date)
