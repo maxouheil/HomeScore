@@ -55,16 +55,24 @@ def format_apartment_info(apartment):
     }
 
 def get_apartment_photo(apartment):
-    """Récupère la première photo d'appartement téléchargée (depuis la bonne div)"""
+    """Récupère la photo d'appartement la plus récente (depuis la bonne div)"""
     apartment_id = apartment.get('id', 'unknown')
     
     # Chercher les photos téléchargées localement (qui viennent de la bonne div)
     photos_dir = f"data/photos/{apartment_id}"
     if os.path.exists(photos_dir):
-        # Prendre simplement la première photo trouvée (elles viennent toutes de la bonne div)
-        for filename in sorted(os.listdir(photos_dir)):
+        # Prendre la photo la plus récente (timestamp le plus élevé)
+        photo_files = []
+        for filename in os.listdir(photos_dir):
             if filename.endswith(('.jpg', '.jpeg', '.png')):
-                return f"../data/photos/{apartment_id}/{filename}"
+                file_path = os.path.join(photos_dir, filename)
+                file_mtime = os.path.getmtime(file_path)
+                photo_files.append((filename, file_mtime))
+        
+        if photo_files:
+            # Trier par date de modification décroissante (plus récent en premier)
+            photo_files.sort(key=lambda x: x[1], reverse=True)
+            return f"../data/photos/{apartment_id}/{photo_files[0][0]}"
     
     # Fallback: chercher dans les photos de l'appartement
     photos = apartment.get('photos', [])
@@ -79,7 +87,9 @@ def get_apartment_photo(apartment):
             elif isinstance(photo, str):
                 if 'upload_pro_ad' in photo or 'upload_p' in photo or 'media.apimo.pro' in photo:
                     return photo
-    return ''
+    
+    # Pas de photo trouvée, retourner None pour utiliser le placeholder
+    return None
 
 def generate_scorecard_html(apartments):
     """Génère le HTML avec le design de scorecard EXACT"""
@@ -184,8 +194,20 @@ def generate_scorecard_html(apartments):
             overflow: hidden;
         }}
         
-        .apartment-image.no-photo::before {{
-            content: "📷 Photo d'appartement";
+        .apartment-image-placeholder {{
+            width: 100%;
+            height: 220px;
+            background: #f0f0f0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #999;
+            font-size: 2rem;
+            position: relative;
+        }}
+        
+        .apartment-image-placeholder::before {{
+            content: "📷";
         }}
         
         .apartment-image::after {{
@@ -442,8 +464,12 @@ def generate_scorecard_html(apartments):
         
         # Récupérer la photo de l'appartement
         photo_url = get_apartment_photo(apartment)
-        photo_style = f"background-image: url('{photo_url}');" if photo_url else ""
-        photo_class = "apartment-image" if photo_url else "apartment-image no-photo"
+        if photo_url:
+            photo_style = f"background-image: url('{photo_url}');"
+            photo_class = "apartment-image"
+        else:
+            photo_style = ""
+            photo_class = "apartment-image-placeholder"
         
         # Couleur du score global
         score_color = get_score_color(score_total, 100)

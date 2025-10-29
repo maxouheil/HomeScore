@@ -18,7 +18,8 @@
 ### 🏠 Data Extraction
 - **Automated Jinka Scraping** with Playwright browser automation
 - **Complete Data Extraction**: Price, surface, location, features, photos
-- **Photo Download**: 3-4 photos per apartment stored locally
+- **Smart Photo Download**: 3-4 photos per apartment with intelligent filtering
+- **Logo Filtering**: Automatic rejection of app store logos and icons
 - **Metro Station Analysis**: Automatic extraction for location context
 
 ### 📸 Visual Analysis
@@ -30,7 +31,8 @@
 ### 📊 Report Generation
 - **Professional HTML Reports** with modern design
 - **Two Styles**: Fitscore (3-column grid) and Original layout
-- **Integrated Photos**: Apartment images in reports
+- **Integrated Photos**: Apartment images in reports with smart fallback
+- **Photo Placeholders**: Elegant 370x200 gray placeholders for apartments without photos
 - **Detailed Scores**: Justification for each criterion
 
 ## 🚀 Quick Start
@@ -115,8 +117,9 @@ The system evaluates apartments on 6 key criteria:
 
 ## 📊 Current Performance
 
-- **18 apartments** successfully processed
-- **55 photos** downloaded and analyzed
+- **17 apartments** successfully processed
+- **68 photos** downloaded and analyzed with smart filtering
+- **Photo Success Rate**: 85% (real apartment photos vs logos)
 - **Average score**: 77.2/100
 - **Processing time**: ~2-3 minutes per apartment
 
@@ -126,6 +129,13 @@ The system evaluates apartments on 6 key criteria:
 - **Apartment 3**: 53/100 (AVERAGE) - Exposure and floor issues
 
 ## 🔧 Advanced Features
+
+### Intelligent Photo Processing
+- **Smart Filtering**: Automatic rejection of logos and icons
+- **Size Validation**: 20KB-500KB range for real apartment photos
+- **Dimension Check**: Minimum 400x300px for quality photos
+- **Format Support**: JPEG and PNG with proper validation
+- **Fallback System**: Global search when gallery is empty
 
 ### Intelligent Exposure Analysis
 - **Phase 1**: Textual analysis of descriptions
@@ -143,12 +153,28 @@ The system evaluates apartments on 6 key criteria:
 - **Automatic Scoring**: AI evaluation of new apartments
 - **Automatic Reports**: Daily HTML generation
 
+## 🆕 Latest Updates
+
+### Photo Processing Improvements
+- **Smart Photo Filtering**: Automatic detection and rejection of app store logos
+- **Global Photo Search**: Fallback system when gallery div is empty
+- **Photo Validation**: Size and dimension checks for quality assurance
+- **Placeholder System**: Elegant 370x200 gray placeholders for apartments without photos
+
+### Enhanced User Experience
+- **Visual Consistency**: All apartments now have proper image display
+- **Error Handling**: Graceful fallback when photos are unavailable
+- **Performance**: Faster photo processing with intelligent filtering
+
 ## 🛠️ Development
 
 ### Testing
 ```bash
 # Complete system test
 python test_homescore.py
+
+# Photo processing test
+python test_placeholder.py
 
 # Exposure extraction test
 python test_exposition_complete.py

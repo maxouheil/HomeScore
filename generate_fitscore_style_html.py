@@ -37,16 +37,24 @@ def get_score_badge_class(score, max_score):
         return "red"
 
 def get_apartment_photo(apartment):
-    """Récupère la première photo d'appartement téléchargée (depuis la bonne div)"""
+    """Récupère la photo d'appartement la plus récente (depuis la bonne div)"""
     apartment_id = apartment.get('id', 'unknown')
     
     # Chercher les photos téléchargées localement (qui viennent de la bonne div)
     photos_dir = f"data/photos/{apartment_id}"
     if os.path.exists(photos_dir):
-        # Prendre simplement la première photo trouvée (elles viennent toutes de la bonne div)
-        for filename in sorted(os.listdir(photos_dir)):
+        # Prendre la photo la plus récente (timestamp le plus élevé)
+        photo_files = []
+        for filename in os.listdir(photos_dir):
             if filename.endswith(('.jpg', '.jpeg', '.png')):
-                return f"../data/photos/{apartment_id}/{filename}"
+                file_path = os.path.join(photos_dir, filename)
+                file_mtime = os.path.getmtime(file_path)
+                photo_files.append((filename, file_mtime))
+        
+        if photo_files:
+            # Trier par date de modification décroissante (plus récent en premier)
+            photo_files.sort(key=lambda x: x[1], reverse=True)
+            return f"../data/photos/{apartment_id}/{photo_files[0][0]}"
     
     # Fallback: chercher dans les photos de l'appartement
     photos = apartment.get('photos', [])
@@ -61,7 +69,9 @@ def get_apartment_photo(apartment):
             elif isinstance(photo, str):
                 if 'upload_pro_ad' in photo or 'upload_p' in photo or 'media.apimo.pro' in photo:
                     return photo
-    return ''
+    
+    # Pas de photo trouvée, retourner None pour utiliser le placeholder
+    return None
 
 def format_apartment_info(apartment):
     """Formate les informations de l'appartement"""
@@ -166,6 +176,19 @@ def generate_fitscore_style_html(apartments):
             height: 200px;
             border-radius: 12px;
             object-fit: cover;
+            flex-shrink: 0;
+        }}
+        
+        .candidate-photo-placeholder {{
+            width: 100%;
+            height: 200px;
+            background: #f0f0f0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #999;
+            font-size: 2rem;
+            border-radius: 12px;
             flex-shrink: 0;
         }}
         
@@ -393,7 +416,7 @@ def generate_fitscore_style_html(apartments):
         
         # Récupérer la photo de l'appartement
         photo_url = get_apartment_photo(apartment)
-        photo_html = f'<img src="{photo_url}" alt="Photo d\'appartement" class="candidate-photo">' if photo_url else '<div class="candidate-photo" style="background: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #999; font-size: 0.8rem;">📷</div>'
+        photo_html = f'<img src="{photo_url}" alt="Photo d\'appartement" class="candidate-photo">' if photo_url else '<div class="candidate-photo-placeholder"></div>'
         
         # Classes CSS pour le score
         score_class = get_score_color_class(score_total, 100)

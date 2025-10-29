@@ -8,6 +8,7 @@ import json
 import math
 import os
 import re
+import aiohttp
 import sys
 from datetime import datetime
 from playwright.async_api import async_playwright
@@ -189,6 +190,9 @@ class JinkaScraper:
             description = await self.extract_description()
             caracteristiques = await self.extract_caracteristiques()
             photos = await self.extract_photos()
+            
+            # Télécharger les photos localement
+            await self.download_apartment_photos(apartment_id, photos)
             
             data = {
                 'id': apartment_id,
@@ -766,6 +770,7 @@ class JinkaScraper:
                 
                 # Chercher toutes les images dans cette div
                 images = await gallery_div.locator('img').all()
+                print(f"      🔍 {len(images)} images trouvées dans la div galerie")
                 
                 for img in images:
                     try:
@@ -781,30 +786,26 @@ class JinkaScraper:
                             print(f"      📸 Photo galerie: {src[:60]}...")
                     except Exception as e:
                         continue
-            else:
-                print("      ⚠️ Div galerie non trouvée, recherche alternative...")
+            # Si pas de photos dans la galerie, chercher toutes les images d'appartement sur la page
+            if len(photos) == 0:
+                print("      ⚠️ Aucune photo dans la galerie, recherche globale...")
                 
-                # Fallback: chercher avec les anciens sélecteurs
-                selectors = [
-                    'img[alt*="logement"]',
-                    'img[alt*="appartement"]', 
-                    'img[src*="loueragile-media"]',
-                    'img[src*="upload_pro_ad"]'
-                ]
+                # Chercher toutes les images avec des URLs d'appartement
+                all_images = await self.page.locator('img').all()
+                print(f"      🔍 {len(all_images)} images totales sur la page")
                 
-                for selector in selectors:
+                for img in all_images:
                     try:
-                        elements = await self.page.query_selector_all(selector)
-                        for element in elements:
-                            src = await element.get_attribute('src')
-                            alt = await element.get_attribute('alt')
-                            if src and ('loueragile' in src or 'upload_pro_ad' in src or 'jinka' in src):
-                                photos.append({
-                                    'url': src,
-                                    'alt': alt or 'appartement',
-                                    'selector': selector
-                                })
-                                print(f"      📸 Photo fallback: {src[:60]}...")
+                        src = await img.get_attribute('src')
+                        alt = await img.get_attribute('alt')
+                        
+                        if src and ('loueragile' in src or 'upload_pro_ad' in src or 'jinka' in src or 'media.apimo.pro' in src or 'studio-net.fr' in src):
+                            photos.append({
+                                'url': src,
+                                'alt': alt or 'appartement',
+                                'selector': 'global_search'
+                            })
+                            print(f"      📸 Photo globale: {src[:60]}...")
                     except Exception as e:
                         continue
             
@@ -861,6 +862,89 @@ class JinkaScraper:
             
         except Exception as e:
             print(f"❌ Erreur sauvegarde: {e}")
+    
+    async def download_apartment_photos(self, apartment_id, photos):
+        """Télécharge les photos d'un appartement localement avec filtrage par taille"""
+        try:
+            if not photos:
+                return
+                
+            # Créer le dossier pour les photos
+            photos_dir = f"data/photos/{apartment_id}"
+            os.makedirs(photos_dir, exist_ok=True)
+            
+            # Télécharger et filtrer les photos
+            valid_photos = []
+            async with aiohttp.ClientSession() as session:
+                for i, photo in enumerate(photos[:8]):  # Tester plus d'images
+                    url = photo['url']
+                    temp_filename = f"{photos_dir}/temp_photo_{i+1}.jpg"
+                    
+                    try:
+                        async with session.get(url) as response:
+                            if response.status == 200:
+                                content = await response.read()
+                                
+                                # Sauvegarder temporairement pour analyser
+                                with open(temp_filename, 'wb') as f:
+                                    f.write(content)
+                                
+                                # Vérifier si c'est une vraie photo d'appartement
+                                if self.is_valid_apartment_photo(temp_filename, content):
+                                    # Renommer avec timestamp
+                                    final_filename = f"{photos_dir}/photo_{len(valid_photos)+1}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                                    os.rename(temp_filename, final_filename)
+                                    valid_photos.append(final_filename)
+                                    print(f"      📸 Photo {len(valid_photos)} validée: {len(content)} bytes")
+                                    
+                                    # Arrêter après 4 bonnes photos
+                                    if len(valid_photos) >= 4:
+                                        break
+                                else:
+                                    # Supprimer la photo invalide
+                                    os.remove(temp_filename)
+                                    print(f"      ❌ Photo {i+1} rejetée: {len(content)} bytes (logo/icône)")
+                            else:
+                                print(f"      ❌ Erreur photo {i+1}: HTTP {response.status}")
+                    except Exception as e:
+                        print(f"      ❌ Erreur téléchargement photo {i+1}: {e}")
+                        if os.path.exists(temp_filename):
+                            os.remove(temp_filename)
+            
+            print(f"      ✅ {len(valid_photos)} photos d'appartement téléchargées")
+                        
+        except Exception as e:
+            print(f"❌ Erreur téléchargement photos: {e}")
+    
+    def is_valid_apartment_photo(self, filepath, content):
+        """Vérifie si une photo est une vraie photo d'appartement"""
+        try:
+            # Vérifier la taille du fichier (pas trop petit, pas trop grand)
+            if len(content) < 20000 or len(content) > 500000:  # 20KB - 500KB
+                return False
+            
+            # Vérifier le type de fichier
+            if not (content.startswith(b'\xff\xd8\xff') or  # JPEG
+                    content.startswith(b'\x89PNG')):  # PNG
+                return False
+            
+            # Pour les PNG, vérifier qu'ils ne sont pas des logos (carrés petits)
+            if content.startswith(b'\x89PNG'):
+                # Lire les dimensions PNG
+                if len(content) >= 24:
+                    width = int.from_bytes(content[16:20], 'big')
+                    height = int.from_bytes(content[20:24], 'big')
+                    # Rejeter les images carrées petites (logos)
+                    if width == height and width < 600:
+                        return False
+                    # Rejeter les images trop petites
+                    if width < 400 or height < 300:
+                        return False
+            
+            return True
+            
+        except Exception as e:
+            return False
     
     async def cleanup(self):
         """Ferme le navigateur"""
