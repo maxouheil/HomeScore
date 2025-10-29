@@ -46,7 +46,8 @@ def get_apartment_photo(apartment):
         # Chercher la première photo dans le dossier
         for filename in os.listdir(photos_dir):
             if filename.endswith('.jpg') or filename.endswith('.jpeg') or filename.endswith('.png'):
-                return f"data/photos/{apartment_id}/{filename}"
+                # Chemin relatif depuis le dossier output/
+                return f"../data/photos/{apartment_id}/{filename}"
     
     # Fallback: chercher dans les photos de l'appartement
     photos = apartment.get('photos', [])
