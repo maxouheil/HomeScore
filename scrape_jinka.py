@@ -752,58 +752,61 @@ class JinkaScraper:
             return {"score": 0, "elements": [], "keywords": [], "error": str(e)}
     
     async def extract_photos(self):
-        """Extrait les URLs des photos d'appartement"""
+        """Extrait les URLs des photos d'appartement depuis la div spécifique"""
         try:
             print("   📸 Extraction des photos d'appartement...")
             
-            # Chercher les images d'appartement avec des sélecteurs spécifiques
-            selectors = [
-                'img[alt*="logement"]',
-                'img[alt*="appartement"]', 
-                'img[alt*="intérieur"]',
-                'img[alt*="salon"]',
-                'img[alt*="cuisine"]',
-                'img[alt*="chambre"]',
-                'img[src*="loueragile-media"]',
-                'img[src*="upload_pro_ad"]',
-                '.apartment-photo img',
-                '.property-photo img',
-                '.listing-photo img',
-                '.swiper-slide img',
-                '.carousel img'
-            ]
-            
             photos = []
-            for selector in selectors:
-                try:
-                    elements = await self.page.query_selector_all(selector)
-                    for element in elements:
-                        src = await element.get_attribute('src')
-                        alt = await element.get_attribute('alt')
-                        if src and ('loueragile' in src or 'upload_pro_ad' in src or 'jinka' in src):
+            
+            # Cibler spécifiquement la div avec les classes sc-gPEVay jnWxBz
+            gallery_div = self.page.locator('div.sc-gPEVay.jnWxBz')
+            
+            if await gallery_div.count() > 0:
+                print("      🎯 Div galerie trouvée, extraction des images...")
+                
+                # Chercher toutes les images dans cette div
+                images = await gallery_div.locator('img').all()
+                
+                for img in images:
+                    try:
+                        src = await img.get_attribute('src')
+                        alt = await img.get_attribute('alt')
+                        
+                        if src and ('loueragile' in src or 'upload_pro_ad' in src or 'jinka' in src or 'media.apimo.pro' in src):
                             photos.append({
                                 'url': src,
                                 'alt': alt or 'appartement',
-                                'selector': selector
+                                'selector': 'gallery_div'
                             })
-                            print(f"      📸 Photo trouvée: {src[:60]}...")
-                except Exception as e:
-                    continue
-            
-            # Si pas de photos trouvées, chercher toutes les images
-            if not photos:
-                print("      🔍 Recherche alternative dans toutes les images...")
-                all_images = await self.page.query_selector_all('img')
-                for img in all_images:
-                    src = await img.get_attribute('src')
-                    alt = await img.get_attribute('alt')
-                    if src and ('loueragile' in src or 'upload_pro_ad' in src or 'jinka' in src):
-                        photos.append({
-                            'url': src,
-                            'alt': alt or 'appartement',
-                            'selector': 'all_images'
-                        })
-                        print(f"      📸 Photo trouvée (alt): {src[:60]}...")
+                            print(f"      📸 Photo galerie: {src[:60]}...")
+                    except Exception as e:
+                        continue
+            else:
+                print("      ⚠️ Div galerie non trouvée, recherche alternative...")
+                
+                # Fallback: chercher avec les anciens sélecteurs
+                selectors = [
+                    'img[alt*="logement"]',
+                    'img[alt*="appartement"]', 
+                    'img[src*="loueragile-media"]',
+                    'img[src*="upload_pro_ad"]'
+                ]
+                
+                for selector in selectors:
+                    try:
+                        elements = await self.page.query_selector_all(selector)
+                        for element in elements:
+                            src = await element.get_attribute('src')
+                            alt = await element.get_attribute('alt')
+                            if src and ('loueragile' in src or 'upload_pro_ad' in src or 'jinka' in src):
+                                photos.append({
+                                    'url': src,
+                                    'alt': alt or 'appartement',
+                                    'selector': selector
+                                })
+                                print(f"      📸 Photo fallback: {src[:60]}...")
+                    except Exception as e:
+                        continue
             
             # Dédupliquer
             unique_photos = []
