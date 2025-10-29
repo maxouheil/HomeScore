@@ -37,17 +37,27 @@ def get_score_badge_class(score, max_score):
         return "red"
 
 def get_apartment_photo(apartment):
-    """Récupère la première photo d'appartement (locale ou URL)"""
+    """Récupère la meilleure photo d'appartement (locale ou URL)"""
     apartment_id = apartment.get('id', 'unknown')
     
     # D'abord, chercher les photos téléchargées localement
     photos_dir = f"data/photos/{apartment_id}"
     if os.path.exists(photos_dir):
-        # Chercher la première photo dans le dossier
+        # Lister toutes les photos et les trier par taille (plus grande = probablement vraie photo)
+        photo_files = []
         for filename in os.listdir(photos_dir):
-            if filename.endswith('.jpg') or filename.endswith('.jpeg') or filename.endswith('.png'):
-                # Chemin relatif depuis le dossier output/
-                return f"../data/photos/{apartment_id}/{filename}"
+            if filename.endswith(('.jpg', '.jpeg', '.png')):
+                file_path = os.path.join(photos_dir, filename)
+                file_size = os.path.getsize(file_path)
+                photo_files.append((filename, file_size))
+        
+        # Trier par taille décroissante (plus grande photo en premier)
+        photo_files.sort(key=lambda x: x[1], reverse=True)
+        
+        # Prendre la plus grande photo (probablement une vraie photo d'appartement)
+        if photo_files:
+            best_photo = photo_files[0][0]
+            return f"../data/photos/{apartment_id}/{best_photo}"
     
     # Fallback: chercher dans les photos de l'appartement
     photos = apartment.get('photos', [])
