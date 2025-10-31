@@ -34,62 +34,267 @@ class ApartmentPhotoDownloader:
             await self.browser.close()
     
     async def extract_apartment_photos(self, apartment_url: str) -> list:
-        """Extrait les URLs des photos d'un appartement"""
+        """Extrait les URLs des photos d'un appartement depuis la div galerie spécifique"""
         try:
             print(f"🏠 Extraction des photos: {apartment_url}")
             await self.page.goto(apartment_url)
             await self.page.wait_for_load_state('networkidle')
             await self.page.wait_for_timeout(3000)
             
-            # Chercher les images d'appartement avec des sélecteurs spécifiques
-            selectors = [
-                'img[alt*="logement"]',
-                'img[alt*="appartement"]', 
-                'img[alt*="intérieur"]',
-                'img[alt*="salon"]',
-                'img[alt*="cuisine"]',
-                'img[alt*="chambre"]',
-                'img[src*="loueragile-media"]',
-                'img[src*="upload_pro_ad"]',
-                'img[src*="media.apimo.pro"]',
-                '.apartment-photo img',
-                '.property-photo img',
-                '.listing-photo img',
-                '.swiper-slide img',
-                '.carousel img'
+            photos = []
+            
+            # Attendre un peu plus longtemps pour le chargement des images lazy
+            await asyncio.sleep(1)
+            
+            # Scroller un peu pour déclencher le chargement lazy si nécessaire
+            await self.page.evaluate('window.scrollTo(0, 200)')
+            await asyncio.sleep(0.5)
+            await self.page.evaluate('window.scrollTo(0, 0)')
+            await asyncio.sleep(0.5)
+            
+            # Méthode 1: Cibler la div galerie principale (structure actuelle)
+            gallery_selectors = [
+                'div.sc-cJSrbW.juBoVb',  # Structure actuelle visible
+                'div.sc-gPEVay.jnWxBz',  # Ancienne structure
+                '[class*="sc-cJSrbW"][class*="juBoVb"]',
+                '[class*="sc-gPEVay"][class*="jnWxBz"]'
             ]
             
-            photos = []
-            for selector in selectors:
+            for selector in gallery_selectors:
                 try:
-                    elements = await self.page.query_selector_all(selector)
-                    for element in elements:
-                        src = await element.get_attribute('src')
-                        alt = await element.get_attribute('alt')
-                        if src and ('loueragile' in src or 'upload_pro_ad' in src or 'media.apimo.pro' in src):
-                            photos.append({
-                                'url': src,
-                                'alt': alt or 'appartement',
-                                'selector': selector
-                            })
-                            print(f"      📸 Photo trouvée: {src[:60]}...")
+                    gallery_div = self.page.locator(selector)
+                    if await gallery_div.count() > 0:
+                        print(f"      🎯 Div galerie trouvée ({selector}), extraction des images visibles...")
+                        
+                        # PRIORITÉ 1: Chercher dans les divs visibles avec classes "col" (première, middle, last)
+                        # Ces divs contiennent les photos réellement affichées
+                        col_selectors = [
+                            '[class*="col"][class*="first"] img',
+                            '[class*="col"][class*="middle"] img',
+                            '[class*="col"][class*="last"] img',
+                            '[class*="cyvIwy"] img',
+                            '.col img'
+                        ]
+                        
+                        visible_images = []
+                        seen_srcs = set()  # Pour dédupliquer par URL
+                        for col_selector in col_selectors:
+                            try:
+                                col_images = await gallery_div.locator(col_selector).all()
+                                if col_images:
+                                    print(f"      🔍 {len(col_images)} images trouvées dans les divs 'col' ({col_selector})")
+                                    # Ajouter toutes les images trouvées (ne pas break pour accumuler)
+                                    for img in col_images:
+                                        try:
+                                            # Vérifier si on a déjà vu cette URL
+                                            src = await img.get_attribute('src') or await img.get_attribute('data-src')
+                                            if src and src not in seen_srcs:
+                                                visible_images.append(img)
+                                                seen_srcs.add(src)
+                                        except:
+                                            # Si on ne peut pas vérifier l'URL, on ajoute quand même
+                                            visible_images.append(img)
+                            except:
+                                continue
+                        
+                        # Si on a trouvé des images dans les divs col, on les garde
+                        if len(visible_images) > 0:
+                            print(f"      ✅ {len(visible_images)} images uniques trouvées dans toutes les divs 'col'")
+                        
+                        # PRIORITÉ 2: Si pas trouvé dans les divs col, chercher toutes les images visibles
+                        if len(visible_images) == 0:
+                            visible_images = await gallery_div.locator('img:visible').all()
+                            print(f"      🔍 {len(visible_images)} images VISIBLES trouvées dans la div galerie")
+                        
+                        # Exclure les images avec alt="preloader" SAUF si l'URL correspond à un pattern valide
+                        # (car certaines images visibles ont alt="preloader" mais sont de vraies photos)
+                        if len(visible_images) > 0:
+                            filtered_images = []
+                            photo_patterns = ['loueragile', 'upload_pro_ad', 'media.apimo.pro', 'studio-net.fr', 'images.century21.fr', 'biens', 'apartement', 'transopera', 'staticlbi', 'uploadcaregdc', 'uploadcare', 's3.amazonaws.com', 'googleusercontent.com', 'cdn.safti.fr', 'safti.fr', 'paruvendu.fr', 'immo-facile.com', 'mms.seloger.com', 'seloger.com']
+                            for img in visible_images:
+                                try:
+                                    alt = await img.get_attribute('alt')
+                                    src = await img.get_attribute('src') or await img.get_attribute('data-src')
+                                    # Si alt="preloader" mais URL valide, on garde quand même
+                                    if alt and 'preloader' in alt.lower() and src:
+                                        if any(pattern in src.lower() for pattern in photo_patterns):
+                                            # URL valide malgré alt="preloader", on garde
+                                            filtered_images.append(img)
+                                        else:
+                                            # alt="preloader" et URL non valide, on skip
+                                            continue
+                                    else:
+                                        # Pas de alt="preloader" ou pas d'URL, on garde
+                                        filtered_images.append(img)
+                                except:
+                                    filtered_images.append(img)
+                            visible_images = filtered_images
+                            print(f"      🔍 {len(visible_images)} images après filtrage (sans preloader)")
+                        
+                        # Extraire les photos avec leur position DOM pour préserver l'ordre
+                        photos_with_position = []
+                        for img in visible_images:
+                            try:
+                                # Vérifier que l'image n'est pas cachée
+                                display = await img.evaluate('el => window.getComputedStyle(el).display')
+                                if display == 'none':
+                                    continue
+                                
+                                # Obtenir la position visuelle (top, left) pour préserver l'ordre de Jinka
+                                position = await img.evaluate('''
+                                    el => {
+                                        const rect = el.getBoundingClientRect();
+                                        return { top: rect.top, left: rect.left };
+                                    }
+                                ''')
+                                
+                                # Obtenir aussi l'index DOM pour ordre de fallback
+                                dom_index = await img.evaluate('''
+                                    el => {
+                                        const allImgs = document.querySelectorAll('img');
+                                        return Array.from(allImgs).indexOf(el);
+                                    }
+                                ''')
+                                
+                                # Vérifier les dimensions de l'image (exclure les très petites comme les logos)
+                                width = await img.evaluate('el => el.naturalWidth || el.width || 0')
+                                height = await img.evaluate('el => el.naturalHeight || el.height || 0')
+                                
+                                # Les logos font généralement ~128x128px, les vraies photos sont beaucoup plus grandes
+                                # On exclut seulement les images très petites (< 200px)
+                                if width > 0 and height > 0:
+                                    if width < 200 or height < 200:
+                                        # Probablement un logo ou icône (ex: logo immobilier 128x128), on skip
+                                        continue
+                                
+                                # Récupérer src et data-src (lazy loading)
+                                src = await img.get_attribute('src')
+                                data_src = await img.get_attribute('data-src')
+                                data_lazy = await img.get_attribute('data-lazy-src')
+                                srcset = await img.get_attribute('srcset')
+                                
+                                # Utiliser src, data-src ou extraire de srcset
+                                src_to_use = src
+                                if not src_to_use or 'placeholder' in src_to_use.lower() or 'preloader' in src_to_use.lower():
+                                    src_to_use = data_src or data_lazy
+                                
+                                # Si srcset, extraire la première URL
+                                if not src_to_use and srcset:
+                                    srcset_urls = srcset.split(',')
+                                    if srcset_urls:
+                                        src_to_use = srcset_urls[0].strip().split(' ')[0]
+                                
+                                if not src_to_use:
+                                    continue
+                                
+                                alt = await img.get_attribute('alt')
+                                
+                                # Vérifier que c'est une vraie photo (pas un logo)
+                                if 'logo' in src_to_use.lower() or 'source_logos' in src_to_use.lower() or 'preloader' in src_to_use.lower():
+                                    continue
+                                
+                                # Accepter les URLs de vraies photos d'appartements (patterns étendus)
+                                photo_patterns = ['loueragile', 'upload_pro_ad', 'media.apimo.pro', 'studio-net.fr', 'images.century21.fr', 'biens', 'apartement', 'transopera', 'staticlbi', 'uploadcaregdc', 'uploadcare', 's3.amazonaws.com', 'googleusercontent.com', 'cdn.safti.fr', 'safti.fr', 'paruvendu.fr', 'immo-facile.com', 'mms.seloger.com', 'seloger.com']
+                                if not any(pattern in src_to_use.lower() for pattern in photo_patterns):
+                                    continue
+                                
+                                # Si l'image n'est pas encore chargée, essayer de la charger
+                                if width == 0 or height == 0:
+                                    await asyncio.sleep(0.5)
+                                    width = await img.evaluate('el => el.naturalWidth || el.width || 0')
+                                    height = await img.evaluate('el => el.naturalHeight || el.height || 0')
+                                
+                                photos_with_position.append({
+                                    'url': src_to_use,
+                                    'alt': alt or 'appartement',
+                                    'selector': 'gallery_div_visible',
+                                    'width': width,
+                                    'height': height,
+                                    'dom_index': dom_index,
+                                    'position_top': position['top'],
+                                    'position_left': position['left']
+                                })
+                            except Exception as e:
+                                continue
+                        
+                        # Trier par position visuelle (top puis left) pour conserver l'ordre de Jinka
+                        # Cela correspond à l'ordre de lecture : de haut en bas, puis de gauche à droite
+                        photos_with_position.sort(key=lambda x: (x.get('position_top', 0), x.get('position_left', 0)))
+                        
+                        # Ajouter les photos dans l'ordre correct (ordre visuel de Jinka)
+                        for photo_with_pos in photos_with_position:
+                            photo = {k: v for k, v in photo_with_pos.items() if k not in ['dom_index', 'position_top', 'position_left']}
+                            photos.append(photo)
+                            print(f"      📸 Photo galerie visible ({photo_with_pos['width']}x{photo_with_pos['height']}): {photo_with_pos['url'][:60]}...")
+                        
+                        if len(photos) > 0:
+                            break  # On a trouvé des photos, pas besoin d'essayer les autres sélecteurs
                 except Exception as e:
                     continue
             
-            # Si pas de photos trouvées, chercher toutes les images
+            # Méthode 2: Si pas de photos dans la galerie, chercher les images visibles avec URLs d'appartement
             if not photos:
-                print("      🔍 Recherche alternative dans toutes les images...")
-                all_images = await self.page.query_selector_all('img')
-                for img in all_images:
-                    src = await img.get_attribute('src')
-                    alt = await img.get_attribute('alt')
-                    if src and ('loueragile' in src or 'upload_pro_ad' in src or 'media.apimo.pro' in src):
+                print("      🔍 Recherche alternative dans les images visibles...")
+                all_visible_images = await self.page.locator('img:visible').all()
+                for img in all_visible_images:
+                    try:
+                        # Vérifier que l'image est vraiment visible
+                        display = await img.evaluate('el => window.getComputedStyle(el).display')
+                        if display == 'none':
+                            continue
+                        
+                        # Vérifier les dimensions de l'image (exclure les très petites comme les logos)
+                        width = await img.evaluate('el => el.naturalWidth || el.width || 0')
+                        height = await img.evaluate('el => el.naturalHeight || el.height || 0')
+                        
+                        # Les logos font généralement ~128x128px, les vraies photos sont beaucoup plus grandes
+                        # On exclut seulement les images très petites (< 200px)
+                        if width > 0 and height > 0:
+                            if width < 200 or height < 200:
+                                # Probablement un logo ou icône (ex: logo immobilier 128x128), on skip
+                                continue
+                        
+                        # Récupérer src et data-src (lazy loading)
+                        src = await img.get_attribute('src')
+                        data_src = await img.get_attribute('data-src')
+                        data_lazy = await img.get_attribute('data-lazy-src')
+                        srcset = await img.get_attribute('srcset')
+                        
+                        # Utiliser src, data-src ou extraire de srcset
+                        src_to_use = src
+                        if not src_to_use or 'placeholder' in src_to_use.lower() or 'preloader' in src_to_use.lower():
+                            src_to_use = data_src or data_lazy
+                        
+                        # Si srcset, extraire la première URL
+                        if not src_to_use and srcset:
+                            srcset_urls = srcset.split(',')
+                            if srcset_urls:
+                                src_to_use = srcset_urls[0].strip().split(' ')[0]
+                        
+                        if not src_to_use:
+                            continue
+                        
+                        alt = await img.get_attribute('alt')
+                        
+                        # Vérifier que c'est une vraie photo (pas un logo)
+                        if 'logo' in src_to_use.lower() or 'source_logos' in src_to_use.lower() or 'preloader' in src_to_use.lower():
+                            continue
+                        
+                        # Accepter les URLs de vraies photos d'appartements (patterns étendus)
+                        photo_patterns = ['loueragile', 'upload_pro_ad', 'media.apimo.pro', 'studio-net.fr', 'images.century21.fr', 'biens', 'apartement', 'transopera', 'staticlbi', 'uploadcaregdc', 'uploadcare', 's3.amazonaws.com', 'googleusercontent.com', 'cdn.safti.fr', 'safti.fr', 'paruvendu.fr', 'immo-facile.com', 'mms.seloger.com', 'seloger.com']
+                        if not any(pattern in src_to_use.lower() for pattern in photo_patterns):
+                            continue
+                        
                         photos.append({
-                            'url': src,
+                            'url': src_to_use,
                             'alt': alt or 'appartement',
-                            'selector': 'all_images'
+                            'selector': 'global_search_visible',
+                            'width': width,
+                            'height': height
                         })
-                        print(f"      📸 Photo trouvée (alt): {src[:60]}...")
+                        print(f"      📸 Photo visible ({width}x{height}): {src_to_use[:60]}...")
+                    except Exception as e:
+                        continue
             
             # Dédupliquer
             unique_photos = []

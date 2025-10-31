@@ -53,10 +53,23 @@ def test_new_scoring_system():
     map_info = data.get('map_info', {})
     quartier = map_info.get('quartier', '')
     
-    if 'Place des Fêtes' in quartier or 'Jourdain' in quartier or 'Pyrénées' in quartier:
+    # TIER 1: Place de la Réunion (+5 bonus), Tronçon ligne 2 Belleville-Avron
+    if 'Place de la Réunion' in quartier or 'Place de la reunion' in quartier:
         score_localisation = 20
         tier = "TIER 1"
-        justification = "Zone premium identifiée"
+        justification = "Place de la Réunion - zone premium (+5 bonus)"
+    elif 'Belleville' in quartier or 'Ménilmontant' in quartier or 'Alexandre Dumas' in quartier or 'Philippe Auguste' in quartier or 'Avron' in quartier:
+        score_localisation = 20
+        tier = "TIER 1"
+        justification = "Tronçon ligne 2 Belleville-Avron - zone premium"
+    elif 'Jourdain' in quartier or 'Pyrénées' in quartier:
+        score_localisation = 15
+        tier = "TIER 2"
+        justification = "Zone bonne avec potentiel"
+    elif 'Goncourt' in quartier or '11e' in localisation:
+        score_localisation = 15
+        tier = "TIER 2"
+        justification = "Zone bonne avec potentiel"
     elif '19e' in localisation and 'Buttes-Chaumont' in data.get('description', ''):
         score_localisation = 15
         tier = "TIER 2"
@@ -90,17 +103,17 @@ def test_new_scoring_system():
     if prix_m2 > 0:
         if prix_m2 < 9000:
             score_prix = 20
-            tier = "TIER 1"
+            tier = "TIER 1 - GOOD"
         elif prix_m2 <= 11000:
-            score_prix = 15
-            tier = "TIER 2"
+            score_prix = 12
+            tier = "TIER 2 - MOYEN"
         else:
-            score_prix = 10
-            tier = "TIER 3"
+            score_prix = 2
+            tier = "TIER 3 - BAD"
         justification = f"{prix_m2}€/m²"
     else:
-        score_prix = 10  # Score par défaut si pas de prix/m²
-        tier = "TIER 3"
+        score_prix = 2  # Score par défaut si pas de prix/m²
+        tier = "TIER 3 - BAD"
         justification = "Prix/m² non trouvé"
     
     print(f"   Score: {score_prix}/20 ({tier})")

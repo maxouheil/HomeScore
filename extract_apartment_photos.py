@@ -6,6 +6,7 @@ Extraction et analyse des photos d'appartement pour déterminer l'exposition
 import asyncio
 import json
 import os
+import re
 import requests
 from datetime import datetime
 from playwright.async_api import async_playwright
@@ -61,73 +62,325 @@ class ApartmentPhotoExtractor:
             print(f"❌ Erreur de connexion: {e}")
             return False
     
+    async def extract_etage(self) -> str:
+        """Extrait l'étage de la page d'appartement"""
+        try:
+            page_content = await self.page.content()
+            
+            # Patterns pour trouver l'étage
+            etage_patterns = [
+                r'(\d+)(?:er?|e|ème?)\s*étage',
+                r'étage\s*(\d+)',
+                r'(\d+)(?:er?|e|ème?)\s*ét\.',
+            ]
+            
+            for pattern in etage_patterns:
+                matches = re.findall(pattern, page_content, re.IGNORECASE)
+                if matches:
+                    etage_num = matches[0]
+                    # Formater comme "4e étage" ou "1er étage"
+                    if etage_num == '1':
+                        return "1er étage"
+                    else:
+                        return f"{etage_num}e étage"
+            
+            # Chercher RDC
+            if re.search(r'RDC|rez-de-chaussée|rez de chaussée', page_content, re.IGNORECASE):
+                return "RDC"
+            
+            return None
+        except Exception as e:
+            print(f"   ⚠️ Erreur extraction étage: {e}")
+            return None
+    
+    async def extract_surface(self) -> str:
+        """Extrait la surface de la page d'appartement"""
+        try:
+            # Chercher la surface dans différents formats
+            surface_elements = self.page.locator('text=/\\d+\\s*m²/')
+            if await surface_elements.count() > 0:
+                text = await surface_elements.first.text_content()
+                if text:
+                    # Extraire juste la partie "XX m²"
+                    match = re.search(r'(\d+(?:[.,]\d+)?)\s*m²', text, re.IGNORECASE)
+                    if match:
+                        # Arrondir si décimal et formater
+                        surface_val = match.group(1).replace(',', '.')
+                        try:
+                            surface_num = float(surface_val)
+                            return f"{int(surface_num)} m²" if surface_num == int(surface_num) else f"{surface_num:.1f} m²"
+                        except:
+                            return f"{match.group(1)} m²"
+            return None
+        except Exception as e:
+            print(f"   ⚠️ Erreur extraction surface: {e}")
+            return None
+    
+    async def extract_prix_m2(self) -> str:
+        """Extrait le prix au m² de la page d'appartement"""
+        try:
+            # Chercher le prix au m²
+            price_elements = self.page.locator('text=/€\/m²/')
+            if await price_elements.count() > 0:
+                text = await price_elements.first.text_content()
+                if text:
+                    # Extraire et formater le prix au m²
+                    match = re.search(r'([\d\s]+)\s*€\s*/?\s*m²', text, re.IGNORECASE)
+                    if match:
+                        prix_clean = match.group(1).strip().replace(' ', ' ')
+                        return f"{prix_clean} € / m²"
+            return None
+        except Exception as e:
+            print(f"   ⚠️ Erreur extraction prix au m²: {e}")
+            return None
+    
+    async def extract_style(self) -> str:
+        """Extrait le style de l'appartement"""
+        try:
+            page_content = await self.page.content()
+            page_text = await self.page.text_content('body') or ""
+            
+            # Chercher des indices de style haussmannien
+            style_keywords = {
+                'haussmannien': 'Haussmannien',
+                'haussmann': 'Haussmannien',
+                'moulures': 'Haussmannien',
+                'parquet': 'Haussmannien',
+                'cheminée': 'Haussmannien',
+                'restauré': 'Haussmannien',
+                'contemporain': 'Contemporain',
+                'moderne': 'Moderne',
+                'ancien': 'Ancien',
+                'neuf': 'Neuf'
+            }
+            
+            for keyword, style in style_keywords.items():
+                if re.search(keyword, page_text, re.IGNORECASE):
+                    return style
+            
+            return "Style Inconnu"
+        except Exception as e:
+            print(f"   ⚠️ Erreur extraction style: {e}")
+            return "Style Inconnu"
+    
+    def format_photo_description(self, surface: str = None, prix_m2: str = None, etage: str = None, style: str = None) -> str:
+        """Formate la description de photo au format: 70 m² · 3e étage · Style Inconnu"""
+        parts = []
+        
+        if surface:
+            parts.append(surface)
+        # Prix au m² masqué pour simplifier
+        # if prix_m2:
+        #     parts.append(prix_m2)
+        if etage:
+            parts.append(etage)
+        if style:
+            parts.append(style)
+        
+        return " · ".join(parts) if parts else "Appartement"
+    
     async def extract_apartment_photos(self, apartment_url: str) -> list:
-        """Extrait les photos d'un appartement"""
+        """Extrait les photos d'un appartement dans l'ordre de la galerie Jinka"""
         try:
             print(f"🏠 Extraction des photos: {apartment_url}")
             await self.page.goto(apartment_url)
             await self.page.wait_for_load_state('networkidle')
             await self.page.wait_for_timeout(3000)
             
-            # Chercher les images d'appartement
-            photo_urls = []
+            # Extraire les informations de l'appartement pour la description
+            etage = await self.extract_etage()
+            surface = await self.extract_surface()
+            prix_m2 = await self.extract_prix_m2()
+            style = await self.extract_style()
             
-            # Méthode 1: Chercher les images avec des sélecteurs spécifiques
-            selectors = [
-                'img[alt*="logement"]',
-                'img[alt*="appartement"]',
-                'img[alt*="intérieur"]',
-                'img[alt*="salon"]',
-                'img[alt*="cuisine"]',
-                'img[alt*="chambre"]',
-                'img[src*="loueragile-media"]',
-                'img[src*="upload_pro_ad"]',
-                '.apartment-photo img',
-                '.property-photo img',
-                '.listing-photo img'
+            if etage:
+                print(f"   🏢 Étage trouvé: {etage}")
+            if surface:
+                print(f"   📐 Surface trouvée: {surface}")
+            if prix_m2:
+                print(f"   💰 Prix au m² trouvé: {prix_m2}")
+            if style:
+                print(f"   🎨 Style trouvé: {style}")
+            
+            # Attendre un peu plus pour le chargement des images lazy
+            await asyncio.sleep(1)
+            
+            # Scroller un peu pour déclencher le chargement lazy si nécessaire
+            await self.page.evaluate('window.scrollTo(0, 200)')
+            await asyncio.sleep(0.5)
+            await self.page.evaluate('window.scrollTo(0, 0)')
+            await asyncio.sleep(0.5)
+            
+            photos = []
+            
+            # Méthode 1: Cibler la div galerie principale (sc-cJSrbW juBoVb ou sc-gPEVay jnWxBz)
+            gallery_selectors = [
+                'div.sc-cJSrbW.juBoVb',  # Structure actuelle
+                'div.sc-gPEVay.jnWxBz',  # Ancienne structure
+                '[class*="sc-cJSrbW"][class*="juBoVb"]',
+                '[class*="sc-gPEVay"][class*="jnWxBz"]'
             ]
             
-            for selector in selectors:
+            for selector in gallery_selectors:
                 try:
-                    images = await self.page.query_selector_all(selector)
-                    for img in images:
-                        src = await img.get_attribute('src')
-                        alt = await img.get_attribute('alt')
-                        if src and ('loueragile' in src or 'upload_pro_ad' in src):
-                            photo_urls.append({
-                                'url': src,
-                                'alt': alt,
-                                'selector': selector
-                            })
-                            print(f"   📸 Photo trouvée: {src[:80]}...")
-                except:
+                    gallery_div = self.page.locator(selector)
+                    if await gallery_div.count() > 0:
+                        print(f"   🎯 Div galerie trouvée ({selector}), extraction des images dans l'ordre...")
+                        
+                        # Extraire les images dans l'ordre exact du DOM de la galerie
+                        # Extraire d'abord toutes les images de la galerie dans l'ordre du DOM
+                        gallery_element = await gallery_div.first.element_handle()
+                        img_elements = await gallery_element.evaluate('''
+                            el => {
+                                // Obtenir toutes les images dans l'ordre exact du DOM
+                                const allImgs = Array.from(el.querySelectorAll('img'));
+                                
+                                // Extraire les infos dans l'ordre d'apparition du DOM
+                                return allImgs.map((img, domIndex) => {
+                                    const rect = img.getBoundingClientRect();
+                                    return {
+                                        domIndex: domIndex,  // Index dans le DOM
+                                        src: img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || '',
+                                        alt: img.alt || '',
+                                        width: img.naturalWidth || img.width || 0,
+                                        height: img.naturalHeight || img.height || 0,
+                                        display: window.getComputedStyle(img).display,
+                                        visibility: window.getComputedStyle(img).visibility,
+                                        top: rect.top,  // Position pour tri de fallback
+                                        left: rect.left
+                                    };
+                                }).filter(img => 
+                                    img.display !== 'none' && 
+                                    img.visibility !== 'hidden' &&
+                                    img.src &&
+                                    !img.src.toLowerCase().includes('preloader') &&
+                                    !img.src.toLowerCase().includes('placeholder')
+                                );
+                            }
+                        ''')
+                        
+                        # Extraire les images avec leur index dans la galerie pour préserver l'ordre
+                        photos_with_order = []
+                        for img_data in img_elements:
+                            try:
+                                src_to_use = img_data.get('src')
+                                if not src_to_use:
+                                    continue
+                                
+                                # Filtrer les placeholders et preloaders
+                                if 'placeholder' in src_to_use.lower() or 'preloader' in src_to_use.lower():
+                                    continue
+                                
+                                # Vérifier que c'est une vraie photo (pas un logo)
+                                if 'logo' in src_to_use.lower() or 'source_logos' in src_to_use.lower():
+                                    continue
+                                
+                                # Accepter les URLs de vraies photos d'appartements
+                                photo_patterns = ['loueragile', 'upload_pro_ad', 'media.apimo.pro', 'studio-net.fr', 'images.century21.fr', 'biens', 'apartement', 'transopera', 'staticlbi', 'uploadcaregdc', 'uploadcare', 's3.amazonaws.com', 'googleusercontent.com', 'cdn.safti.fr', 'safti.fr', 'paruvendu.fr', 'immo-facile.com', 'mms.seloger.com', 'seloger.com']
+                                if not any(pattern in src_to_use.lower() for pattern in photo_patterns):
+                                    continue
+                                
+                                # Vérifier les dimensions
+                                width = img_data.get('width', 0)
+                                height = img_data.get('height', 0)
+                                
+                                if width > 0 and height > 0 and (width < 200 or height < 200):
+                                    continue
+                                
+                                alt_text = img_data.get('alt', '')
+                                
+                                # Ajouter l'étage à la description si disponible
+                                if etage:
+                                    if alt_text and alt_text != 'preloader' and alt_text != 'appartement':
+                                        alt_text = f"{alt_text} - {etage}"
+                                    else:
+                                        alt_text = f"Appartement - {etage}"
+                                
+                                # Ajouter l'image avec position visuelle pour préserver l'ordre de Jinka
+                                photos_with_order.append({
+                                    'url': src_to_use,
+                                    'alt': alt_text or 'appartement',
+                                    'selector': 'gallery',
+                                    'dom_index': img_data.get('domIndex', 0),
+                                    'position_top': img_data.get('top', 0),
+                                    'position_left': img_data.get('left', 0)
+                                })
+                            except Exception as e:
+                                continue
+                        
+                        # Trier par position visuelle (top puis left) pour conserver l'ordre de Jinka
+                        # Cela correspond à l'ordre de lecture : de haut en bas, puis de gauche à droite
+                        photos_with_order.sort(key=lambda x: (x.get('position_top', 0), x.get('position_left', 0)))
+                        
+                        # Dédupliquer en conservant l'ordre
+                        seen_urls = set()
+                        for photo_with_order in photos_with_order:
+                            if photo_with_order['url'] not in seen_urls:
+                                photo = {
+                                    'url': photo_with_order['url'],
+                                    'alt': photo_with_order['alt'],
+                                    'selector': photo_with_order['selector']
+                                }
+                                photos.append(photo)
+                                seen_urls.add(photo_with_order['url'])
+                                print(f"   📸 Photo trouvée (top: {photo_with_order.get('position_top', 0):.0f}, left: {photo_with_order.get('position_left', 0):.0f}): {photo_with_order['url'][:60]}...")
+                        
+                        if len(photos) > 0:
+                            break  # On a trouvé des photos dans la galerie
+                except Exception as e:
                     continue
             
-            # Méthode 2: Chercher toutes les images et filtrer
-            if not photo_urls:
-                print("   🔍 Recherche alternative...")
+            # Méthode 2: Si pas de photos dans la galerie, chercher toutes les images visibles
+            if len(photos) == 0:
+                print("   🔍 Recherche alternative dans toutes les images visibles...")
                 all_images = await self.page.query_selector_all('img')
-                for img in all_images:
-                    src = await img.get_attribute('src')
-                    alt = await img.get_attribute('alt')
-                    if src and ('loueragile' in src or 'upload_pro_ad' in src or 'jinka' in src):
-                        photo_urls.append({
+                
+                photos_with_position = []
+                for index, img in enumerate(all_images):
+                    try:
+                        src = await img.get_attribute('src') or await img.get_attribute('data-src') or await img.get_attribute('data-lazy-src')
+                        if not src:
+                            continue
+                        
+                        # Filtrer les vraies photos d'appartement
+                        photo_patterns = ['loueragile', 'upload_pro_ad', 'jinka']
+                        if not any(pattern in src.lower() for pattern in photo_patterns):
+                            continue
+                        
+                        if 'logo' in src.lower() or 'preloader' in src.lower():
+                            continue
+                        
+                        alt = await img.get_attribute('alt')
+                        
+                        # Formater la description complète avec toutes les infos
+                        alt = self.format_photo_description(surface, prix_m2, etage, style)
+                        
+                        photos_with_position.append({
                             'url': src,
                             'alt': alt or 'appartement',
-                            'selector': 'all_images'
+                            'selector': 'all_images',
+                            'dom_index': index
                         })
-                        print(f"   📸 Photo trouvée (alt): {src[:80]}...")
+                    except:
+                        continue
+                
+                # Trier par position DOM
+                photos_with_position.sort(key=lambda x: x['dom_index'])
+                
+                # Dédupliquer
+                seen_urls = set()
+                for photo_with_pos in photos_with_position:
+                    if photo_with_pos['url'] not in seen_urls:
+                        photo = {
+                            'url': photo_with_pos['url'],
+                            'alt': photo_with_pos['alt'],
+                            'selector': photo_with_pos['selector']
+                        }
+                        photos.append(photo)
+                        seen_urls.add(photo_with_pos['url'])
             
-            # Dédupliquer
-            unique_photos = []
-            seen_urls = set()
-            for photo in photo_urls:
-                if photo['url'] not in seen_urls:
-                    unique_photos.append(photo)
-                    seen_urls.add(photo['url'])
-            
-            print(f"   ✅ {len(unique_photos)} photos uniques trouvées")
-            return unique_photos
+            print(f"   ✅ {len(photos)} photos uniques trouvées (ordre galerie préservé)")
+            return photos
             
         except Exception as e:
             print(f"   ❌ Erreur extraction photos: {e}")

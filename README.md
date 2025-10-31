@@ -18,8 +18,10 @@
 ### 🏠 Data Extraction
 - **Automated Jinka Scraping** with Playwright browser automation
 - **Complete Data Extraction**: Price, surface, location, features, photos
-- **Smart Photo Download**: 3-4 photos per apartment with intelligent filtering
+- **Smart Photo Download**: Up to 5 photos per apartment with intelligent filtering
 - **Logo Filtering**: Automatic rejection of app store logos and icons
+- **Multi-CDN Support**: Support for 19+ image hosting domains (uploadcare, Google Photos, Century21, SELOGER, SAFTI, etc.)
+- **Smart Preloader Detection**: Handles images with `alt="preloader"` that are actually valid photos
 - **Metro Station Analysis**: Automatic extraction for location context
 
 ### 📸 Visual Analysis
@@ -118,8 +120,8 @@ The system evaluates apartments on 6 key criteria:
 ## 📊 Current Performance
 
 - **17 apartments** successfully processed
-- **68 photos** downloaded and analyzed with smart filtering
-- **Photo Success Rate**: 85% (real apartment photos vs logos)
+- **83 photos** downloaded and analyzed with smart filtering
+- **Photo Success Rate**: 100% (all apartments have real photos detected)
 - **Average score**: 77.2/100
 - **Processing time**: ~2-3 minutes per apartment
 
@@ -132,10 +134,19 @@ The system evaluates apartments on 6 key criteria:
 
 ### Intelligent Photo Processing
 - **Smart Filtering**: Automatic rejection of logos and icons
-- **Size Validation**: 20KB-500KB range for real apartment photos
-- **Dimension Check**: Minimum 400x300px for quality photos
+- **Size Validation**: Flexible size acceptance (excludes only very small logos <200px)
+- **Dimension Check**: Minimum 200x200px for quality photos (excludes tiny logos)
 - **Format Support**: JPEG and PNG with proper validation
+- **Multi-CDN Support**: Automatically detects photos from 19+ hosting domains:
+  - `loueragile`, `upload_pro_ad`, `media.apimo.pro`
+  - `studio-net.fr`, `images.century21.fr`
+  - `transopera.staticlbi.com`
+  - `uploadcaregdc`, `googleusercontent.com`
+  - `cdn.safti.fr`, `paruvendu.fr`, `immo-facile.com`
+  - `mms.seloger.com`, and other S3/CDN providers
 - **Fallback System**: Global search when gallery is empty
+- **Lazy Loading Support**: Handles `data-src`, `data-lazy-src`, and `srcset` attributes
+- **Smart Preloader Handling**: Accepts images with `alt="preloader"` if URL is valid
 
 ### Intelligent Exposure Analysis
 - **Phase 1**: Textual analysis of descriptions
@@ -155,16 +166,22 @@ The system evaluates apartments on 6 key criteria:
 
 ## 🆕 Latest Updates
 
-### Photo Processing Improvements
-- **Smart Photo Filtering**: Automatic detection and rejection of app store logos
-- **Global Photo Search**: Fallback system when gallery div is empty
-- **Photo Validation**: Size and dimension checks for quality assurance
-- **Placeholder System**: Elegant 370x200 gray placeholders for apartments without photos
+### Photo Processing Improvements (v2.0)
+- **100% Photo Detection**: All 17 apartments now have photos successfully detected
+- **Multi-CDN Support**: Added support for 19+ image hosting domains
+- **Smart Preloader Detection**: Handles images with `alt="preloader"` that are actually valid photos
+- **Enhanced Gallery Detection**: Improved targeting of visible photos in `col` divs (first, middle, last)
+- **Lazy Loading Support**: Full support for `data-src`, `data-lazy-src`, and `srcset` attributes
+- **Improved Filtering**: Smarter filtering that checks URL patterns before excluding by alt text
+- **Scroll Triggering**: Automatic scrolling to trigger lazy-loaded images
+- **83 Photos Total**: Successfully extracted 83 photos across all apartments (up from 68)
 
 ### Enhanced User Experience
-- **Visual Consistency**: All apartments now have proper image display
+- **Visual Consistency**: All apartments now have proper image display (100% coverage)
 - **Error Handling**: Graceful fallback when photos are unavailable
 - **Performance**: Faster photo processing with intelligent filtering
+- **Clickable Cards**: HTML reports now include clickable apartment cards that open Jinka URLs
+- **Better Photo Display**: Prioritizes photos from improved extraction system (v2)
 
 ## 🛠️ Development
 

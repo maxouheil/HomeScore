@@ -13,14 +13,19 @@ async def scrape_from_urls():
     """Scrape directement depuis les URLs"""
     print("🏠 SCRAPING DIRECT DEPUIS LES URLs")
     print("=" * 50)
-    print("24 appartements détectés !")
-    print()
     
-    # URLs d'appartements (tu peux en ajouter d'autres)
-    apartment_urls = [
-        "https://www.jinka.fr/alert_result?token=26c2ec3064303aa68ffa43f7c6518733&ad=90129925&from=dashboard_card&from_alert_filter=all&from_alert_page=1",
-        # Ajoute d'autres URLs d'appartements ici si tu en as
-    ]
+    # Charger les URLs depuis all_apartments_scores.json
+    scores_file = "data/scores/all_apartments_scores.json"
+    if os.path.exists(scores_file):
+        with open(scores_file, 'r', encoding='utf-8') as f:
+            scored_data = json.load(f)
+        apartment_urls = [apt.get('url', '') for apt in scored_data if apt.get('url')]
+        print(f"{len(apartment_urls)} appartements détectés depuis {scores_file} !")
+    else:
+        print("❌ Fichier all_apartments_scores.json non trouvé")
+        apartment_urls = []
+    
+    print()
     
     scraper = JinkaScraper()
     
