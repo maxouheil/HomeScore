@@ -2,6 +2,205 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [3.2.0] - 2025-02-01 (Dernières 3h)
+
+### 🎯 Version 3.2 - Documentation, Optimisation et Outils de Maintenance
+
+#### ✅ Améliorations Majeures
+
+**📚 Documentation Complète du Système Style**
+- ✅ **DECONSTRUCTION_STYLE.md**: Documentation exhaustive du barème Style (20 points)
+- ✅ **Processus de détection**: Documentation complète de la priorité texte → photos → fallback
+- ✅ **Indices visuels détaillés**: Cheminée, parquet pointe de Hongrie, moulures, chauffage, balcon fer forgé
+- ✅ **Flux complet**: Diagramme du processus de détection de bout en bout
+- ✅ **Références techniques**: Lignes de code exactes pour chaque composant
+- ✅ **Exemples concrets**: Cas d'usage pour chaque tier (Ancien/Atypique/Neuf)
+
+**💰 Rapport d'Optimisation des Coûts**
+- ✅ **RAPPORT_OPTIMISATION.md**: Analyse complète du système de cache et des coûts OpenAI
+- ✅ **546 entrées en cache**: Répartition par type (exposition, baignoire, style, cuisine)
+- ✅ **Économie 90-95%**: Réduction des coûts vs système non optimisé
+- ✅ **Coût estimé**: ~$0.01-0.02 par appartement (première fois), ~$0 avec cache
+- ✅ **Recommandations**: Suggestions d'optimisation optionnelles (réduction photos style, compression images)
+- ✅ **Coût mensuel**: ~$1-2/mois pour 40 appartements × 2 analyses
+
+**🔄 Scripts de Recalcul de Luminosité Image**
+- ✅ **recalculate_brightness.py**: Script pour recalculer brightness_value pour tous les appartements
+- ✅ **recalculate_all_brightness.py**: Script batch pour mise à jour complète
+- ✅ **update_scores_with_brightness.py**: Mise à jour des scores avec luminosité image
+- ✅ **Intégration automatique**: Ajout de brightness_value dans exposition.details
+- ✅ **Test API**: test_api_brightness.py pour vérifier l'intégration dans l'API
+
+**🌐 Extraction Complète des URLs Dashboard**
+- ✅ **extract_all_apartment_urls.py**: Script Python pour extraction complète depuis dashboard
+- ✅ **extract_all_urls_dashboard.js**: Script JavaScript pour console navigateur
+- ✅ **PLAN_RECUPERATION_TOUTES_URLS.md**: Plan détaillé avec 3 stratégies (scroll infini, pagination, bouton "Voir plus")
+- ✅ **EXTRACTION_DASHBOARD_README.md**: Guide d'utilisation complet
+- ✅ **Méthode hybride**: Combine scroll + bouton + pagination pour extraction robuste
+- ✅ **Déduplication**: Évite les doublons automatiquement
+
+#### 🔧 Changements Techniques
+
+**Nouveaux Fichiers**:
+- `DECONSTRUCTION_STYLE.md`: Documentation complète du système Style (349 lignes)
+- `RAPPORT_OPTIMISATION.md`: Analyse des coûts et optimisations (178 lignes)
+- `recalculate_brightness.py`: Script de recalcul individuel
+- `recalculate_all_brightness.py`: Script de recalcul batch
+- `update_scores_with_brightness.py`: Mise à jour des scores
+- `test_api_brightness.py`: Test de l'API brightness
+- `extract_all_apartment_urls.py`: Extraction URLs depuis dashboard
+- `extract_all_urls_dashboard.js`: Script JS pour console navigateur
+- `PLAN_RECUPERATION_TOUTES_URLS.md`: Plan d'implémentation
+- `EXTRACTION_DASHBOARD_README.md`: Guide d'utilisation
+
+**Fichiers Modifiés**:
+- Documentation améliorée et complétée
+- Scripts de maintenance ajoutés
+
+#### 📊 Résultats
+
+**Documentation**:
+- **Style**: Documentation complète avec diagrammes de flux et exemples
+- **Optimisation**: Analyse détaillée des coûts avec recommandations concrètes
+- **Extraction URLs**: Guide complet avec 3 stratégies d'implémentation
+
+**Outils de Maintenance**:
+- **Recalcul luminosité**: Scripts disponibles pour mise à jour rétroactive
+- **Extraction URLs**: Solutions pour récupérer toutes les URLs depuis dashboard
+- **Tests**: Scripts de vérification pour l'intégration API
+
+**Optimisation**:
+- **Cache**: 546 entrées actives avec TTL 30 jours
+- **Coûts**: Système déjà très optimisé (~90-95% d'économie)
+- **Recommandations**: Suggestions optionnelles pour optimisation supplémentaire
+
+#### 🎯 Impact
+
+**Maintenabilité**:
+- Documentation complète facilite la compréhension et l'évolution du système
+- Scripts de maintenance permettent la mise à jour rétroactive des données
+
+**Coûts**:
+- Rapport détaillé permet de monitorer et optimiser les coûts OpenAI
+- Système déjà très optimisé avec cache efficace
+
+**Fonctionnalités**:
+- Extraction complète des URLs permet de scraper tous les appartements de l'alerte
+- Recalcul de luminosité permet d'améliorer les scores d'exposition existants
+
+---
+
+## [3.1.0] - 2025-02-01
+
+### 🎯 Version 3.1 - Détection Avancée et Indices de Confiance
+
+#### ✅ Améliorations Majeures
+
+**🍳 Détection Cuisine Ouverte avec Fallback Visuel**
+- ✅ **Système de fallback visuel**: Analyse automatique des photos pour détecter le type de cuisine quand l'information n'est pas dans le texte
+- ✅ **100% de couverture**: Tous les appartements ont maintenant une détection cuisine (vs 35.3% avant)
+- ✅ **3 types détectés**: Ouverte, Semi-ouverte, Fermée avec confiance 60-100%
+- ✅ **Indices visuels**: Détection de bar/comptoir, murs séparants, îlot central, continuité visuelle
+- ✅ **Validation croisée**: Combinaison intelligente texte + photos avec gestion des conflits
+- ✅ **Agrégation multi-photos**: Vote majoritaire sur 5 photos analysées avec confiance ajustée
+- ✅ **Résultats**: 58.8% ouverte, 29.4% semi-ouverte, 11.8% fermée sur 17 appartements testés
+
+**📊 Calcul Exposition Amélioré - Système de Vote par Signaux**
+- ✅ **Vote majoritaire multi-signaux**: Combinaison de 3 signaux (orientation, étage, luminosité image)
+- ✅ **Classification intelligente**: Chaque signal classe en "Lumineux", "Luminosité moyenne", ou "Sombre"
+- ✅ **Calcul de confiance dynamique**: 
+  - Base 60% pour 1 signal
+  - +20% par signal supplémentaire d'accord
+  - -15% par signal en désaccord
+  - +10% si signal image fort et d'accord
+  - -10% si signal image faible
+  - Bornes: 50-95%
+- ✅ **Bonus étage >=4**: Prise en compte automatique dans le calcul
+- ✅ **Luminosité image**: Analyse de la luminosité réelle des photos (0.0-1.0)
+- ✅ **Indices détaillés**: Affichage de l'étage, exposition directionnelle, et luminosité image
+
+**🎯 Système d'Indices de Confiance**
+- ✅ **Confiance par critère**: Chaque critère affiche maintenant un indice de confiance (50-95%)
+- ✅ **Exposition**: Confiance basée sur cohérence des signaux (orientation, étage, image)
+- ✅ **Cuisine**: Confiance basée sur nombre de photos détectant le même type (60-100%)
+- ✅ **Style**: Confiance basée sur validation croisée texte + photos (70-100%)
+- ✅ **Baignoire**: Confiance basée sur présence explicite dans caractéristiques (50-100%)
+- ✅ **Affichage**: Format "(X% confiance)" affiché dans l'interface pour chaque critère
+
+**🔄 Validation Croisée Texte + Photos**
+- ✅ **Détection automatique des conflits**: Comparaison texte vs photos pour style et cuisine
+- ✅ **Résolution intelligente**: Choix de la source la plus confiante en cas de conflit
+- ✅ **Marquage des validations**: Indication visuelle "✅ Validé par photos" ou "⚠️ Conflit"
+- ✅ **Ajustement de confiance**: Réduction de confiance en cas de conflit, augmentation si cohérent
+
+#### 🔧 Changements Techniques
+
+**Fichiers Modifiés**:
+- `analyze_apartment_style.py`: 
+  - Prompt amélioré avec indices visuels détaillés pour cuisine
+  - Format JSON enrichi (cuisine_type, cuisine_indices, cuisine_confidence)
+  - Agrégation multi-photos avec vote majoritaire
+  - Validation croisée texte + photos
+  
+- `criteria/exposition.py`:
+  - Nouvelle fonction `classify_orientation()` pour classifier l'exposition
+  - Nouvelle fonction `classify_etage()` pour classifier selon l'étage
+  - Nouvelle fonction `classify_image_brightness()` pour classifier selon luminosité image
+  - Nouvelle fonction `vote_majority()` pour décision par vote majoritaire
+  - Nouvelle fonction `calculate_confidence()` pour calcul dynamique de confiance
+  - `format_exposition()` refactorisé pour utiliser le système de vote par signaux
+  
+- `criteria/cuisine.py`:
+  - Intégration de la validation croisée depuis `scores_detaille`
+  - Extraction des indices visuels depuis `photo_validation`
+  - Formatage avec confiance et indices détaillés
+  
+- `extract_exposition.py`:
+  - Intégration du calcul de luminosité image depuis photos
+  - Extraction automatique de l'étage pour bonus >=4
+  - Combinaison des signaux multiples
+
+**Nouveaux Fichiers**:
+- `FALLBACK_CUISINE_OUVERTE.md`: Documentation technique du système de fallback visuel
+- `DIAGNOSTIC_CUISINE_OUVERTE.md`: Diagnostic initial du problème de détection
+- `RESULTATS_FALLBACK_CUISINE.md`: Résultats et statistiques du système de fallback
+
+#### 📊 Résultats
+
+**Détection Cuisine**:
+- **Avant**: 35.3% avec info texte (6/17), 64.7% sans info
+- **Après**: 100% avec détection (17/17), 0% sans info
+- **Confiance moyenne**: 70-100% selon nombre de photos concordantes
+- **Indices visuels**: 3 indices/photos en moyenne détectés
+
+**Calcul Exposition**:
+- **Système multi-signaux**: Combinaison orientation + étage + luminosité image
+- **Confiance dynamique**: 50-95% selon cohérence des signaux
+- **Précision améliorée**: Détection plus fiable grâce au vote majoritaire
+
+**Indices de Confiance**:
+- **Exposition**: 50-95% selon cohérence des signaux
+- **Cuisine**: 60-100% selon nombre de photos concordantes
+- **Style**: 70-100% selon validation croisée
+- **Affichage**: Tous les critères affichent maintenant leur confiance
+
+#### 🎯 Impact sur le Scoring
+
+**Cuisine**:
+- Score moyen attendu: ~9/10 (vs ~3/10 avant pour appartements sans info)
+- Distribution: 88.2% ouverte/semi-ouverte (10 pts), 11.8% fermée (1 pt)
+
+**Exposition**:
+- Calcul plus précis grâce au vote multi-signaux
+- Confiance affichée permet d'évaluer la fiabilité du score
+
+**Qualité globale**:
+- Tous les critères ont maintenant une métrique de confiance
+- Meilleure traçabilité des décisions de scoring
+- Validation croisée réduit les erreurs de détection
+
+---
+
 ## [3.0.0] - 2025-01-31
 
 ### 🎉 Version 3.0 - Architecture React + Backend API
