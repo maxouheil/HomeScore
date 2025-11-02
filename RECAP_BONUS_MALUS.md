@@ -67,4 +67,6 @@ Le scoring se base uniquement sur **6 critères** :
 5. **Cuisine ouverte** (10 pts max)
 6. **Baignoire** (10 pts max)
 
-**Score total max:** 90 pts (arrondi au multiple de 5 le plus proche)
+**Score total max:** 95 pts (90 pts base + 5 pts bonus Place de la Réunion intégré dans localisation, arrondi au multiple de 5 le plus proche)
+
+**Note:** Le bonus Place de la Réunion (+5) est toujours appliqué mais intégré directement dans le score de localisation (20 → 25 pts max pour cette zone spécifique).

@@ -27,10 +27,11 @@ Toutes les modifications notables de ce projet seront documentées dans ce fichi
 - ✅ **Meilleure précision**: Détection plus fiable des zones Tier 1 (Place de la Réunion, ligne 2 Belleville-Avron)
 
 **🚫 Suppression des Bonus/Malus**
-- ✅ **Bonus/Malus supprimés**: Tous les bonus et malus ont été retirés car jamais validés
+- ✅ **Bonus/Malus supprimés**: Tous les bonus et malus généraux ont été retirés car jamais validés
 - ✅ **Score simplifié**: Le mega score se base maintenant uniquement sur 6 critères (localisation, prix, style, ensoleillement, cuisine, baignoire)
+- ✅ **Exception**: Bonus Place de la Réunion (+5) conservé et intégré dans le score de localisation (20 → 25 pts max)
 - ✅ **Documentation**: `RECAP_BONUS_MALUS.md` documente la suppression et les raisons
-- ✅ **Impact**: Score max réduit à 90 pts (au lieu de 100+ avec bonus)
+- ✅ **Impact**: Score max = 95 pts (90 pts base + 5 pts bonus Place de la Réunion)
 
 **🎨 Améliorations Design System**
 - ✅ **DESIGN_SCORECARD.md mis à jour**: Documentation complète de la structure en deux colonnes pour les critères
@@ -73,9 +74,9 @@ Toutes les modifications notables de ce projet seront documentées dans ce fichi
 - **Indices**: Extraction contextuelle des indices pertinents selon le style
 
 **Scoring**:
-- **Simplification**: Score basé uniquement sur 6 critères (plus de bonus/malus)
+- **Simplification**: Score basé uniquement sur 6 critères (plus de bonus/malus généraux)
 - **Clarté**: Calcul plus transparent et prévisible
-- **Score max**: 90 pts au lieu de 100+ avec bonus
+- **Score max**: 95 pts (90 pts base + 5 pts bonus Place de la Réunion intégré dans localisation)
 
 ---
 
