@@ -30,30 +30,47 @@ def load_scored_apartments():
 
 
 def get_all_apartment_photos(apartment):
-    """Récupère toutes les photos d'un appartement (URLs ou fichiers locaux)"""
+    """Récupère toutes les photos d'un appartement (priorité aux fichiers locaux)"""
     photos = []
-    
-    # Priorité 1: photos depuis données scrapées
-    scraped_photos = apartment.get('photos', [])
-    for photo in scraped_photos:
-        if isinstance(photo, dict):
-            photo_url = photo.get('url')
-        else:
-            photo_url = photo
-        
-        if photo_url:
-            photos.append(photo_url)
-    
-    # Priorité 2: photos depuis dossier local
     apartment_id = apartment.get('id')
+    
+    # PRIORITÉ 1: photos depuis dossier local (téléchargées avec le nouveau système)
     if apartment_id:
         photos_dir = f"data/photos/{apartment_id}"
         if os.path.exists(photos_dir):
-            photo_files = sorted([f for f in os.listdir(photos_dir) if f.endswith(('.jpg', '.jpeg', '.png'))])
-            for photo_file in photo_files[:5]:  # Limiter à 5 photos
-                photos.append(f"{photos_dir}/{photo_file}")
+            photo_files = []
+            for filename in os.listdir(photos_dir):
+                if filename.endswith(('.jpg', '.jpeg', '.png')):
+                    # Extraire le numéro pour trier (photo1.jpg -> 1, photo2.jpg -> 2, etc.)
+                    try:
+                        if filename.startswith('photo') and filename[5:].replace('.jpg', '').replace('.jpeg', '').replace('.png', '').isdigit():
+                            photo_num = int(filename[5:].replace('.jpg', '').replace('.jpeg', '').replace('.png', ''))
+                            photo_files.append((filename, photo_num))
+                        else:
+                            # Sinon utiliser un grand numéro pour mettre à la fin
+                            photo_files.append((filename, 9999))
+                    except:
+                        photo_files.append((filename, 9999))
+            
+            # Trier par numéro (photo1, photo2, etc.)
+            photo_files.sort(key=lambda x: x[1])
+            for photo_file, _ in photo_files:
+                # Utiliser un chemin relatif depuis output/ vers data/photos/
+                photos.append(f"../data/photos/{apartment_id}/{photo_file}")
     
-    return photos[:5]  # Max 5 photos
+    # PRIORITÉ 2: fallback vers photos depuis données scrapées (si pas de photos locales)
+    if not photos:
+        scraped_photos = apartment.get('photos', [])
+        for photo in scraped_photos:
+            if isinstance(photo, dict):
+                photo_url = photo.get('url')
+            else:
+                photo_url = photo
+            
+            if photo_url:
+                photos.append(photo_url)
+    
+    return photos  # Retourner toutes les photos disponibles
 
 
 def format_prix_k(prix_str):
@@ -564,13 +581,26 @@ def generate_html(apartments):
         carousel_id = f"carousel-{i}"
         
         # Générer HTML des photos
-        if len(all_photos) > 1:
+        # Filtrer les photos locales qui n'existent pas
+        valid_photos = []
+        for photo_url in all_photos:
+            if photo_url.startswith('../data/photos/'):
+                # Vérifier si le fichier existe
+                relative_path = photo_url.replace('../', '')
+                if os.path.exists(relative_path):
+                    valid_photos.append(photo_url)
+                # Sinon, ne pas l'inclure (fichier n'existe pas)
+            else:
+                # URL distante, toujours inclure
+                valid_photos.append(photo_url)
+        
+        if len(valid_photos) > 1:
             slides_html = ""
-            for photo_idx, photo_url in enumerate(all_photos):
+            for photo_idx, photo_url in enumerate(valid_photos):
                 slides_html += f'<div class="carousel-slide"><img src="{photo_url}" alt="Photo {photo_idx + 1}" onerror="this.parentElement.style.display=\'none\'"></div>'
             
             dots_html = ""
-            for dot_idx in range(len(all_photos)):
+            for dot_idx in range(len(valid_photos)):
                 dots_html += f'<div class="carousel-dot {"active" if dot_idx == 0 else ""}" onclick="event.stopPropagation(); goToSlide(\'{carousel_id}\', {dot_idx})"></div>'
             
             photo_html = f"""
@@ -660,8 +690,69 @@ def generate_html(apartments):
             const container = document.querySelector(`[data-carousel-id="${carouselId}"]`);
             if (!container) return;
             const track = container.querySelector('.carousel-track');
+            if (!track) return;
+            
             const slides = track.querySelectorAll('.carousel-slide');
-            carouselStates[carouselId] = { current: 0, total: slides.length };
+            const totalSlides = slides.length;
+            
+            // Initialiser avec tous les slides, on filtrera après si nécessaire
+            carouselStates[carouselId] = { 
+                current: 0, 
+                total: totalSlides
+            };
+            
+            // Attendre que les images se chargent pour détecter celles qui échouent
+            setTimeout(() => {
+                // Créer le mapping dot index -> slide index réel
+                const dotToSlideMap = [];
+                slides.forEach((slide, realIndex) => {
+                    const style = window.getComputedStyle(slide);
+                    const img = slide.querySelector('img');
+                    // Inclure la slide si elle est visible ET si l'image s'est chargée avec succès
+                    if (style.display !== 'none' && style.visibility !== 'hidden') {
+                        if (img) {
+                            // Si l'image est chargée (complete) ET a une hauteur naturelle > 0, elle est valide
+                            if (img.complete && img.naturalHeight > 0) {
+                                dotToSlideMap.push(realIndex);
+                            } else if (!img.complete) {
+                                // Si l'image n'est pas encore chargée, attendre qu'elle se charge
+                                img.addEventListener('load', function() {
+                                    if (img.naturalHeight > 0 && !dotToSlideMap.includes(realIndex)) {
+                                        dotToSlideMap.push(realIndex);
+                                        carouselStates[carouselId].dotToSlideMap = dotToSlideMap;
+                                        carouselStates[carouselId].total = dotToSlideMap.length;
+                                        updateCarousel(carouselId);
+                                    }
+                                });
+                                img.addEventListener('error', function() {
+                                    // Image a échoué, ne pas l'inclure dans le mapping
+                                });
+                            }
+                        } else {
+                            // Pas d'image dans la slide, l'inclure quand même
+                            dotToSlideMap.push(realIndex);
+                        }
+                    }
+                });
+                
+                // Si certaines slides ont été filtrées, mettre à jour le mapping
+                if (dotToSlideMap.length < totalSlides) {
+                    carouselStates[carouselId].dotToSlideMap = dotToSlideMap;
+                    carouselStates[carouselId].total = dotToSlideMap.length;
+                    
+                    // Cacher les dots au-delà du nombre réel de slides visibles
+                    const dots = container.querySelectorAll('.carousel-dot');
+                    dots.forEach((dot, dotIndex) => {
+                        if (dotIndex >= dotToSlideMap.length) {
+                            dot.style.display = 'none';
+                        }
+                    });
+                }
+                
+                updateCarousel(carouselId);
+            }, 1000); // Attendre 1s pour que les images aient le temps de charger/échouer
+            
+            // Initialiser quand même immédiatement pour avoir quelque chose à afficher
             updateCarousel(carouselId);
         }
         
@@ -670,11 +761,35 @@ def generate_html(apartments):
             const state = carouselStates[carouselId];
             if (!track || !state) return;
             
-            track.style.transform = `translateX(-${state.current * 100}%)`;
+            // Valider que current est dans les limites
+            if (state.current < 0) {
+                state.current = 0;
+            } else if (state.current >= state.total) {
+                state.current = state.total - 1;
+            }
+            
+            // Utiliser le mapping pour obtenir l'index réel de la slide
+            let realSlideIndex = state.current;
+            if (state.dotToSlideMap && state.dotToSlideMap.length > 0) {
+                // Si on a un mapping, utiliser seulement les slides valides
+                if (state.current >= 0 && state.current < state.dotToSlideMap.length) {
+                    realSlideIndex = state.dotToSlideMap[state.current];
+                } else {
+                    // Si l'index est hors limites, revenir à 0
+                    state.current = 0;
+                    realSlideIndex = state.dotToSlideMap[0] || 0;
+                }
+            }
+            
+            track.style.transform = `translateX(-${realSlideIndex * 100}%)`;
             
             const dots = track.parentElement.querySelectorAll('.carousel-dot');
             dots.forEach((dot, idx) => {
-                dot.classList.toggle('active', idx === state.current);
+                if (idx === state.current && idx < state.total) {
+                    dot.classList.add('active');
+                } else {
+                    dot.classList.remove('active');
+                }
             });
         }
         
@@ -695,6 +810,13 @@ def generate_html(apartments):
         function goToSlide(carouselId, index) {
             const state = carouselStates[carouselId];
             if (!state) return;
+            
+            // Valider que l'index est dans les limites
+            if (index < 0 || index >= state.total) {
+                console.warn(`Index ${index} hors limites pour carousel ${carouselId} (total: ${state.total})`);
+                return;
+            }
+            
             state.current = index;
             updateCarousel(carouselId);
         }

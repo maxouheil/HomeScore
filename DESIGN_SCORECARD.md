@@ -15,16 +15,23 @@ Documentation complète du design system pour la maquette HTML des scorecards d'
 
 ## Structure de la grille
 
+### `.container`
+- **Width** : `100%` (pleine largeur)
+- **Margin** : `0`
+- **Padding** : `30px` (haut, bas, gauche, droite)
+
 ### `.apartments-grid`
 - **Display** : `grid`
 - **Colonnes** : `repeat(3, 1fr)` (3 colonnes égales)
 - **Gap** : `30px`
-- **Marges** : `20px 0`
+- **Margin** : `0`
+- **Padding** : `0`
+- **Width** : `100%`
 
 ### Media Queries
-- **≤ 1400px** : 2 colonnes (`repeat(2, 1fr)`)
-- **≤ 900px** : 1 colonne (`1fr`)
-- **≤ 768px** : Gap réduit à `20px`
+- **> 1000px** : 3 colonnes (`repeat(3, 1fr)`)
+- **≤ 1000px** : 2 colonnes (`repeat(2, 1fr)`)
+- **≤ 600px** : 1 colonne (`1fr`)
 
 ---
 
@@ -55,7 +62,9 @@ font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI
 - **Font-size** : `14px`
 - **Line-height** : `1.5`
 - **Color** : `#212529`
-- **Background** : `white`
+- **Background** : `#f8f9fa`
+- **Margin** : `0`
+- **Padding** : `0`
 
 ⚠️ **Règle du design system** : Tous les textes (titres, sous-titres, critères, badges, détails) utilisent Cera Pro comme police principale avec `!important` pour forcer l'application.
 
@@ -301,7 +310,11 @@ font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI
 
 ## Checklist de vérification
 
-- [ ] Grille en 3 colonnes par défaut
+- [ ] Container : width 100%, padding 30px, margin 0
+- [ ] Body : margin 0, padding 0, background #f8f9fa
+- [ ] Grille en 3 colonnes par défaut jusqu'à 1000px
+- [ ] Gap de 30px entre les cards
+- [ ] Breakpoints : 3 colonnes (>1000px), 2 colonnes (≤1000px), 1 colonne (≤600px)
 - [ ] Tous les textes utilisent Cera Pro (chargé depuis cdnfonts.com)
 - [ ] Font-family standard : `'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important`
 - [ ] Titre global : Cera Pro Medium 20px
@@ -329,3 +342,7 @@ font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI
 - Centrage vertical avec `align-items: center` sur `.criterion` (grid layout)
 - Structure grid avec deux colonnes distinctes : `.criterion-content` (texte) et `.criterion-score-badge` (badge)
 - Le texte (titre + détails) reste dans la colonne de gauche et ne passe jamais sous le badge
+- **2024-XX-XX** : Container mis à jour : width 100%, padding 30px, margin 0
+- **2024-XX-XX** : Body avec margin 0 et padding 0
+- **2024-XX-XX** : Breakpoints mis à jour : 3 colonnes jusqu'à 1000px, 2 colonnes jusqu'à 600px, 1 colonne en dessous
+- **2024-XX-XX** : Gap de 30px entre les cards conservé sur tous les breakpoints

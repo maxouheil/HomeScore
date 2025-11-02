@@ -12,6 +12,8 @@ import json
 from typing import Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from analyze_photos import PhotoAnalyzer
+from analyze_text_ai import TextAIAnalyzer
+from cache_api import get_cache
 import requests
 
 class BaignoireExtractor:
@@ -19,6 +21,9 @@ class BaignoireExtractor:
     
     def __init__(self):
         self.photo_analyzer = PhotoAnalyzer()
+        self.text_ai_analyzer = TextAIAnalyzer()
+        self.use_ai_analysis = True  # Activer l'analyse IA pour éviter faux positifs
+        self.cache = get_cache()  # Cache partagé (photo_analyzer a déjà son propre cache)
         
         # Mots-clés baignoire
         self.baignoire_keywords = [
@@ -33,9 +38,45 @@ class BaignoireExtractor:
         ]
     
     def extract_baignoire_textuelle(self, description: str, caracteristiques: str = "") -> Dict:
-        """Extrait la présence de baignoire depuis le texte - STRICT sur description"""
+        """Extrait la présence de baignoire depuis le texte avec analyse IA intelligente"""
         try:
-            # Priorité 1: Description (plus fiable)
+            # Essayer d'abord l'analyse IA si disponible
+            if self.use_ai_analysis and self.text_ai_analyzer.openai_api_key:
+                ai_result = self.text_ai_analyzer.analyze_baignoire(description, caracteristiques)
+                
+                if ai_result.get('available', False):
+                    baignoire_presente = ai_result.get('baignoire_presente')
+                    douche_seule = ai_result.get('douche_seule', False)
+                    ai_confidence = ai_result.get('confiance', 0)
+                    ai_justification = ai_result.get('justification', '')
+                    
+                    if baignoire_presente is True:
+                        return {
+                            'has_baignoire': True,
+                            'has_douche': False,
+                            'justification': f"Analyse IA: {ai_justification}",
+                            'tier': 'tier1',
+                            'score': 10,
+                            'confidence': int(ai_confidence * 100),
+                            'found_in_description': True,
+                            'found_in_caracteristiques': False,
+                            'method': 'ai_analysis'
+                        }
+                    elif douche_seule or baignoire_presente is False:
+                        return {
+                            'has_baignoire': False,
+                            'has_douche': True,
+                            'justification': f"Analyse IA: {ai_justification}",
+                            'tier': 'tier3',
+                            'score': 0,
+                            'confidence': int(ai_confidence * 100),
+                            'found_in_description': True,
+                            'found_in_caracteristiques': False,
+                            'method': 'ai_analysis'
+                        }
+                    # Si null (ambigu), continuer avec recherche mots-clés
+            
+            # Fallback: Recherche par mots-clés (méthode originale)
             description_lower = description.lower()
             caracteristiques_lower = caracteristiques.lower()
             
@@ -194,7 +235,7 @@ class BaignoireExtractor:
             }
             
             payload = {
-                'model': 'gpt-4o',
+                'model': 'gpt-4o-mini',  # Optimisé pour réduire les coûts
                 'messages': [
                     {
                         'role': 'user',
@@ -346,70 +387,66 @@ Réponds au format JSON STRICT:
         }
     
     def extract_baignoire_complete(self, description: str, caracteristiques: str = "", photos_urls: List[str] = None) -> Dict:
-        """Extrait la présence de baignoire : texte → sinon analyse photos
-        Si trouvé uniquement dans caractéristiques, vérifier avec photos pour confirmer"""
-        # Phase 1: Recherche dans le texte
+        """Extrait la présence de baignoire avec validation croisée texte + photos"""
+        # Phase 1: Analyse textuelle IA
         text_result = self.extract_baignoire_textuelle(description, caracteristiques)
         
-        # Si trouvé dans la description (haute confiance), retourner directement
-        if text_result.get('detected_from_text') and text_result.get('found_in_description'):
-            return text_result
-        
-        # Si trouvé uniquement dans caractéristiques (confiance moyenne), vérifier avec photos
-        needs_verification = text_result.get('needs_photo_verification', False)
-        
-        # Phase 2: Vérifier avec photos si nécessaire OU si rien trouvé dans texte
+        # Phase 2: Analyse photos si disponibles
         photo_result = None
-        if photos_urls and (needs_verification or not text_result.get('detected_from_text')):
-            print(f"   🔍 Vérification avec photos (confiance texte: {text_result.get('confidence', 0)}%)")
-            photo_result = self.extract_baignoire_photos(photos_urls)
+        if photos_urls:
+            # Utiliser la nouvelle méthode unifiée du PhotoAnalyzer
+            photo_result = self.photo_analyzer.analyze_photos_baignoire(photos_urls)
         
-        # Si photos analysées avec succès
+        # Phase 3: Validation croisée texte + photos
         if photo_result and photo_result.get('photos_analyzed', 0) > 0:
-            # Si on avait un résultat texte mais faible confiance, combiner les résultats
-            if needs_verification and text_result.get('detected_from_text'):
-                # Utiliser le résultat des photos qui a priorité (plus fiable)
-                # Mais indiquer qu'il y avait un signal texte dans caractéristiques
-                photo_result['had_text_signal'] = True
-                photo_result['text_signal_baignoire'] = text_result.get('has_baignoire', False)
-                return photo_result
-            else:
-                # Résultat purement basé sur photos
-                return photo_result
+            validation = self.photo_analyzer.validate_text_with_photos(text_result, photo_result, 'baignoire')
+            
+            # Utiliser la confiance ajustée
+            confiance_ajustee = validation.get('confidence_adjusted', text_result.get('confidence', 0) / 100)
+            validation_status = validation.get('validation_status', 'text_only')
+            
+            # Construire résultat final enrichi
+            final_result = text_result.copy()
+            
+            # Si photos confirment ou contredisent, ajuster le résultat
+            if validation_status == 'validated':
+                # Cohérent → utiliser résultat texte mais avec confiance augmentée
+                final_result['confidence'] = int(confiance_ajustee * 100)
+                final_result['justification'] += f" | ✅ Validé par photos (confiance: {confiance_ajustee:.0%})"
+            elif validation_status == 'conflict':
+                # Incohérent → préférer photos si plus confiantes
+                photo_confidence = photo_result.get('confidence', 0)
+                text_confidence = text_result.get('confidence', 0) / 100
+                
+                if photo_confidence > text_confidence:
+                    # Photos plus confiantes → utiliser résultat photos
+                    final_result = {
+                        'has_baignoire': photo_result.get('has_baignoire', False),
+                        'has_douche': photo_result.get('has_douche', False),
+                        'detected_from_text': False,
+                        'found_in_description': False,
+                        'found_in_caracteristiques': False,
+                        'score': photo_result.get('score', 0),
+                        'tier': photo_result.get('tier', 'tier3'),
+                        'justification': f"{photo_result.get('justification', '')} | ⚠️ Conflit avec texte, photos prioritaires",
+                        'confidence': int(confiance_ajustee * 100),
+                        'photos_analyzed': photo_result.get('photos_analyzed', 0)
+                    }
+                else:
+                    # Texte plus confiant → garder texte mais réduire confiance
+                    final_result['confidence'] = int(confiance_ajustee * 100)
+                    final_result['justification'] += f" | ⚠️ Conflit avec photos (confiance: {confiance_ajustee:.0%})"
+            
+            # Ajouter les infos de validation dans les détails
+            if 'details' not in final_result:
+                final_result['details'] = {}
+            final_result['details']['photo_validation'] = validation.get('cross_validation')
+            final_result['details']['validation_status'] = validation_status
+            
+            return final_result
         
-        # Si on a un résultat texte mais faible confiance et pas de photos analysables
-        # Si trouvé uniquement dans caractéristiques → considérer comme NON détecté (besoin photos pour confirmer)
-        if text_result.get('detected_from_text') and needs_verification:
-            # Pas de photos disponibles → retourner comme NON détecté (ne pas faire confiance aux caractéristiques seules)
-            return {
-                'has_baignoire': False,
-                'has_douche': False,
-                'detected_from_text': False,
-                'found_in_description': False,
-                'found_in_caracteristiques': True,
-                'score': 0,
-                'tier': 'tier3',
-                'justification': 'Baignoire mentionnée uniquement dans caractéristiques mais pas vérifiable avec photos (photos manquantes)',
-                'photos_analyzed': 0,
-                'confidence': 0,
-                'needs_photo_verification': True
-            }
-        
-        # Si trouvé dans description mais pas de photos → retourner résultat texte (haute confiance)
-        if text_result.get('detected_from_text') and text_result.get('found_in_description'):
-            return text_result
-        
-        # Pas de résultat ni texte ni photos
-        return {
-            'has_baignoire': False,
-            'has_douche': False,
-            'detected_from_text': False,
-            'score': 0,
-            'tier': 'tier3',
-            'justification': 'Aucune information trouvée (ni texte ni photos analysables)',
-            'photos_analyzed': 0,
-            'confidence': 0
-        }
+        # Pas de photos → retourner résultat textuel uniquement
+        return text_result
     
     def extract_baignoire_ultimate(self, apartment_data: Dict) -> Dict:
         """

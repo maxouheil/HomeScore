@@ -15,8 +15,8 @@ Le système de scoring a été entièrement refondu selon vos critères précis 
 - **ÉLIMINÉ (0 pts)** : Toutes les autres zones
 
 ### 2. **PRIX (20 pts)**
-- **TIER 1 - GOOD (20 pts)** : < 9k€/m²
-- **TIER 2 - MOYEN (12 pts)** : 9-11k€/m²
+- **TIER 1 - GOOD (20 pts)** : < 9.5k€/m²
+- **TIER 2 - MOYEN (12 pts)** : 9.5-11k€/m²
 - **TIER 3 - BAD (2 pts)** : > 11k€/m²
 
 ### 3. **STYLE (20 pts)**

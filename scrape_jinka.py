@@ -911,11 +911,15 @@ class JinkaScraper:
             await asyncio.sleep(0.5)
             
             # Méthode 1: Cibler la div galerie principale (sc-cJSrbW juBoVb ou sc-gPEVay jnWxBz)
+            # Aussi chercher dans les divs cachées avec display="none" qui contiennent toutes les photos
             gallery_selectors = [
                 'div.sc-cJSrbW.juBoVb',  # Structure actuelle visible dans l'image
                 'div.sc-gPEVay.jnWxBz',  # Ancienne structure
                 '[class*="sc-cJSrbW"][class*="juBoVb"]',  # Sélecteurs partiels
-                '[class*="sc-gPEVay"][class*="jnWxBz"]'
+                '[class*="sc-gPEVay"][class*="jnWxBz"]',
+                'div.sc-bdVaJa.InsofV',  # Div cachée avec toutes les photos (display="none")
+                '[class*="sc-bdVaJa"][class*="InsofV"]',  # Sélecteur partiel
+                'div[style*="display: none"]',  # Toute div cachée
             ]
             
             gallery_found = False
@@ -926,34 +930,41 @@ class JinkaScraper:
                         print(f"      🎯 Div galerie trouvée ({selector}), extraction des images visibles...")
                         gallery_found = True
                         
-                        # Extraire toutes les images de la galerie avec leur position visuelle
+                        # Extraire toutes les images de la galerie (visibles ET cachées avec preloader)
                         gallery_element = await gallery_div.first.element_handle()
                         img_elements = await gallery_element.evaluate('''
                             el => {
-                                // Obtenir toutes les images dans l'ordre exact du DOM
+                                // Obtenir toutes les images dans l'ordre exact du DOM (même cachées)
                                 const allImgs = Array.from(el.querySelectorAll('img'));
                                 
                                 // Extraire les infos avec position visuelle pour tri correct
                                 return allImgs.map((img, domIndex) => {
                                     const rect = img.getBoundingClientRect();
+                                    const computedStyle = window.getComputedStyle(img);
                                     return {
                                         domIndex: domIndex,  // Index dans le DOM
                                         src: img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || '',
                                         alt: img.alt || '',
                                         width: img.naturalWidth || img.width || 0,
                                         height: img.naturalHeight || img.height || 0,
-                                        display: window.getComputedStyle(img).display,
-                                        visibility: window.getComputedStyle(img).visibility,
+                                        display: computedStyle.display,
+                                        visibility: computedStyle.visibility,
                                         top: rect.top,  // Position top pour tri visuel
                                         left: rect.left  // Position left pour tri visuel
                                     };
-                                }).filter(img => 
-                                    img.display !== 'none' && 
-                                    img.visibility !== 'hidden' &&
-                                    img.src &&
-                                    !img.src.toLowerCase().includes('preloader') &&
-                                    !img.src.toLowerCase().includes('placeholder')
-                                );
+                                }).filter(img => {
+                                    // Garder toutes les images avec une URL valide
+                                    // Y compris celles avec display="none" et alt="preloader" si elles ont une URL de photo valide
+                                    if (!img.src) return false;
+                                    if (img.src.toLowerCase().includes('placeholder')) return false;
+                                    
+                                    // Patterns de vraies photos d'appartements
+                                    const photoPatterns = ['loueragile', 'upload_pro_ad', 'media.apimo.pro', 'studio-net.fr', 'images.century21.fr', 'biens', 'apartement', 'transopera', 'staticlbi', 'uploadcaregdc', 'uploadcare', 's3.amazonaws.com', 'googleusercontent.com', 'cdn.safti.fr', 'safti.fr', 'paruvendu.fr', 'immo-facile.com', 'mms.seloger.com', 'seloger.com'];
+                                    const hasValidPhotoPattern = photoPatterns.some(pattern => img.src.toLowerCase().includes(pattern));
+                                    
+                                    // Si c'est une vraie photo, on la garde même si cachée ou avec alt="preloader"
+                                    return hasValidPhotoPattern;
+                                });
                             }
                         ''')
                         
@@ -991,16 +1002,8 @@ class JinkaScraper:
                                 position_top = img_data.get('top', 0)
                                 position_left = img_data.get('left', 0)
                                 
-                                # Ignorer les images avec position 0,0 qui sont probablement cachées
-                                # Sauf si elles ont une taille valide et sont dans la galerie
-                                if position_top == 0 and position_left == 0:
-                                    # Vérifier si l'image est vraiment visible avec une taille valide
-                                    if width > 0 and height > 0 and width >= 1600 and height >= 1000:
-                                        # Probablement la grande photo principale, on la garde
-                                        pass
-                                    else:
-                                        # Photo probablement cachée ou pas chargée, on ignore
-                                        continue
+                                # Garder toutes les photos valides, même si cachées (display="none")
+                                # Les photos avec alt="preloader" dans des divs cachées sont souvent les vraies photos
                                 
                                 photos_with_position.append({
                                     'url': src_to_use,
@@ -1050,16 +1053,12 @@ class JinkaScraper:
                         # Trier les photos visibles par position (top puis left) pour l'ordre visuel
                         visible_photos.sort(key=lambda x: (x.get('position_top', 0), x.get('position_left', 0)))
                         
-                        # Si on a des photos visibles, les utiliser. Sinon, utiliser les cachées mais trier par taille (plus grande en premier)
-                        if len(visible_photos) > 0:
-                            # Utiliser les photos visibles dans l'ordre trié
-                            photos_with_position = visible_photos
-                            print(f"      ✅ {len(visible_photos)} photos visibles trouvées, utilisation de l'ordre visuel")
-                        else:
-                            # Pas de photos visibles, utiliser les cachées triées par taille (plus grande d'abord)
-                            hidden_photos.sort(key=lambda x: (x.get('width', 0) * x.get('height', 0)), reverse=True)
-                            photos_with_position = hidden_photos
-                            print(f"      ⚠️ Aucune photo visible avec position, utilisation des photos cachées triées par taille")
+                        # Trier les photos cachées par index DOM pour préserver l'ordre de Jinka
+                        hidden_photos.sort(key=lambda x: x.get('dom_index', 0))
+                        
+                        # Combiner : photos visibles d'abord, puis photos cachées dans l'ordre DOM
+                        photos_with_position = visible_photos + hidden_photos
+                        print(f"      ✅ {len(visible_photos)} photos visibles + {len(hidden_photos)} photos cachées = {len(photos_with_position)} photos au total")
                         
                         # Ajouter les photos dans l'ordre correct (ordre visuel de Jinka)
                         for photo_with_pos in photos_with_position:
@@ -1068,9 +1067,21 @@ class JinkaScraper:
                             print(f"      📸 Photo galerie (top: {photo_with_pos.get('position_top', 0):.0f}, left: {photo_with_pos.get('position_left', 0):.0f}, {photo_with_pos['width']}x{photo_with_pos['height']}): {photo_with_pos['url'][:60]}...")
                         
                         if len(photos) > 0:
-                            break  # On a trouvé des photos, pas besoin d'essayer les autres sélecteurs
+                            # Ne pas break, continuer à chercher dans d'autres sélecteurs pour accumuler toutes les photos
+                            pass
                 except Exception as e:
                     continue
+            
+            # Après avoir cherché dans toutes les galeries, dédupliquer
+            if len(photos) > 0:
+                unique_photos_temp = []
+                seen_urls_temp = set()
+                for photo in photos:
+                    if photo['url'] not in seen_urls_temp:
+                        unique_photos_temp.append(photo)
+                        seen_urls_temp.add(photo['url'])
+                photos = unique_photos_temp
+                print(f"      ✅ {len(photos)} photos uniques trouvées après déduplication")
             
             # Méthode 2: Si pas de photos dans la galerie, chercher les images visibles avec URLs d'appartement
             if len(photos) == 0:
@@ -1173,9 +1184,6 @@ class JinkaScraper:
                                 'height': height
                             })
                             print(f"      📸 Photo trouvée (lazy-loaded?): {src_to_use[:60]}...")
-                            
-                            if len(photos) >= 5:  # Limiter à 5 photos max
-                                break
                         except Exception as e:
                             continue
             
@@ -1188,7 +1196,7 @@ class JinkaScraper:
                     seen_urls.add(photo['url'])
             
             print(f"   ✅ {len(unique_photos)} photos d'appartement trouvées")
-            return unique_photos[:10]  # Max 10 photos
+            return unique_photos  # Retourner toutes les photos disponibles
             
         except Exception as e:
             print(f"   ❌ Erreur extraction photos: {e}")
@@ -1243,10 +1251,21 @@ class JinkaScraper:
             photos_dir = f"data/photos/{apartment_id}"
             os.makedirs(photos_dir, exist_ok=True)
             
+            # Supprimer toutes les photos existantes
+            if os.path.exists(photos_dir):
+                existing_files = [f for f in os.listdir(photos_dir) if f.endswith(('.jpg', '.jpeg', '.png'))]
+                for existing_file in existing_files:
+                    file_path = os.path.join(photos_dir, existing_file)
+                    try:
+                        os.remove(file_path)
+                        print(f"      🗑️ Photo existante supprimée: {existing_file}")
+                    except Exception as e:
+                        print(f"      ⚠️ Erreur suppression {existing_file}: {e}")
+            
             # Télécharger et filtrer les photos
             valid_photos = []
             async with aiohttp.ClientSession() as session:
-                for i, photo in enumerate(photos[:8]):  # Tester plus d'images
+                for i, photo in enumerate(photos):  # Télécharger toutes les photos disponibles
                     url = photo['url']
                     temp_filename = f"{photos_dir}/temp_photo_{i+1}.jpg"
                     
@@ -1261,15 +1280,12 @@ class JinkaScraper:
                                 
                                 # Vérifier si c'est une vraie photo d'appartement
                                 if self.is_valid_apartment_photo(temp_filename, content):
-                                    # Renommer avec timestamp
-                                    final_filename = f"{photos_dir}/photo_{len(valid_photos)+1}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                                    # Renommer avec format simple: photo1.jpg, photo2.jpg, etc.
+                                    photo_number = len(valid_photos) + 1
+                                    final_filename = f"{photos_dir}/photo{photo_number}.jpg"
                                     os.rename(temp_filename, final_filename)
                                     valid_photos.append(final_filename)
-                                    print(f"      📸 Photo {len(valid_photos)} validée: {len(content)} bytes")
-                                    
-                                    # Arrêter après 4 bonnes photos
-                                    if len(valid_photos) >= 4:
-                                        break
+                                    print(f"      📸 Photo {photo_number} téléchargée: {final_filename} ({len(content)} bytes)")
                                 else:
                                     # Supprimer la photo invalide
                                     os.remove(temp_filename)
@@ -1281,7 +1297,7 @@ class JinkaScraper:
                         if os.path.exists(temp_filename):
                             os.remove(temp_filename)
             
-            print(f"      ✅ {len(valid_photos)} photos d'appartement téléchargées")
+            print(f"      ✅ {len(valid_photos)} photos d'appartement téléchargées dans {photos_dir}/")
                         
         except Exception as e:
             print(f"❌ Erreur téléchargement photos: {e}")

@@ -2,6 +2,52 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [3.0.0] - 2025-01-31
+
+### 🎉 Version 3.0 - Architecture React + Backend API
+
+#### ✅ Nouvelle Architecture
+
+**⚛️ Frontend React + Vite**
+- ✅ Interface React moderne avec composants réutilisables
+- ✅ Hot Module Replacement (HMR) pour développement rapide
+- ✅ Tri automatique par mega score décroissant
+- ✅ Formatage intelligent des données (prix, quartier, étage, prix/m²)
+- ✅ Carousel de photos interactif
+- ✅ Score badges avec couleurs dynamiques
+
+**🔧 Backend FastAPI**
+- ✅ API REST pour servir les données d'appartements
+- ✅ WebSocket pour mises à jour temps réel
+- ✅ WatchService pour surveillance automatique des fichiers
+- ✅ Cache intelligent pour optimiser les performances
+
+**📊 Améliorations du Scoring**
+- ✅ Mega score calculé depuis les scores réels affichés
+- ✅ Cohérence garantie entre affichage et calcul
+- ✅ Correction automatique des tiers selon les valeurs affichées
+- ✅ Exposition : Lumineux = 20pts, Luminosité moyenne = 10pts, Sombre = 0pts
+- ✅ Cuisine : Ouverte = 10pts, Fermée = 0pts
+
+**🎨 Améliorations UI/UX**
+- ✅ Titres des critères en casse normale (pas d'ALL CAPS)
+- ✅ Cera Pro Medium 16px pour les titres de critères
+- ✅ Affichage de l'étage dans le subtitle
+- ✅ Prix/m² remplacé par l'étage dans le subtitle
+- ✅ Style affiché comme "Ancien / Atypique / Neuf"
+
+#### 🔧 Changements Techniques
+
+**Nouveaux Fichiers :**
+- `frontend/` : Application React complète avec Vite
+- `backend/` : API FastAPI avec WebSocket
+- `dev.py` : Script de démarrage unifié
+- `frontend/src/utils/scoreUtils.js` : Utilitaires de calcul de score
+
+**Modifications :**
+- `generate_scorecard_html.py` : Améliorations de formatage
+- `scoring.py` : Calculs de scores améliorés
+
 ## [2.3.0] - 2025-02-01
 
 ### 🎯 Version 2.3 - Améliorations de Détection et Scoring Affiné

@@ -1,0 +1,49 @@
+/* Cera Pro - Design System Standard - Chargement via CDN */
+@import url('https://fonts.cdnfonts.com/css/cera-pro');
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+}
+
+body {
+    font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    background-color: #f8f9fa;
+    color: #212529;
+    line-height: 1.5;
+    font-size: 14px;
+    margin: 0;
+    padding: 0;
+}
+
+.container {
+    width: 100%;
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 30px;
+}
+
+.apartments-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 30px;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    grid-auto-flow: row;
+}
+
+@media (max-width: 1000px) {
+    .apartments-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 600px) {
+    .apartments-grid {
+        grid-template-columns: 1fr;
+    }
+}
+

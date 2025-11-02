@@ -5,3 +5,6 @@ python-dotenv==1.0.0
 requests==2.31.0
 lxml==4.9.3
 watchdog==3.0.0  # Optionnel: pour watch_regenerate.py (surveillance plus efficace)
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+websockets==12.0

@@ -23,7 +23,7 @@ def download_apartment_photos(apartment_data):
     downloaded_photos = []
     apartment_id = apartment_data.get('id', 'unknown')
     
-    for i, photo in enumerate(photos[:5], 1):  # Limiter à 5 photos
+    for i, photo in enumerate(photos, 1):  # Télécharger toutes les photos disponibles
         try:
             if isinstance(photo, dict):
                 url = photo.get('url')

@@ -31,6 +31,7 @@
 
 ### Prerequisites
 - Python 3.8+
+- Node.js 18+ and npm
 - Playwright
 - OpenAI API Key
 
@@ -40,11 +41,16 @@
 git clone https://github.com/maxouheil/HomeScore.git
 cd HomeScore
 
-# Install dependencies
+# Install Python dependencies
 pip install -r requirements.txt
 
 # Install Playwright
 playwright install
+
+# Install frontend dependencies
+cd frontend
+npm install
+cd ..
 
 # Configure environment variables
 cp .env.example .env
@@ -61,7 +67,22 @@ OPENAI_API_KEY=your_openai_api_key
 
 ## 🎯 Usage
 
-### Complete Workflow
+### Development Mode (React Frontend + Backend API)
+
+Start the development server with hot reload:
+
+```bash
+python dev.py
+```
+
+This will:
+- Start the FastAPI backend on `http://localhost:8000`
+- Start the React frontend on `http://localhost:5173`
+- Open your browser automatically
+- Watch for file changes and reload automatically
+
+### Complete Workflow (Traditional)
+
 ```bash
 # 1. Scrape apartments and analyze with AI (images)
 python scrape.py <alert_url>
@@ -82,31 +103,46 @@ python -c "from scoring import score_all_apartments, load_scraped_apartments; im
 python generate_html.py
 ```
 
-## 📁 Project Structure (Simplified)
+## 📁 Project Structure
 
 ```
 HomeScore/
-├── homescore.py              ⭐ Orchestrateur central
-├── scrape.py                 ⭐ Scraping + analyse IA images
-├── scoring.py                ⭐ Calcul scores (règles simples)
-├── generate_html.py          ⭐ Génération HTML unique
-├── criteria/                 ⭐ Un fichier par critère
-│   ├── __init__.py
-│   ├── localisation.py       # Formatage "Metro · Quartier"
-│   ├── prix.py               # Formatage "X / m² · Good/Moyen/Bad"
-│   ├── style.py              # Formatage "Style (X% confiance) + indices"
-│   ├── exposition.py         # Formatage "Lumineux/Moyen/Sombre (X% confiance)"
-│   ├── cuisine.py            # Formatage "Ouverte/Semi/Fermée (X% confiance)"
-│   └── baignoire.py          # Formatage "Oui/Non (X% confiance)"
-├── scrape_jinka.py           # Scraper Jinka (utilisé par scrape.py)
-├── analyze_apartment_style.py # Analyse IA images (utilisé par scrape.py)
-├── extract_baignoire.py       # Détection baignoire (utilisé par criteria/baignoire.py)
-├── extract_exposition.py      # Extraction exposition (utilisé par scrape_jinka.py)
-├── data/
-│   ├── scraped_apartments.json    # Source unique scrapée + analyses IA
-│   └── scores.json                # Source unique scores calculés
-└── output/
-    └── homepage.html              # UN SEUL fichier HTML généré
+├── 🐍 Backend (Python)
+│   ├── backend/
+│   │   ├── main.py              # FastAPI server
+│   │   ├── api/
+│   │   │   └── apartments.py    # REST API endpoints
+│   │   └── watch_service.py      # File watching + WebSocket
+│   ├── homescore.py              # Orchestrateur central
+│   ├── scrape.py                 # Scraping + analyse IA images
+│   ├── scoring.py                # Calcul scores (règles simples)
+│   ├── generate_scorecard_html.py # Génération HTML statique
+│   ├── criteria/                 # Un fichier par critère
+│   │   ├── localisation.py
+│   │   ├── prix.py
+│   │   ├── style.py
+│   │   ├── exposition.py
+│   │   ├── cuisine.py
+│   │   └── baignoire.py
+│   └── data/
+│       ├── scraped_apartments.json
+│       └── scores/
+│           └── all_apartments_scores.json
+│
+├── ⚛️ Frontend (React + Vite)
+│   ├── frontend/
+│   │   ├── src/
+│   │   │   ├── App.jsx           # Main React component
+│   │   │   ├── components/
+│   │   │   │   ├── ApartmentCard.jsx
+│   │   │   │   ├── Carousel.jsx
+│   │   │   │   └── ScoreBadge.jsx
+│   │   │   └── utils/
+│   │   │       └── scoreUtils.js # Score calculation utilities
+│   │   └── package.json
+│
+└── 📄 Scripts
+    └── dev.py                    # Development server launcher
 ```
 
 ## 🎯 Scoring Criteria
@@ -176,17 +212,32 @@ Examples:
 3. Update `criteria/__init__.py` to export the function
 4. Add to `criteria_mapping` in `generate_html.py`
 
+## 🎨 Frontend Features
+
+### Real-Time Updates
+- **WebSocket Integration**: Automatic refresh when data files change
+- **Hot Module Replacement**: Instant UI updates during development
+- **Responsive Design**: 3-column grid layout, mobile-friendly
+
+### Component Architecture
+- **ApartmentCard**: Individual apartment display with all criteria
+- **Carousel**: Image carousel with navigation dots
+- **ScoreBadge**: Dynamic score badge with color coding
+- **Smart Data Formatting**: Automatic extraction of prix, quartier, étage, prix/m²
+
 ## 📈 Roadmap
 
-### Version 2.1
-- [ ] Web interface for visualization
+### Version 2.1 ✅
+- [x] Web interface for visualization (React + Vite)
+- [x] REST API for external integration (FastAPI)
+- [x] Real-time updates via WebSocket
 - [ ] Email notifications for new apartments
 - [ ] CSV/Excel data export
 
 ### Version 2.2
 - [ ] Integration with other real estate platforms
-- [ ] REST API for external integration
 - [ ] Monitoring dashboard
+- [ ] Advanced filtering and sorting
 
 ## 🤝 Contributing
 

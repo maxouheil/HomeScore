@@ -2,7 +2,22 @@
 
 ## 🚀 Démarrage Rapide
 
-### Workflow Complet (Recommandé)
+### Mode Développement (Nouveau - Recommandé)
+
+Pour une expérience de développement moderne avec hot reload :
+
+```bash
+# Lance le backend + frontend avec hot reload
+python dev.py
+```
+
+**Fonctionnalités :**
+- ✅ Interface React moderne avec hot reload
+- ✅ Mises à jour automatiques via WebSocket
+- ✅ Tri automatique par score décroissant
+- ✅ Formatage intelligent des données
+
+### Workflow Complet (Traditionnel)
 
 ```bash
 # 1. Scraper les appartements et analyser avec IA
@@ -127,7 +142,7 @@ with open('output/homepage.html', 'w') as f:
     "prix": {
       "tiers": {
         "tier1": {
-          "prix_m2_max": 9000  // Modifier ici
+          "prix_m2_max": 9499  // Modifier ici (< 9500)
         }
       }
     }

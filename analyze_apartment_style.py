@@ -11,9 +11,12 @@ import os
 import base64
 import requests
 from datetime import datetime
+from analyze_text_ai import TextAIAnalyzer
+from extract_cuisine_text import CuisineTextExtractor
+from cache_api import get_cache
 
 class ApartmentStyleAnalyzer:
-    """Analyseur de style d'appartement basé sur les photos"""
+    """Analyseur de style d'appartement basé sur les photos et le texte"""
     
     def __init__(self):
         # Forcer le rechargement du .env
@@ -21,54 +24,250 @@ class ApartmentStyleAnalyzer:
         load_dotenv()
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
         self.openai_base_url = "https://api.openai.com/v1"
+        self.text_ai_analyzer = TextAIAnalyzer()
+        self.cuisine_text_extractor = CuisineTextExtractor()
+        self.use_text_analysis = True  # Activer l'analyse texte IA
+        self.cache = get_cache()
         
     def analyze_apartment_photos_from_data(self, apartment_data):
-        """Analyse les photos directement depuis les données d'appartement"""
+        """Analyse les photos directement depuis les données d'appartement
+        ET combine avec l'analyse texte IA si disponible
+        """
+        description = apartment_data.get('description', '')
+        caracteristiques = apartment_data.get('caracteristiques', '')
         photos = apartment_data.get('photos', [])
-        if not photos:
-            return None
         
-        # Prendre seulement les 3 premières photos pour économiser
-        photos_to_analyze = photos[:3]
-        
-        # Télécharger temporairement les photos
-        temp_photos = []
-        for i, photo in enumerate(photos_to_analyze):
-            try:
-                if isinstance(photo, dict):
-                    url = photo.get('url')
-                else:
-                    url = photo
-                
-                if url:
-                    # Télécharger l'image
-                    response = requests.get(url, timeout=5)
-                    if response.status_code == 200:
-                        temp_file = f"temp_photo_{i}.jpg"
-                        with open(temp_file, 'wb') as f:
-                            f.write(response.content)
-                        temp_photos.append(temp_file)
-            except:
-                continue
-        
-        if not temp_photos:
-            return None
+        # Analyser le texte d'abord (IA intelligente)
+        text_analysis = None
+        if self.use_text_analysis:
+            text_analysis = self.analyze_text(description, caracteristiques)
         
         # Analyser les photos
-        analyses = []
-        for photo_path in temp_photos:
-            analysis = self.analyze_single_photo(photo_path)
-            if analysis:
-                analyses.append(analysis)
-            # Nettoyer le fichier temporaire
-            try:
-                os.remove(photo_path)
-            except:
-                pass
+        photo_analysis = None
+        if photos:
+            # Prendre seulement les 3 premières photos pour économiser
+            photos_to_analyze = photos[:3]
+            
+            # Télécharger temporairement les photos
+            temp_photos = []
+            for i, photo in enumerate(photos_to_analyze):
+                try:
+                    if isinstance(photo, dict):
+                        url = photo.get('url')
+                    else:
+                        url = photo
+                    
+                    if url:
+                        # Télécharger l'image
+                        response = requests.get(url, timeout=5)
+                        if response.status_code == 200:
+                            temp_file = f"temp_photo_{i}.jpg"
+                            with open(temp_file, 'wb') as f:
+                                f.write(response.content)
+                            temp_photos.append(temp_file)
+                except:
+                    continue
+            
+            if temp_photos:
+                # Analyser les photos
+                analyses = []
+                for photo_path in temp_photos:
+                    analysis = self.analyze_single_photo(photo_path)
+                    if analysis:
+                        analyses.append(analysis)
+                    # Nettoyer le fichier temporaire
+                    try:
+                        os.remove(photo_path)
+                    except:
+                        pass
+                
+                if analyses:
+                    photo_analysis = self.aggregate_analyses(analyses)
         
-        if analyses:
-            return self.aggregate_analyses(analyses)
-        return None
+        # Combiner texte + photos (priorité aux photos mais texte comme validation)
+        return self.combine_text_and_photo_analysis(text_analysis, photo_analysis)
+    
+    def analyze_text(self, description: str, caracteristiques: str = ""):
+        """Analyse le style et la cuisine depuis le texte avec IA"""
+        if not self.text_ai_analyzer.openai_api_key:
+            return None
+        
+        try:
+            # Analyser le style
+            style_result = self.text_ai_analyzer.analyze_style(description, caracteristiques)
+            
+            # Analyser la cuisine
+            cuisine_result = self.cuisine_text_extractor.extract_cuisine_from_text(description, caracteristiques)
+            
+            if not style_result.get('available', False) and not cuisine_result.get('ouverte') is not None:
+                return None
+            
+            result = {
+                'style': None,
+                'cuisine': None,
+                'method': 'text_ai_analysis'
+            }
+            
+            # Style
+            if style_result.get('available', False):
+                style_type = style_result.get('style', 'autre')
+                # Utiliser confiance_globale si disponible, sinon confiance classique
+                style_confidence = style_result.get('confiance_globale', style_result.get('confiance', 0))
+                
+                # Extraire les informations enrichies
+                contexte_detection = style_result.get('contexte_detection', {})
+                indices_architecturaux = style_result.get('indices_architecturaux', {})
+                est_conversion = contexte_detection.get('est_conversion', False)
+                type_conversion = contexte_detection.get('type_conversion', '')
+                
+                # Construire une justification enrichie
+                justification_parts = [style_result.get('justification', '')]
+                
+                if est_conversion:
+                    conversion_desc = f"Conversion d'ancien {type_conversion}" if type_conversion else "Conversion d'ancien espace"
+                    justification_parts.append(f"🏭 {conversion_desc}")
+                
+                if contexte_detection.get('periode_mentionnee'):
+                    justification_parts.append(f"📅 Période: {contexte_detection.get('periode_mentionnee')}")
+                
+                # Ajouter les indices architecturaux détectés
+                elements_haussmannien = indices_architecturaux.get('elements_haussmannien', [])
+                elements_atypique = indices_architecturaux.get('elements_atypique', [])
+                elements_moderne = indices_architecturaux.get('elements_moderne', [])
+                
+                if elements_haussmannien:
+                    justification_parts.append(f"🏛️ Éléments haussmanniens: {', '.join(elements_haussmannien[:3])}")
+                if elements_atypique:
+                    justification_parts.append(f"🏭 Éléments atypiques: {', '.join(elements_atypique[:3])}")
+                if elements_moderne:
+                    justification_parts.append(f"✨ Éléments modernes: {', '.join(elements_moderne[:3])}")
+                
+                justification = " | ".join(justification_parts)
+                
+                # Calculer le score
+                base_score = self.calculate_style_score(style_type)
+                
+                # Si confiance globale très élevée (>0.85) et style atypique/haussmannien, on peut augmenter légèrement la confiance
+                # Mais le score reste basé sur le style uniquement
+                
+                result['style'] = {
+                    'type': style_type,
+                    'confidence': style_confidence,
+                    'score': base_score,
+                    'justification': justification,
+                    'indices': style_result.get('indices', []),
+                    'details': {
+                        'confiance_globale': style_confidence,
+                        'contexte_detection': contexte_detection,
+                        'indices_architecturaux': indices_architecturaux,
+                        'est_conversion': est_conversion,
+                        'type_conversion': type_conversion,
+                        'note_scoring': style_result.get('note_scoring', '')
+                    }
+                }
+            
+            # Cuisine
+            if cuisine_result.get('ouverte') is not None:
+                cuisine_ouverte = cuisine_result.get('ouverte', False)
+                cuisine_confidence = cuisine_result.get('confidence', 0)
+                result['cuisine'] = {
+                    'ouverte': cuisine_ouverte,
+                    'confidence': cuisine_confidence,
+                    'score': self.calculate_cuisine_score(cuisine_ouverte),
+                    'justification': cuisine_result.get('justification', ''),
+                    'indices': cuisine_result.get('indices', [])
+                }
+            
+            return result if result['style'] or result['cuisine'] else None
+            
+        except Exception as e:
+            print(f"   ⚠️ Erreur analyse texte IA: {e}")
+            return None
+    
+    def combine_text_and_photo_analysis(self, text_analysis, photo_analysis):
+        """Combine l'analyse texte et photo avec validation croisée"""
+        if not photo_analysis and not text_analysis:
+            return None
+        
+        # Si seulement texte → utiliser texte
+        if not photo_analysis and text_analysis:
+            return {
+                'style': text_analysis.get('style', {}),
+                'cuisine': text_analysis.get('cuisine', {}),
+                'luminosite': {'type': 'inconnue', 'confidence': 0, 'score': 0},
+                'photos_analyzed': 0,
+                'method': 'text_only'
+            }
+        
+        # Si seulement photos → utiliser photos
+        if photo_analysis and not text_analysis:
+            return photo_analysis
+        
+        # Si les deux → validation croisée avec PhotoAnalyzer
+        from analyze_photos import PhotoAnalyzer
+        photo_validator = PhotoAnalyzer()
+        
+        combined = {
+            'style': photo_analysis.get('style', {}),
+            'cuisine': photo_analysis.get('cuisine', {}),
+            'luminosite': photo_analysis.get('luminosite', {}),
+            'photos_analyzed': photo_analysis.get('photos_analyzed', 0),
+            'method': 'combined'
+        }
+        
+        # Valider style avec validation croisée
+        if text_analysis.get('style') and photo_analysis.get('style'):
+            text_style = text_analysis.get('style')
+            photo_style = photo_analysis.get('style')
+            style_validation = photo_validator.validate_text_with_photos(text_style, photo_style, 'style')
+            
+            if style_validation.get('validation_status') == 'validated':
+                # Cohérent → utiliser texte si plus confiant, sinon photos
+                if text_style.get('confidence', 0) > photo_style.get('confidence', 0):
+                    combined['style'] = text_style
+                    combined['style']['confidence'] = style_validation.get('confidence_adjusted', text_style.get('confidence', 0))
+                    combined['style']['justification'] += f" | ✅ Validé par photos"
+                else:
+                    combined['style']['confidence'] = style_validation.get('confidence_adjusted', photo_style.get('confidence', 0))
+            elif style_validation.get('validation_status') == 'conflict':
+                # Incohérent → préférer celui avec plus de confiance
+                if text_style.get('confidence', 0) > photo_style.get('confidence', 0):
+                    combined['style'] = text_style
+                    combined['style']['confidence'] = style_validation.get('confidence_adjusted', text_style.get('confidence', 0))
+                    combined['style']['justification'] += f" | ⚠️ Conflit avec photos"
+                else:
+                    combined['style']['confidence'] = style_validation.get('confidence_adjusted', photo_style.get('confidence', 0))
+                    combined['style']['justification'] += f" | ⚠️ Conflit avec texte"
+            
+            combined['style']['photo_validation'] = style_validation.get('cross_validation')
+        
+        # Valider cuisine avec validation croisée
+        if text_analysis.get('cuisine') and photo_analysis.get('cuisine'):
+            text_cuisine = text_analysis.get('cuisine')
+            photo_cuisine = photo_analysis.get('cuisine')
+            cuisine_validation = photo_validator.validate_text_with_photos(text_cuisine, photo_cuisine, 'cuisine')
+            
+            if cuisine_validation.get('validation_status') == 'validated':
+                # Cohérent → utiliser texte si plus confiant, sinon photos
+                if text_cuisine.get('confidence', 0) > photo_cuisine.get('confidence', 0):
+                    combined['cuisine'] = text_cuisine
+                    combined['cuisine']['confidence'] = cuisine_validation.get('confidence_adjusted', text_cuisine.get('confidence', 0))
+                    combined['cuisine']['justification'] += f" | ✅ Validé par photos"
+                else:
+                    combined['cuisine']['confidence'] = cuisine_validation.get('confidence_adjusted', photo_cuisine.get('confidence', 0))
+            elif cuisine_validation.get('validation_status') == 'conflict':
+                # Incohérent → préférer celui avec plus de confiance
+                if text_cuisine.get('confidence', 0) > photo_cuisine.get('confidence', 0):
+                    combined['cuisine'] = text_cuisine
+                    combined['cuisine']['confidence'] = cuisine_validation.get('confidence_adjusted', text_cuisine.get('confidence', 0))
+                    combined['cuisine']['justification'] += f" | ⚠️ Conflit avec photos"
+                else:
+                    combined['cuisine']['confidence'] = cuisine_validation.get('confidence_adjusted', photo_cuisine.get('confidence', 0))
+                    combined['cuisine']['justification'] += f" | ⚠️ Conflit avec texte"
+            
+            combined['cuisine']['photo_validation'] = cuisine_validation.get('cross_validation')
+        
+        return combined
     
     def analyze_apartment_photos(self, photos_dir="data/photos"):
         """Analyse toutes les photos d'appartement"""
@@ -103,7 +302,16 @@ class ApartmentStyleAnalyzer:
             return None
     
     def analyze_single_photo(self, photo_path):
-        """Analyse une photo individuelle"""
+        """Analyse une photo individuelle avec cache"""
+        # Générer une clé de cache basée sur le chemin du fichier
+        # Pour les URLs, utiliser l'URL directement
+        cache_key = photo_path if photo_path.startswith('http') else f"file:{photo_path}"
+        
+        # Vérifier le cache d'abord
+        cached_result = self.cache.get('style_photo', cache_key)
+        if cached_result:
+            return cached_result
+        
         try:
             # Encoder l'image en base64
             with open(photo_path, 'rb') as image_file:
@@ -195,6 +403,10 @@ Réponds au format JSON:
                 print(f"      Style: {analysis.get('style', 'N/A')} (confiance: {analysis.get('style_confidence', 0):.2f})")
                 print(f"      Cuisine: {'Ouverte' if analysis.get('cuisine_ouverte') else 'Fermée'} (confiance: {analysis.get('cuisine_confidence', 0):.2f})")
                 print(f"      Luminosité: {analysis.get('luminosite', 'N/A')} (confiance: {analysis.get('luminosite_confidence', 0):.2f})")
+                
+                # Mettre en cache avant de retourner
+                self.cache.set('style_photo', cache_key, analysis)
+                
                 return analysis
                 
             except json.JSONDecodeError as e:
@@ -328,8 +540,15 @@ Réponds au format JSON:
         if 'haussmann' in style_normalized:
             return 20
         
-        # Atypique = 10 pts (loft, atypique, unique, original)
-        if 'loft' in style_normalized or 'atypique' in style_normalized or 'unique' in style_normalized or 'original' in style_normalized:
+        # Atypique = 10 pts (loft, atypique, unique, original, entrepôt, usine, atelier)
+        if ('loft' in style_normalized or 
+            'atypique' in style_normalized or 
+            'unique' in style_normalized or 
+            'original' in style_normalized or
+            'entrepot' in style_normalized or
+            'usine' in style_normalized or
+            'atelier' in style_normalized or
+            'garage' in style_normalized):
             return 10
         
         # Tout le reste = Neuf = 0 pts

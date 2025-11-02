@@ -53,11 +53,14 @@ class ApartmentPhotoDownloader:
             await asyncio.sleep(0.5)
             
             # Méthode 1: Cibler la div galerie principale (structure actuelle)
+            # Aussi chercher dans les divs cachées avec display="none" qui contiennent toutes les photos
             gallery_selectors = [
                 'div.sc-cJSrbW.juBoVb',  # Structure actuelle visible
                 'div.sc-gPEVay.jnWxBz',  # Ancienne structure
                 '[class*="sc-cJSrbW"][class*="juBoVb"]',
-                '[class*="sc-gPEVay"][class*="jnWxBz"]'
+                '[class*="sc-gPEVay"][class*="jnWxBz"]',
+                'div.sc-bdVaJa.InsofV',  # Div cachée avec toutes les photos (display="none")
+                '[class*="sc-bdVaJa"][class*="InsofV"]',  # Sélecteur partiel
             ]
             
             for selector in gallery_selectors:
@@ -132,33 +135,59 @@ class ApartmentPhotoDownloader:
                             print(f"      🔍 {len(visible_images)} images après filtrage (sans preloader)")
                         
                         # Extraire les photos avec leur position DOM pour préserver l'ordre
+                        # Utiliser une méthode JavaScript pour extraire TOUTES les images (même cachées)
+                        gallery_element = await gallery_div.first.element_handle()
+                        img_elements = await gallery_element.evaluate('''
+                            el => {
+                                // Obtenir toutes les images dans l'ordre exact du DOM (même cachées)
+                                const allImgs = Array.from(el.querySelectorAll('img'));
+                                
+                                // Extraire les infos avec position visuelle pour tri correct
+                                return allImgs.map((img, domIndex) => {
+                                    const rect = img.getBoundingClientRect();
+                                    const computedStyle = window.getComputedStyle(img);
+                                    return {
+                                        domIndex: domIndex,  // Index dans le DOM
+                                        src: img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || '',
+                                        alt: img.alt || '',
+                                        width: img.naturalWidth || img.width || 0,
+                                        height: img.naturalHeight || img.height || 0,
+                                        display: computedStyle.display,
+                                        visibility: computedStyle.visibility,
+                                        top: rect.top,  // Position top pour tri visuel
+                                        left: rect.left  // Position left pour tri visuel
+                                    };
+                                }).filter(img => {
+                                    // Garder toutes les images avec une URL valide
+                                    // Y compris celles avec display="none" et alt="preloader" si elles ont une URL de photo valide
+                                    if (!img.src) return false;
+                                    if (img.src.toLowerCase().includes('placeholder')) return false;
+                                    
+                                    // Patterns de vraies photos d'appartements
+                                    const photoPatterns = ['loueragile', 'upload_pro_ad', 'media.apimo.pro', 'studio-net.fr', 'images.century21.fr', 'biens', 'apartement', 'transopera', 'staticlbi', 'uploadcaregdc', 'uploadcare', 's3.amazonaws.com', 'googleusercontent.com', 'cdn.safti.fr', 'safti.fr', 'paruvendu.fr', 'immo-facile.com', 'mms.seloger.com', 'seloger.com'];
+                                    const hasValidPhotoPattern = photoPatterns.some(pattern => img.src.toLowerCase().includes(pattern));
+                                    
+                                    // Si c'est une vraie photo, on la garde même si cachée ou avec alt="preloader"
+                                    return hasValidPhotoPattern;
+                                });
+                            }
+                        ''')
+                        
+                        # Extraire les photos avec leur index DOM pour préserver l'ordre de Jinka
                         photos_with_position = []
-                        for img in visible_images:
+                        for img_data in img_elements:
                             try:
-                                # Vérifier que l'image n'est pas cachée
-                                display = await img.evaluate('el => window.getComputedStyle(el).display')
-                                if display == 'none':
+                                src_to_use = img_data.get('src', '')
+                                if not src_to_use:
                                     continue
                                 
-                                # Obtenir la position visuelle (top, left) pour préserver l'ordre de Jinka
-                                position = await img.evaluate('''
-                                    el => {
-                                        const rect = el.getBoundingClientRect();
-                                        return { top: rect.top, left: rect.left };
-                                    }
-                                ''')
-                                
-                                # Obtenir aussi l'index DOM pour ordre de fallback
-                                dom_index = await img.evaluate('''
-                                    el => {
-                                        const allImgs = document.querySelectorAll('img');
-                                        return Array.from(allImgs).indexOf(el);
-                                    }
-                                ''')
+                                # Vérifier que c'est une vraie photo (pas un logo)
+                                if 'logo' in src_to_use.lower() or 'source_logos' in src_to_use.lower():
+                                    continue
                                 
                                 # Vérifier les dimensions de l'image (exclure les très petites comme les logos)
-                                width = await img.evaluate('el => el.naturalWidth || el.width || 0')
-                                height = await img.evaluate('el => el.naturalHeight || el.height || 0')
+                                width = img_data.get('width', 0)
+                                height = img_data.get('height', 0)
                                 
                                 # Les logos font généralement ~128x128px, les vraies photos sont beaucoup plus grandes
                                 # On exclut seulement les images très petites (< 200px)
@@ -167,70 +196,63 @@ class ApartmentPhotoDownloader:
                                         # Probablement un logo ou icône (ex: logo immobilier 128x128), on skip
                                         continue
                                 
-                                # Récupérer src et data-src (lazy loading)
-                                src = await img.get_attribute('src')
-                                data_src = await img.get_attribute('data-src')
-                                data_lazy = await img.get_attribute('data-lazy-src')
-                                srcset = await img.get_attribute('srcset')
+                                # Garder toutes les photos valides, même si cachées (display="none")
+                                # Les photos avec alt="preloader" dans des divs cachées sont souvent les vraies photos
                                 
-                                # Utiliser src, data-src ou extraire de srcset
-                                src_to_use = src
-                                if not src_to_use or 'placeholder' in src_to_use.lower() or 'preloader' in src_to_use.lower():
-                                    src_to_use = data_src or data_lazy
-                                
-                                # Si srcset, extraire la première URL
-                                if not src_to_use and srcset:
-                                    srcset_urls = srcset.split(',')
-                                    if srcset_urls:
-                                        src_to_use = srcset_urls[0].strip().split(' ')[0]
-                                
-                                if not src_to_use:
-                                    continue
-                                
-                                alt = await img.get_attribute('alt')
-                                
-                                # Vérifier que c'est une vraie photo (pas un logo)
-                                if 'logo' in src_to_use.lower() or 'source_logos' in src_to_use.lower() or 'preloader' in src_to_use.lower():
-                                    continue
-                                
-                                # Accepter les URLs de vraies photos d'appartements (patterns étendus)
-                                photo_patterns = ['loueragile', 'upload_pro_ad', 'media.apimo.pro', 'studio-net.fr', 'images.century21.fr', 'biens', 'apartement', 'transopera', 'staticlbi', 'uploadcaregdc', 'uploadcare', 's3.amazonaws.com', 'googleusercontent.com', 'cdn.safti.fr', 'safti.fr', 'paruvendu.fr', 'immo-facile.com', 'mms.seloger.com', 'seloger.com']
-                                if not any(pattern in src_to_use.lower() for pattern in photo_patterns):
-                                    continue
-                                
-                                # Si l'image n'est pas encore chargée, essayer de la charger
-                                if width == 0 or height == 0:
-                                    await asyncio.sleep(0.5)
-                                    width = await img.evaluate('el => el.naturalWidth || el.width || 0')
-                                    height = await img.evaluate('el => el.naturalHeight || el.height || 0')
+                                position_top = img_data.get('top', 0)
+                                position_left = img_data.get('left', 0)
+                                dom_index = img_data.get('domIndex', 0)
                                 
                                 photos_with_position.append({
                                     'url': src_to_use,
-                                    'alt': alt or 'appartement',
-                                    'selector': 'gallery_div_visible',
+                                    'alt': img_data.get('alt', 'appartement'),
+                                    'selector': 'gallery_div_all',
                                     'width': width,
                                     'height': height,
                                     'dom_index': dom_index,
-                                    'position_top': position['top'],
-                                    'position_left': position['left']
+                                    'position_top': position_top,
+                                    'position_left': position_left
                                 })
                             except Exception as e:
                                 continue
                         
-                        # Trier par position visuelle (top puis left) pour conserver l'ordre de Jinka
-                        # Cela correspond à l'ordre de lecture : de haut en bas, puis de gauche à droite
-                        photos_with_position.sort(key=lambda x: (x.get('position_top', 0), x.get('position_left', 0)))
+                        # Séparer les photos visibles (position != 0,0) des photos cachées (0,0)
+                        visible_photos = [p for p in photos_with_position if p.get('position_top', 0) != 0 or p.get('position_left', 0) != 0]
+                        hidden_photos = [p for p in photos_with_position if p.get('position_top', 0) == 0 and p.get('position_left', 0) == 0]
+                        
+                        # Trier les photos visibles par position (top puis left) pour l'ordre visuel
+                        visible_photos.sort(key=lambda x: (x.get('position_top', 0), x.get('position_left', 0)))
+                        
+                        # Trier les photos cachées par index DOM pour préserver l'ordre de Jinka
+                        hidden_photos.sort(key=lambda x: x.get('dom_index', 0))
+                        
+                        # Combiner : photos visibles d'abord, puis photos cachées dans l'ordre DOM
+                        photos_with_position = visible_photos + hidden_photos
+                        print(f"      ✅ {len(visible_photos)} photos visibles + {len(hidden_photos)} photos cachées = {len(photos_with_position)} photos au total")
                         
                         # Ajouter les photos dans l'ordre correct (ordre visuel de Jinka)
                         for photo_with_pos in photos_with_position:
                             photo = {k: v for k, v in photo_with_pos.items() if k not in ['dom_index', 'position_top', 'position_left']}
                             photos.append(photo)
-                            print(f"      📸 Photo galerie visible ({photo_with_pos['width']}x{photo_with_pos['height']}): {photo_with_pos['url'][:60]}...")
+                            visibility = "visible" if (photo_with_pos.get('position_top', 0) != 0 or photo_with_pos.get('position_left', 0) != 0) else "cachée"
+                            print(f"      📸 Photo galerie {visibility} ({photo_with_pos['width']}x{photo_with_pos['height']}): {photo_with_pos['url'][:60]}...")
                         
+                        # Ne pas break, continuer à chercher dans d'autres sélecteurs pour accumuler toutes les photos
                         if len(photos) > 0:
-                            break  # On a trouvé des photos, pas besoin d'essayer les autres sélecteurs
+                            pass
                 except Exception as e:
                     continue
+            
+            # Après avoir cherché dans toutes les galeries, dédupliquer
+            if len(photos) > 0:
+                unique_photos_temp = []
+                seen_urls_temp = set()
+                for photo in photos:
+                    if photo['url'] not in seen_urls_temp:
+                        unique_photos_temp.append(photo)
+                        seen_urls_temp.add(photo['url'])
+                photos = unique_photos_temp
+                print(f"      ✅ {len(photos)} photos uniques trouvées après déduplication")
             
             # Méthode 2: Si pas de photos dans la galerie, chercher les images visibles avec URLs d'appartement
             if not photos:
@@ -317,7 +339,19 @@ class ApartmentPhotoDownloader:
             print(f"   📥 Téléchargement de {len(photos)} photos...")
             
             # Créer le dossier
-            os.makedirs(f"data/photos/{apartment_id}", exist_ok=True)
+            photos_dir = f"data/photos/{apartment_id}"
+            os.makedirs(photos_dir, exist_ok=True)
+            
+            # Supprimer toutes les photos existantes
+            if os.path.exists(photos_dir):
+                existing_files = [f for f in os.listdir(photos_dir) if f.endswith(('.jpg', '.jpeg', '.png'))]
+                for existing_file in existing_files:
+                    file_path = os.path.join(photos_dir, existing_file)
+                    try:
+                        os.remove(file_path)
+                        print(f"      🗑️ Photo existante supprimée: {existing_file}")
+                    except Exception as e:
+                        print(f"      ⚠️ Erreur suppression {existing_file}: {e}")
             
             downloaded_photos = []
             for i, photo in enumerate(photos):
@@ -327,8 +361,9 @@ class ApartmentPhotoDownloader:
                     # Télécharger l'image
                     response = requests.get(photo['url'], timeout=30)
                     if response.status_code == 200:
-                        # Nom du fichier avec numérotation simple (photo_1.jpg, photo_2.jpg, etc.)
-                        filename = f"data/photos/{apartment_id}/photo_{i+1}.jpg"
+                        # Nom du fichier avec format simple: photo1.jpg, photo2.jpg, etc.
+                        photo_number = len(downloaded_photos) + 1
+                        filename = f"{photos_dir}/photo{photo_number}.jpg"
                         
                         # Sauvegarder
                         with open(filename, 'wb') as f:
@@ -342,7 +377,7 @@ class ApartmentPhotoDownloader:
                             'selector': photo['selector']
                         })
                         
-                        print(f"      ✅ Photo {i+1} sauvegardée: {filename} ({len(response.content)} bytes)")
+                        print(f"      ✅ Photo {photo_number} sauvegardée: {filename} ({len(response.content)} bytes)")
                     else:
                         print(f"      ❌ Erreur téléchargement photo {i+1}: {response.status_code}")
                         

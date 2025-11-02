@@ -54,3 +54,8 @@ test-results/
 
 # Watch cache
 .watch_scorecard_cache.txt
+frontend/node_modules/
+frontend/.vite/
+__pycache__/
+*.pyc
+.watch_scorecard_cache.txt

@@ -189,13 +189,88 @@ def score_prix(apartment, config):
 
 
 def score_style(apartment, config):
-    """Score style depuis style_analysis (IA images) + analyse texte - Ancien (20pts) / Atypique (10pts) / Neuf (0pts)"""
+    """Score style avec validation croisée texte + photos
+    Utilise analyze_apartment_photos_from_data() qui combine texte + photos
+    Ancien (20pts) / Atypique (10pts) / Neuf (0pts)
+    """
     tier_config = config['axes']['style']['tiers']
+    
+    # Essayer d'abord avec style_analysis existant (peut contenir validation croisée)
     style_analysis = apartment.get('style_analysis', {})
     style_data = style_analysis.get('style', {})
     style_type = style_data.get('type', '').lower()
     
-    # Analyser le texte pour détecter "Atypique" (loft, atypique, unique, original, ancien entrepôt, etc.)
+    # Si style_analysis existe et contient des données enrichies, l'utiliser
+    if style_data and style_type:
+        # Tier1: Ancien (Haussmannien) = 20 pts
+        tier1_styles = [s.lower() for s in tier_config['tier1']['styles']]
+        if style_type in tier1_styles or 'haussmann' in style_type:
+            return {
+                'score': tier_config['tier1']['score'],
+                'tier': 'tier1',
+                'justification': style_data.get('justification', f"Style ancien: {style_type}"),
+                'details': style_data.get('details', {})
+            }
+        
+        # Tier2: Atypique = 10 pts
+        if 'atypique' in style_type or 'loft' in style_type:
+            return {
+                'score': tier_config['tier2']['score'],
+                'tier': 'tier2',
+                'justification': style_data.get('justification', f"Style atypique: {style_type}"),
+                'details': style_data.get('details', {})
+            }
+        
+        # Tier3: Neuf = 0 pts
+        return {
+            'score': tier_config['tier3']['score'],
+            'tier': 'tier3',
+            'justification': style_data.get('justification', f"Style neuf: {style_type}"),
+            'details': style_data.get('details', {})
+        }
+    
+    # Si pas de style_analysis, essayer de le générer avec validation croisée
+    try:
+        from analyze_apartment_style import ApartmentStyleAnalyzer
+        style_analyzer = ApartmentStyleAnalyzer()
+        style_analysis = style_analyzer.analyze_apartment_photos_from_data(apartment)
+        
+        if style_analysis:
+            style_data = style_analysis.get('style', {})
+            style_type = style_data.get('type', '').lower()
+            
+            if style_type:
+                # Tier1: Ancien (Haussmannien) = 20 pts
+                tier1_styles = [s.lower() for s in tier_config['tier1']['styles']]
+                if style_type in tier1_styles or 'haussmann' in style_type:
+                    return {
+                        'score': tier_config['tier1']['score'],
+                        'tier': 'tier1',
+                        'justification': style_data.get('justification', f"Style ancien: {style_type}"),
+                        'details': style_data.get('details', {})
+                    }
+                
+                # Tier2: Atypique = 10 pts
+                if 'atypique' in style_type or 'loft' in style_type:
+                    return {
+                        'score': tier_config['tier2']['score'],
+                        'tier': 'tier2',
+                        'justification': style_data.get('justification', f"Style atypique: {style_type}"),
+                        'details': style_data.get('details', {})
+                    }
+                
+                # Tier3: Neuf = 0 pts
+                return {
+                    'score': tier_config['tier3']['score'],
+                    'tier': 'tier3',
+                    'justification': style_data.get('justification', f"Style neuf: {style_type}"),
+                    'details': style_data.get('details', {})
+                }
+    except Exception as e:
+        # Fallback sur méthode ancienne si erreur
+        pass
+    
+    # Fallback: méthode ancienne avec analyse texte seule
     description = apartment.get('description', '').lower()
     caracteristiques = apartment.get('caracteristiques', '').lower()
     titre = apartment.get('titre', '').lower()
@@ -227,42 +302,103 @@ def score_style(apartment, config):
     
     is_atypique = is_atypique_direct or is_atypique_concept
     
+    # Vérifier haussmannien dans le texte
+    is_haussmannien = 'haussmann' in text_combined
+    
     # Tier1: Ancien (Haussmannien) = 20 pts
-    tier1_styles = [s.lower() for s in tier_config['tier1']['styles']]
-    if style_type in tier1_styles or 'haussmann' in style_type:
+    if is_haussmannien:
         return {
             'score': tier_config['tier1']['score'],
             'tier': 'tier1',
-            'justification': f"Style ancien: {style_type}"
+            'justification': "Style haussmannien détecté dans le texte"
         }
     
-    # Tier2: Atypique (détecté depuis texte: loft, atypique, unique, original) = 10 pts
-    if is_atypique or 'loft' in style_type or 'atypique' in style_type:
+    # Tier2: Atypique = 10 pts
+    if is_atypique:
         return {
             'score': tier_config['tier2']['score'],
             'tier': 'tier2',
             'justification': f"Style atypique détecté (loft/atypique/unique/original)"
         }
     
-    # Tout le reste = Neuf (0 pts): moderne, contemporain, récent, 70s, 60s, années 20-40, etc.
+    # Tout le reste = Neuf (0 pts)
     return {
         'score': tier_config['tier3']['score'],
         'tier': 'tier3',
-        'justification': f"Style neuf: {style_type}"
+        'justification': "Style neuf (par défaut)"
     }
 
 
 def score_ensoleillement(apartment, config):
-    """Score ensoleillement depuis style_analysis.luminosite + exposition
+    """Score ensoleillement avec validation croisée texte + photos
+    Utilise extract_exposition_complete() pour analyse enrichie
     Barème: Lumineux = 20 pts, Moyenne = 10 pts, Sombre = 0 pts
     """
     tier_config = config['axes']['ensoleillement']['tiers']
+    
+    # Utiliser la nouvelle méthode avec validation croisée
+    try:
+        from extract_exposition import ExpositionExtractor
+        extractor = ExpositionExtractor()
+        
+        description = apartment.get('description', '')
+        caracteristiques = apartment.get('caracteristiques', '')
+        etage = apartment.get('etage', '')
+        photos = apartment.get('photos', [])
+        
+        # Extraire les URLs des photos si liste de dicts
+        photos_urls = []
+        if photos:
+            for photo in photos:
+                if isinstance(photo, dict):
+                    photos_urls.append(photo.get('url', ''))
+                elif isinstance(photo, str):
+                    photos_urls.append(photo)
+        
+        exposition_result = extractor.extract_exposition_complete(
+            description, caracteristiques, photos_urls, etage
+        )
+        
+        exposition_dir_raw = exposition_result.get('exposition') or ''
+        exposition_dir = exposition_dir_raw.lower() if exposition_dir_raw else ''
+        exposition_score = exposition_result.get('score', 0)
+        exposition_tier = exposition_result.get('tier', 'tier3')
+        
+        # Convertir score exposition (0-10) vers score ensoleillement (0-20)
+        # Score 10 = tier1 = 20pts, Score 7 = tier2 = 10pts, Score <7 = tier3 = 0pts
+        if exposition_score >= 10 or exposition_tier == 'tier1':
+            return {
+                'score': tier_config['tier1']['score'],
+                'tier': 'tier1',
+                'justification': exposition_result.get('justification', f"Exposition {exposition_dir}"),
+                'details': exposition_result.get('details', {})
+            }
+        elif exposition_score >= 7 or exposition_tier == 'tier2':
+            return {
+                'score': tier_config['tier2']['score'],
+                'tier': 'tier2',
+                'justification': exposition_result.get('justification', f"Exposition {exposition_dir}"),
+                'details': exposition_result.get('details', {})
+            }
+        else:
+            return {
+                'score': tier_config['tier3']['score'],
+                'tier': 'tier3',
+                'justification': exposition_result.get('justification', f"Exposition {exposition_dir}"),
+                'details': exposition_result.get('details', {})
+            }
+    except Exception as e:
+        # Fallback sur méthode ancienne si erreur
+        pass
+    
+    # Fallback: méthode ancienne
     style_analysis = apartment.get('style_analysis', {})
     luminosite_data = style_analysis.get('luminosite', {})
-    luminosite_type = luminosite_data.get('type', '').lower()
+    luminosite_type = (luminosite_data.get('type') or '').lower()
     
     exposition = apartment.get('exposition', {})
-    exposition_dir = exposition.get('exposition', '').lower()
+    exposition_dir_raw = exposition.get('exposition') or ''
+    exposition_dir = exposition_dir_raw.lower() if exposition_dir_raw else ''
     
     # Tier1: Lumineux = 20 pts
     # Détecter "lumineux", "excellente", "excellent"
@@ -417,28 +553,74 @@ def score_surface(apartment, config):
 
 
 def score_cuisine(apartment, config):
-    """Score cuisine depuis style_analysis.cuisine (IA images)
-    Simplifié: Ouverte (10pts) ou Fermée (0pts)
-    """
+    """Score cuisine avec validation croisée texte + photos"""
     tier_config = config['axes']['cuisine']['tiers']
-    style_analysis = apartment.get('style_analysis', {})
-    cuisine_data = style_analysis.get('cuisine', {})
-    cuisine_ouverte = cuisine_data.get('ouverte', False)
     
-    # tier1: ouverte uniquement (10pts)
-    if cuisine_ouverte:
+    try:
+        from extract_cuisine_text import CuisineTextExtractor
+        extractor = CuisineTextExtractor()
+        
+        description = apartment.get('description', '')
+        caracteristiques = apartment.get('caracteristiques', '')
+        photos = apartment.get('photos', [])
+        
+        # Extraire les URLs des photos si liste de dicts
+        photos_urls = []
+        if photos:
+            for photo in photos:
+                if isinstance(photo, dict):
+                    photos_urls.append(photo.get('url', ''))
+                elif isinstance(photo, str):
+                    photos_urls.append(photo)
+        
+        cuisine_result = extractor.extract_cuisine_complete(
+            description, caracteristiques, photos_urls
+        )
+        
+        cuisine_ouverte = cuisine_result.get('ouverte', False)
+        
+        # tier1: ouverte uniquement (10pts)
+        if cuisine_ouverte:
+            return {
+                'score': tier_config['tier1']['score'],
+                'tier': 'tier1',
+                'justification': cuisine_result.get('justification', "Cuisine ouverte"),
+                'details': {
+                    'confidence': cuisine_result.get('confidence', 0),
+                    'photo_validation': cuisine_result.get('photo_validation'),
+                    'validation_status': cuisine_result.get('validation_status')
+                }
+            }
+        
+        # tier3: fermée ou ambigu (0pts)
         return {
-            'score': tier_config['tier1']['score'],
-            'tier': 'tier1',
-            'justification': "Cuisine ouverte"
+            'score': tier_config['tier3']['score'],
+            'tier': 'tier3',
+            'justification': cuisine_result.get('justification', "Cuisine fermée"),
+            'details': {
+                'confidence': cuisine_result.get('confidence', 0),
+                'photo_validation': cuisine_result.get('photo_validation'),
+                'validation_status': cuisine_result.get('validation_status')
+            }
         }
-    
-    # tier3: fermée (0pts)
-    return {
-        'score': tier_config['tier3']['score'],
-        'tier': 'tier3',
-        'justification': "Cuisine fermée"
-    }
+    except Exception as e:
+        # Fallback sur méthode ancienne si erreur
+        style_analysis = apartment.get('style_analysis', {})
+        cuisine_data = style_analysis.get('cuisine', {})
+        cuisine_ouverte = cuisine_data.get('ouverte', False)
+        
+        if cuisine_ouverte:
+            return {
+                'score': tier_config['tier1']['score'],
+                'tier': 'tier1',
+                'justification': "Cuisine ouverte"
+            }
+        
+        return {
+            'score': tier_config['tier3']['score'],
+            'tier': 'tier3',
+            'justification': "Cuisine fermée"
+        }
 
 
 def calculate_bonus_malus(apartment, config):
@@ -477,27 +659,66 @@ def calculate_bonus_malus(apartment, config):
 
 
 def score_baignoire(apartment, config):
-    """Score baignoire depuis analyse texte/IA"""
-    # Utiliser criteria/baignoire pour obtenir les données
-    from criteria.baignoire import format_baignoire
-    
-    formatted = format_baignoire(apartment)
-    has_baignoire = formatted.get('main_value') == 'Oui'
-    
-    # tier1: baignoire présente = 10pts (good)
-    if has_baignoire:
+    """Score baignoire avec validation croisée texte + photos"""
+    try:
+        from extract_baignoire import BaignoireExtractor
+        extractor = BaignoireExtractor()
+        
+        description = apartment.get('description', '')
+        caracteristiques = apartment.get('caracteristiques', '')
+        photos = apartment.get('photos', [])
+        
+        # Extraire les URLs des photos si liste de dicts
+        photos_urls = []
+        if photos:
+            for photo in photos:
+                if isinstance(photo, dict):
+                    photos_urls.append(photo.get('url', ''))
+                elif isinstance(photo, str):
+                    photos_urls.append(photo)
+        
+        baignoire_result = extractor.extract_baignoire_complete(
+            description, caracteristiques, photos_urls
+        )
+        
+        has_baignoire = baignoire_result.get('has_baignoire', False)
+        score_baignoire_val = baignoire_result.get('score', 0)
+        tier_baignoire = baignoire_result.get('tier', 'tier3')
+        
+        # tier1: baignoire présente = 10pts (good)
+        if has_baignoire:
+            return {
+                'score': 10,
+                'tier': 'tier1',
+                'justification': baignoire_result.get('justification', 'Baignoire détectée'),
+                'details': baignoire_result.get('details', {})
+            }
+        
+        # tier3: pas de baignoire = 0pts
         return {
-            'score': 10,
-            'tier': 'tier1',
-            'justification': 'Baignoire détectée'
+            'score': 0,
+            'tier': 'tier3',
+            'justification': baignoire_result.get('justification', 'Pas de baignoire détectée'),
+            'details': baignoire_result.get('details', {})
         }
-    
-    # tier3: pas de baignoire = 0pts
-    return {
-        'score': 0,
-        'tier': 'tier3',
-        'justification': 'Pas de baignoire détectée'
-    }
+    except Exception as e:
+        # Fallback sur méthode ancienne si erreur
+        from criteria.baignoire import format_baignoire
+        formatted = format_baignoire(apartment)
+        has_baignoire = formatted.get('main_value') == 'Oui'
+        
+        if has_baignoire:
+            return {
+                'score': 10,
+                'tier': 'tier1',
+                'justification': 'Baignoire détectée'
+            }
+        
+        return {
+            'score': 0,
+            'tier': 'tier3',
+            'justification': 'Pas de baignoire détectée'
+        }
 
 
 def score_apartment(apartment, config):

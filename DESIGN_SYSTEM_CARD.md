@@ -337,26 +337,33 @@ Documentation complète de tous les détails d'UI d'une card de scorecard d'appa
 ## 📐 Grille et Layout
 
 ### Container Global (`.container`)
-- **Max-width** : `1200px`
-- **Margin** : `0 auto` (centré)
-- **Padding** : `20px`
+- **Width** : `100%` (pleine largeur)
+- **Margin** : `0`
+- **Padding** : `30px` (haut, bas, gauche, droite)
+
+### Body
+- **Margin** : `0`
+- **Padding** : `0`
+- **Background** : `#f8f9fa`
 
 ### Grille Appartements (`.apartments-grid`)
 - **Display** : `grid`
 - **Grid-template-columns** : `repeat(3, 1fr)` (3 colonnes par défaut)
 - **Gap** : `30px`
-- **Margin** : `20px 0`
+- **Margin** : `0`
+- **Padding** : `0`
+- **Width** : `100%`
 
 ### Media Queries
 
-#### ≤ 1400px
+#### > 1000px
+- **Grid-template-columns** : `repeat(3, 1fr)` (3 colonnes)
+
+#### ≤ 1000px
 - **Grid-template-columns** : `repeat(2, 1fr)` (2 colonnes)
 
-#### ≤ 900px
+#### ≤ 600px
 - **Grid-template-columns** : `1fr` (1 colonne)
-
-#### ≤ 768px
-- **Gap** : `20px`
 - **Apartment-title font-size** : `1.1em` (responsive)
 
 ---
@@ -432,7 +439,7 @@ font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI
 - **Détails → Sous-détails** : `2px`
 
 ### Gaps
-- **Grille appartements** : `30px` (desktop), `20px` (mobile)
+- **Grille appartements** : `30px` (tous les breakpoints)
 - **Header critère** : `12px` (entre nom et badge)
 - **Carousel dots** : `6px`
 
@@ -456,10 +463,9 @@ font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI
 
 | Breakpoint | Colonnes | Gap | Notes |
 |------------|----------|-----|-------|
-| > 1400px | 3 | 30px | Desktop large |
-| ≤ 1400px | 2 | 30px | Desktop |
-| ≤ 900px | 1 | 30px | Tablet |
-| ≤ 768px | 1 | 20px | Mobile (titre réduit) |
+| > 1000px | 3 | 30px | Desktop large |
+| ≤ 1000px | 2 | 30px | Desktop |
+| ≤ 600px | 1 | 30px | Mobile (titre réduit) |
 
 ---
 
@@ -516,6 +522,10 @@ font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI
 - **2024-XX-XX** : Éclaircissement badge confiance de 40%
 - **2024-XX-XX** : Changement noms critères de majuscules à capitalisation normale
 - **2024-XX-XX** : Ajout `text-transform: none !important` sur nom critère
+- **2024-XX-XX** : Container mis à jour : width 100%, padding 30px (au lieu de max-width 1200px et padding 20px)
+- **2024-XX-XX** : Body avec margin 0 et padding 0 pour supprimer les espacements par défaut
+- **2024-XX-XX** : Breakpoints mis à jour : 3 colonnes jusqu'à 1000px (au lieu de 1400px), 2 colonnes jusqu'à 600px (au lieu de 900px)
+- **2024-XX-XX** : Gap uniforme de 30px sur tous les breakpoints (plus de réduction à 20px sur mobile)
 
 ---
 

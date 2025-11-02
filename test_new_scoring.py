@@ -101,7 +101,7 @@ def test_new_scoring_system():
             pass
     
     if prix_m2 > 0:
-        if prix_m2 < 9000:
+        if prix_m2 < 9500:
             score_prix = 20
             tier = "TIER 1 - GOOD"
         elif prix_m2 <= 11000:

@@ -1,0 +1,147 @@
+.scorecard {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.scorecard:hover {
+    box-shadow: 0 6px 16px rgba(0,0,0,0.15);
+    transform: translateY(-2px);
+}
+
+.apartment-info {
+    padding: 24px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.apartment-title {
+    font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 20px;
+    font-weight: 500;
+    color: #212529;
+    margin-bottom: 4px;
+    line-height: 1.2;
+}
+
+.apartment-subtitle {
+    font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 14px;
+    font-weight: 400;
+    color: #6c757d;
+    margin-bottom: 24px;
+}
+
+.criterion {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.criterion:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+    margin-bottom: 0;
+}
+
+.criterion-content {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.criterion-name {
+    font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 16px;
+    font-weight: 500;
+    color: #212529;
+    margin-bottom: 0;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    text-transform: none !important;
+}
+
+.criterion-details {
+    font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 13px;
+    font-weight: 400;
+    color: #212529;
+    margin-top: 4px;
+}
+
+.criterion-details .tier-label {
+    font-weight: 600;
+}
+
+.criterion-details .tier-label.good {
+    color: #00966D !important;
+}
+
+.criterion-details .tier-label.moyen {
+    color: #F59E0B !important;
+}
+
+.criterion-details .tier-label.bad {
+    color: #F85457 !important;
+}
+
+.criterion-score-badge {
+    font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 4px 12px;
+    border-radius: 9999px;
+    text-align: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    height: fit-content;
+    line-height: 1.2;
+    align-self: center;
+    white-space: nowrap;
+}
+
+.criterion-score-badge.green {
+    color: #00966D;
+    background: rgba(0, 150, 109, 0.1);
+}
+
+.criterion-score-badge.yellow {
+    color: #F59E0B;
+    background: rgba(245, 158, 11, 0.1);
+}
+
+.criterion-score-badge.red {
+    color: #F85457;
+    background: rgba(248, 84, 87, 0.1);
+}
+
+.confidence-badge {
+    font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 10px;
+    font-weight: 500;
+    color: rgba(0, 0, 0, 0.3);
+    background: rgba(0, 0, 0, 0.06);
+    padding: 0 8px;
+    height: 18px;
+    line-height: 18px;
+    border-radius: 9999px;
+    margin-left: 4px;
+    display: inline-block;
+}
+

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Script pour re-télécharger toutes les photos depuis all_apartments_scores.json
-avec numérotation correcte (photo_1.jpg, photo_2.jpg, etc.)
+Retélécharge toutes les photos pour tous les appartements avec le nouveau système
 """
 
 import asyncio
@@ -9,110 +8,107 @@ import json
 import os
 from download_apartment_photos import ApartmentPhotoDownloader
 
-def load_apartments():
-    """Charge tous les appartements depuis all_apartments_scores.json"""
-    try:
-        with open('data/scores/all_apartments_scores.json', 'r', encoding='utf-8') as f:
-            apartments = json.load(f)
-        return apartments
-    except FileNotFoundError:
-        print("❌ Fichier data/scores/all_apartments_scores.json non trouvé")
-        return []
-    except Exception as e:
-        print(f"❌ Erreur lors du chargement: {e}")
-        return []
-
-def get_apartment_url(apartment):
-    """Extrait l'URL de l'appartement depuis les données"""
-    # Essayer différentes sources pour l'URL
-    url = apartment.get('url', '')
+def get_all_apartment_urls():
+    """Récupère toutes les URLs d'appartements depuis scores.json ou data/appartements"""
+    apartment_urls = []
     
-    # Si pas d'URL directe, construire depuis l'ID
-    if not url and apartment.get('id'):
-        apartment_id = apartment.get('id')
-        # Construire l'URL Jinka standard
-        url = f"https://www.jinka.fr/alert_result?token=26c2ec3064303aa68ffa43f7c6518733&ad={apartment_id}&from=dashboard_card&from_alert_filter=all&from_alert_page=1"
+    # Méthode 1: Depuis scores.json
+    if os.path.exists('data/scores.json'):
+        try:
+            with open('data/scores.json', 'r', encoding='utf-8') as f:
+                apartments = json.load(f)
+            
+            base_url = "https://www.jinka.fr/alert_result?token=26c2ec3064303aa68ffa43f7c6518733&ad={}&from=dashboard_card&from_alert_filter=all&from_alert_page=1"
+            
+            for apt in apartments:
+                apt_id = apt.get('id')
+                apt_url = apt.get('url')
+                
+                if apt_url:
+                    apartment_urls.append(apt_url)
+                elif apt_id:
+                    apartment_urls.append(base_url.format(apt_id))
+            
+            print(f"✅ {len(apartment_urls)} URLs trouvées depuis scores.json")
+        except Exception as e:
+            print(f"⚠️ Erreur lecture scores.json: {e}")
     
-    return url
+    # Méthode 2: Depuis data/appartements/*.json
+    if not apartment_urls and os.path.exists('data/appartements'):
+        try:
+            base_url = "https://www.jinka.fr/alert_result?token=26c2ec3064303aa68ffa43f7c6518733&ad={}&from=dashboard_card&from_alert_filter=all&from_alert_page=1"
+            
+            for filename in os.listdir('data/appartements'):
+                if filename.endswith('.json'):
+                    apt_id = filename.replace('.json', '')
+                    apartment_urls.append(base_url.format(apt_id))
+            
+            print(f"✅ {len(apartment_urls)} URLs trouvées depuis data/appartements/")
+        except Exception as e:
+            print(f"⚠️ Erreur lecture data/appartements: {e}")
+    
+    return apartment_urls
 
-async def redownload_all_photos():
-    """Re-télécharge toutes les photos pour tous les appartements"""
-    print("🚀 RE-TÉLÉCHARGEMENT DE TOUTES LES PHOTOS")
+async def main():
+    """Fonction principale"""
+    print("🚀 RETÉLÉCHARGEMENT DE TOUTES LES PHOTOS")
     print("=" * 60)
     
-    # Charger les appartements
-    apartments = load_apartments()
-    if not apartments:
-        print("❌ Aucun appartement trouvé")
+    # Récupérer toutes les URLs
+    apartment_urls = get_all_apartment_urls()
+    
+    if not apartment_urls:
+        print("❌ Aucune URL d'appartement trouvée")
         return
     
-    print(f"📊 {len(apartments)} appartements trouvés\n")
+    print(f"📊 {len(apartment_urls)} appartements à traiter")
+    print(f"📸 Nouveau système: extraction de TOUTES les photos (visibles + cachées)")
+    print(f"💾 Nommage: photo1.jpg, photo2.jpg, etc.")
+    print(f"🗑️ Suppression automatique des anciennes photos")
+    print()
     
-    # Initialiser le téléchargeur
     downloader = ApartmentPhotoDownloader()
     
     try:
         await downloader.setup()
         
         results = []
-        successful = 0
-        failed = 0
         total_photos = 0
         
-        for i, apartment in enumerate(apartments, 1):
-            apartment_id = apartment.get('id', 'unknown')
-            url = get_apartment_url(apartment)
+        for i, url in enumerate(apartment_urls, 1):
+            print(f"\n{'='*60}")
+            print(f"🏠 Appartement {i}/{len(apartment_urls)}")
+            print(f"{'='*60}")
             
-            if not url:
-                print(f"\n⏭️  Appartement {i}/{len(apartments)} - ID: {apartment_id}")
-                print(f"   ❌ Pas d'URL disponible, ignoré")
-                failed += 1
-                continue
+            result = await downloader.process_apartment(url)
+            if result:
+                results.append(result)
+                total_photos += result['downloaded_photos']
+                print(f"✅ {result['downloaded_photos']} photos téléchargées")
+            else:
+                print(f"❌ Échec du traitement")
             
-            print(f"\n🏠 Appartement {i}/{len(apartments)} - ID: {apartment_id}")
-            print(f"   🔗 URL: {url[:80]}...")
-            
-            try:
-                # Traiter l'appartement (extraction + téléchargement)
-                result = await downloader.process_apartment(url)
-                
-                if result:
-                    photos_count = result.get('downloaded_photos', 0)
-                    total_photos += photos_count
-                    successful += 1
-                    results.append(result)
-                    print(f"   ✅ {photos_count} photos téléchargées")
-                else:
-                    failed += 1
-                    print(f"   ❌ Aucune photo téléchargée")
-                    
-            except Exception as e:
-                failed += 1
-                print(f"   ❌ Erreur: {e}")
-            
-            # Pause entre les appartements pour éviter la surcharge
-            if i < len(apartments):
+            # Pause entre les appartements
+            if i < len(apartment_urls):
                 await asyncio.sleep(2)
         
         # Résumé final
-        print(f"\n" + "=" * 60)
-        print(f"🎉 RE-TÉLÉCHARGEMENT TERMINÉ !")
-        print(f"   ✅ Appartements réussis: {successful}")
-        print(f"   ❌ Appartements échoués: {failed}")
-        print(f"   📸 Total photos téléchargées: {total_photos}")
-        print(f"   📊 Moyenne: {total_photos / successful if successful > 0 else 0:.1f} photos/appartement")
+        print(f"\n{'='*60}")
+        print(f"🎉 RETÉLÉCHARGEMENT TERMINÉ !")
+        print(f"{'='*60}")
+        print(f"✅ {len(results)} appartements traités avec succès")
+        print(f"📸 {total_photos} photos téléchargées au total")
         
-        # Afficher le détail par appartement
-        if results:
+        if len(results) > 0:
+            avg_photos = total_photos / len(results)
+            print(f"📊 Moyenne: {avg_photos:.2f} photos/appartement")
+            
             print(f"\n📋 DÉTAIL PAR APPARTEMENT:")
             for result in results:
-                apt_id = result.get('apartment_id', 'unknown')
-                photos_count = result.get('downloaded_photos', 0)
-                print(f"   🏠 {apt_id}: {photos_count} photos")
-        
+                print(f"   🏠 {result['apartment_id']}: {result['downloaded_photos']} photos")
+    
     finally:
         await downloader.close()
 
 if __name__ == "__main__":
-    asyncio.run(redownload_all_photos())
-
+    asyncio.run(main())
