@@ -9,6 +9,9 @@ import json
 import os
 import requests
 from typing import Dict, List, Optional
+from io import BytesIO
+from PIL import Image
+import numpy as np
 from dotenv import load_dotenv
 from cache_api import get_cache
 
@@ -63,6 +66,15 @@ class PhotoAnalyzer:
         # Vérifier le cache d'abord
         cached_result = self.cache.get('exposition_photo', photo_url)
         if cached_result:
+            # Si le cache n'a pas brightness_value, le calculer maintenant
+            if cached_result.get('brightness_value') is None:
+                try:
+                    response = requests.get(photo_url, timeout=5)
+                    if response.status_code == 200:
+                        brightness = self._calculate_photo_brightness(response.content)
+                        cached_result['brightness_value'] = brightness
+                except:
+                    pass
             return cached_result
         
         try:
@@ -72,8 +84,11 @@ class PhotoAnalyzer:
                 print(f"   ❌ Erreur téléchargement: {response.status_code}")
                 return None
             
+            # Sauvegarder le contenu pour calcul brightness
+            image_content = response.content
+            
             # Encoder en base64
-            image_base64 = base64.b64encode(response.content).decode('utf-8')
+            image_base64 = base64.b64encode(image_content).decode('utf-8')
             
             # Appel à OpenAI Vision
             headers = {
@@ -89,31 +104,19 @@ class PhotoAnalyzer:
                         'content': [
                             {
                                 'type': 'text',
-                                'text': """Analyse cette photo d'appartement et détermine l'exposition et les caractéristiques de luminosité.
+                                'text': """Analyse cette photo d'appartement pour déterminer la luminosité relative.
 
-Critères d'analyse détaillés:
-1. Orientation des fenêtres (Sud, Sud-Ouest, Ouest, Est, Nord, Nord-Est) - basé sur position du soleil, ombres
-2. Luminosité relative par rapport à la moyenne parisienne (très_lumineux, lumineux, moyen, faible)
-3. Nombre de fenêtres visibles dans la pièce principale (nb_fenetres: nombre entier)
-4. Taille des fenêtres (grandes, moyennes, petites)
-5. Vis-à-vis (aucun, leger, important, obstrué)
-6. Vue dégagée (true/false)
-7. Balcon/Terrasse visible (true/false)
-8. Taille du balcon si visible (grand, moyen, petit, aucun)
+## TÂCHE PRINCIPALE : Évaluer la luminosité globale de la photo
+
+### INDICES À DÉTECTER :
+
+- Luminosité relative (très_lumineux, lumineux, moyen, faible)
+- Balcon/Terrasse visible (optionnel)
 
 Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
 {
-    "exposition": "sud|sud_ouest|ouest|est|nord|nord_est|null",
     "luminosite_relative": "tres_lumineux|lumineux|moyen|faible",
-    "nb_fenetres": nombre_entier,
-    "taille_fenetres": "grandes|moyennes|petites",
-    "vis_a_vis": "aucun|leger|important|obstrué",
-    "vue_degagee": true|false,
-    "balcon_visible": true|false,
-    "taille_balcon": "grand|moyen|petit|aucun",
     "score_luminosite": 0-10,
-    "score_fenetres": 0-10,
-    "score_vue": 0-10,
     "confidence": 0.0-1.0,
     "details": "description détaillée de ce que tu vois"
 }"""
@@ -127,7 +130,7 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
                         ]
                     }
                 ],
-                'max_tokens': 500
+                'max_tokens': 800  # Augmenté pour les indices précis détaillés
             }
             
             response = requests.post(
@@ -146,8 +149,19 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
             
             # Parser le JSON
             try:
+                # Nettoyer le contenu (enlever les blocs markdown)
+                if '```json' in content:
+                    content = content.split('```json')[1].split('```')[0].strip()
+                elif '```' in content:
+                    content = content.split('```')[1].split('```')[0].strip()
+                
                 analysis = json.loads(content)
-                print(f"   ✅ Photo analysée: {analysis.get('exposition', 'N/A')}")
+                
+                # Calculer la luminosité moyenne de la photo
+                brightness = self._calculate_photo_brightness(image_content)
+                analysis['brightness_value'] = brightness
+                
+                print(f"   ✅ Photo analysée: luminosité {analysis.get('luminosite_relative', 'N/A')} (brightness: {brightness:.2f})")
                 
                 # Mettre en cache avant de retourner
                 self.cache.set('exposition_photo', photo_url, analysis)
@@ -167,16 +181,56 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
             print(f"   ❌ Erreur analyse photo: {e}")
             return None
     
+    def _calculate_photo_brightness(self, image_data: bytes) -> float:
+        """Calcule la luminosité moyenne d'une photo (0.0 = sombre, 1.0 = très lumineux)"""
+        try:
+            # Vérifier que ce sont bien des bytes
+            if not isinstance(image_data, bytes):
+                return 0.5
+            
+            # Ouvrir l'image depuis les bytes
+            image_bytes_io = BytesIO(image_data)
+            image = Image.open(image_bytes_io)
+            
+            # Convertir en RGB si nécessaire
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            
+            # Redimensionner si trop grande (pour performance)
+            max_size = 1000
+            if image.size[0] > max_size or image.size[1] > max_size:
+                image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+            
+            # Convertir en numpy array
+            img_array = np.array(image)
+            
+            # Vérifier les dimensions
+            if len(img_array.shape) != 3 or img_array.shape[2] != 3:
+                return 0.5
+            
+            # Calculer la luminance moyenne (formule standard: 0.299*R + 0.587*G + 0.114*B)
+            # Normaliser entre 0 et 1
+            luminance = (0.299 * img_array[:, :, 0] + 
+                        0.587 * img_array[:, :, 1] + 
+                        0.114 * img_array[:, :, 2]) / 255.0
+            
+            # Moyenne de la luminance
+            brightness = float(np.mean(luminance))
+            
+            return brightness
+        except Exception as e:
+            print(f"   ⚠️ Erreur calcul brightness: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0.5  # Valeur par défaut si erreur
+    
     def _aggregate_photo_results(self, results: List[Dict]) -> Dict:
-        """Agrège les résultats de plusieurs photos avec score relatif pondéré
+        """Agrège les résultats de plusieurs photos avec luminosité moyenne
         
-        Calcul selon CHANGELOG:
-        Score total = (
-            exposition_score * 0.3 +      # 30% exposition pure
-            luminosite_score * 0.3 +       # 30% luminosité relative
-            fenetres_score * 0.2 +         # 20% nombre/taille fenêtres
-            vue_score * 0.2                # 20% vis-à-vis/dégagement
-        ) + balcon_bonus                    # Bonus balcon
+        NOUVELLE LOGIQUE:
+        - Calcule la luminosité moyenne des photos (brightness)
+        - Utilise la luminosité IA si disponible, sinon utilise brightness_value
+        - Score basé sur luminosité moyenne
         """
         if not results:
             return {
@@ -188,25 +242,26 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
                 'details': {}
             }
         
-        # Compter les expositions
-        expositions = [r.get('exposition') for r in results if r.get('exposition')]
+        # Calculer la luminosité moyenne des photos
+        brightness_values = [r.get('brightness_value') for r in results if r.get('brightness_value') is not None]
+        avg_brightness = sum(brightness_values) / len(brightness_values) if brightness_values else 0.5
         
-        # Déterminer l'exposition la plus fréquente
-        if expositions:
-            exposition_counts = {}
-            for expo in expositions:
-                exposition_counts[expo] = exposition_counts.get(expo, 0) + 1
-            most_common_exposition = max(exposition_counts, key=exposition_counts.get)
+        # Convertir brightness (0.0-1.0) en score (0-10)
+        # Échelle: <0.3 = sombre (3), 0.3-0.5 = moyen (5), 0.5-0.7 = lumineux (7), >0.7 = très lumineux (10)
+        if avg_brightness < 0.3:
+            brightness_score = 3
+            brightness_level = 'faible'
+        elif avg_brightness < 0.5:
+            brightness_score = 5
+            brightness_level = 'moyen'
+        elif avg_brightness < 0.7:
+            brightness_score = 7
+            brightness_level = 'bon'
         else:
-            most_common_exposition = None
+            brightness_score = 10
+            brightness_level = 'excellent'
         
-        # Score d'exposition (30%)
-        exposition_scores = {
-            'sud': 10, 'sud_ouest': 10, 'ouest': 7, 'est': 7, 'nord': 3, 'nord_est': 3
-        }
-        exposition_score = exposition_scores.get(most_common_exposition, 0)
-        
-        # Score luminosité relative (30%) - utiliser score_luminosite si disponible, sinon convertir luminosite_relative
+        # Utiliser aussi les scores IA de luminosité si disponibles (pour combiner)
         luminosite_scores_list = []
         for r in results:
             if 'score_luminosite' in r and r['score_luminosite'] is not None:
@@ -214,117 +269,46 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
             elif 'luminosite_relative' in r:
                 luminosite_map = {'tres_lumineux': 10, 'lumineux': 7, 'moyen': 5, 'faible': 3}
                 luminosite_scores_list.append(luminosite_map.get(r['luminosite_relative'], 5))
-            elif 'luminosite' in r:
-                # Fallback ancien format
-                luminosite_map = {'excellent': 10, 'bon': 7, 'moyen': 5, 'faible': 3}
-                luminosite_scores_list.append(luminosite_map.get(r['luminosite'], 5))
         
-        avg_luminosite_score = sum(luminosite_scores_list) / len(luminosite_scores_list) if luminosite_scores_list else 5
+        # Combiner brightness_score et scores IA (moyenne pondérée: 70% brightness, 30% IA)
+        if luminosite_scores_list:
+            avg_ia_luminosite = sum(luminosite_scores_list) / len(luminosite_scores_list)
+            combined_luminosite_score = brightness_score * 0.7 + avg_ia_luminosite * 0.3
+        else:
+            combined_luminosite_score = brightness_score
         
-        # Score fenêtres (20%) - basé sur nombre et taille
-        fenetres_scores_list = []
-        for r in results:
-            if 'score_fenetres' in r and r['score_fenetres'] is not None:
-                fenetres_scores_list.append(r['score_fenetres'])
-            elif 'nb_fenetres' in r and r['nb_fenetres'] is not None:
-                nb_fenetres = r['nb_fenetres']
-                taille = r.get('taille_fenetres', 'moyennes')
-                # Score de base : 2 points par fenêtre
-                score_base = min(10, nb_fenetres * 2)
-                # Bonus taille
-                taille_bonus = {'grandes': 2, 'moyennes': 1, 'petites': 0}.get(taille, 1)
-                fenetres_scores_list.append(min(10, score_base + taille_bonus))
-        
-        avg_fenetres_score = sum(fenetres_scores_list) / len(fenetres_scores_list) if fenetres_scores_list else 5
-        
-        # Score vue (20%) - basé sur vis-à-vis et vue dégagée
-        vue_scores_list = []
-        for r in results:
-            if 'score_vue' in r and r['score_vue'] is not None:
-                vue_scores_list.append(r['score_vue'])
-            else:
-                # Calculer depuis vis_a_vis et vue_degagee
-                vis_a_vis = r.get('vis_a_vis', 'inconnu')
-                vue_degagee = r.get('vue_degagee', False)
-                if vue_degagee and vis_a_vis == 'aucun':
-                    vue_scores_list.append(10)
-                elif vue_degagee and vis_a_vis == 'leger':
-                    vue_scores_list.append(8)
-                elif not vue_degagee and vis_a_vis == 'important':
-                    vue_scores_list.append(5)
-                elif vis_a_vis == 'obstrué':
-                    vue_scores_list.append(3)
-                else:
-                    # Fallback ancien format
-                    vue_map = {'excellent': 10, 'bon': 7, 'moyen': 5, 'faible': 3}
-                    vue_scores_list.append(vue_map.get(r.get('vue', 'moyen'), 5))
-        
-        avg_vue_score = sum(vue_scores_list) / len(vue_scores_list) if vue_scores_list else 5
-        
-        # Bonus balcon
-        balcon_bonus = 0
-        balcons = [r.get('balcon_visible', False) for r in results]
-        if any(balcons):
-            tailles_balcon = [r.get('taille_balcon', 'aucun') for r in results if r.get('balcon_visible', False)]
-            if tailles_balcon:
-                taille_balcon_moyenne = max(set(tailles_balcon), key=tailles_balcon.count)
-                balcon_bonus_map = {'grand': 2, 'moyen': 1, 'petit': 0.5, 'aucun': 0}
-                balcon_bonus = balcon_bonus_map.get(taille_balcon_moyenne, 0)
-        
-        # Calcul du score relatif pondéré
-        score_pondere = (
-            exposition_score * 0.3 +
-            avg_luminosite_score * 0.3 +
-            avg_fenetres_score * 0.2 +
-            avg_vue_score * 0.2
-        ) + balcon_bonus
-        
-        # Limiter à 10 max
-        total_score = min(10, score_pondere)
+        # Score total basé uniquement sur la luminosité moyenne
+        total_score = min(10, combined_luminosite_score)
         
         # Déterminer le tier
-        if total_score >= 10:
+        if total_score >= 9:
             tier = 'tier1'
         elif total_score >= 7:
             tier = 'tier2'
         else:
             tier = 'tier3'
         
-        # Calculer nb_fenetres moyen pour la justification
-        nb_fenetres_list = [r.get('nb_fenetres', 0) for r in results if r.get('nb_fenetres') is not None]
-        nb_fenetres_moyen = sum(nb_fenetres_list) / len(nb_fenetres_list) if nb_fenetres_list else 0
-        
         # Construire la justification
         justification_parts = []
-        if most_common_exposition:
-            justification_parts.append(f"Exposition {most_common_exposition} détectée")
-        if avg_luminosite_score >= 7:
-            justification_parts.append("Luminosité élevée")
-        if nb_fenetres_moyen > 0:
-            justification_parts.append(f"{nb_fenetres_moyen:.1f} fenêtres en moyenne")
-        if avg_vue_score >= 7:
-            justification_parts.append("Vue dégagée")
-        if balcon_bonus > 0:
-            justification_parts.append("Balcon détecté")
+        justification_parts.append(f"Luminosité moyenne: {avg_brightness:.2f} ({brightness_level})")
+        if brightness_values:
+            justification_parts.append(f"{len(brightness_values)} photos analysées")
         
-        justification = f"Analyse de {len(results)} photos: {', '.join(justification_parts) if justification_parts else 'Informations limitées'}"
+        justification = f"Analyse de {len(results)} photos: {', '.join(justification_parts)}"
         
         return {
-            'exposition': most_common_exposition,
+            'exposition': None,  # Plus de détection d'exposition depuis photos
             'score': int(total_score),
             'tier': tier,
             'justification': justification,
             'photos_analyzed': len(results),
-            'luminosite': self._get_luminosite_level_from_score(avg_luminosite_score),
-            'vue': self._get_vue_level_from_score(avg_vue_score),
+            'luminosite': brightness_level,
+            'vue': 'inconnue',  # Plus de détection de vue
             'details': {
-                'exposition_score': exposition_score,
-                'luminosite_score': avg_luminosite_score,
-                'fenetres_score': avg_fenetres_score,
-                'vue_score': avg_vue_score,
-                'balcon_bonus': balcon_bonus,
-                'nb_fenetres_moyen': nb_fenetres_moyen,
-                'confidence': sum(r.get('confidence', 0.5) for r in results) / len(results)
+                'brightness_value': avg_brightness,
+                'brightness_score': brightness_score,
+                'luminosite_score': combined_luminosite_score,
+                'confidence': sum(r.get('confidence', 0.5) for r in results) / len(results) if results else 0.5
             }
         }
     
@@ -358,18 +342,21 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
                 'has_douche': None,
                 'confidence': 0.0,
                 'justification': 'Aucune photo disponible',
-                'photos_analyzed': 0
+                'photos_analyzed': 0,
+                'detected_photos': []
             }
         
         try:
-            # Analyser les premières photos (max 3 pour économiser)
-            photos_to_analyze = photos_urls[:3]
+            # Analyser les top 10 photos (comme pour la cuisine)
+            photos_to_analyze = photos_urls[:10]
             analysis_results = []
             
             for i, photo_url in enumerate(photos_to_analyze):
                 print(f"   📸 Analyse photo baignoire {i+1}/{len(photos_to_analyze)}: {photo_url[:50]}...")
                 result = self._analyze_single_photo_baignoire(photo_url)
                 if result:
+                    # Ajouter le numéro de la photo (1-indexed)
+                    result['photo_number'] = i + 1
                     analysis_results.append(result)
             
             # Agréger les résultats
@@ -381,7 +368,8 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
                 'has_douche': None,
                 'confidence': 0.0,
                 'justification': f'Erreur analyse photos: {e}',
-                'photos_analyzed': 0
+                'photos_analyzed': 0,
+                'detected_photos': []
             }
     
     def _analyze_single_photo_baignoire(self, photo_url: str) -> Optional[Dict]:
@@ -479,26 +467,40 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
                 'has_douche': None,
                 'confidence': 0.0,
                 'justification': 'Aucune photo analysée avec succès',
-                'photos_analyzed': 0
+                'photos_analyzed': 0,
+                'detected_photos': []
             }
         
-        # Compter les détections
-        baignoires = [r.get('baignoire_visible', False) for r in results]
-        douches = [r.get('douche_visible', False) for r in results]
+        # Compter les détections avec numéros d'images
+        baignoires_photos = []
+        douches_photos = []
         
-        has_baignoire = any(baignoires)
-        has_douche = any(douches) and not has_baignoire  # Si baignoire trouvée, on ignore douche
+        for r in results:
+            photo_number = r.get('photo_number', 0)
+            baignoire_visible = r.get('baignoire_visible', False)
+            douche_visible = r.get('douche_visible', False)
+            
+            if baignoire_visible:
+                baignoires_photos.append(photo_number)
+            elif douche_visible:
+                douches_photos.append(photo_number)
+        
+        has_baignoire = len(baignoires_photos) > 0
+        has_douche = len(douches_photos) > 0 and not has_baignoire  # Si baignoire trouvée, on ignore douche
         
         # Confiance moyenne
         confidences = [r.get('confidence', 0.5) for r in results]
         avg_confidence = sum(confidences) / len(confidences) if confidences else 0.5
         
-        # Justification
+        # Déterminer les photos détectées
         if has_baignoire:
-            justification = f"Baignoire détectée sur {sum(baignoires)}/{len(results)} photos analysées"
+            detected_photos = sorted(baignoires_photos)
+            justification = f"Baignoire détectée sur {len(baignoires_photos)}/{len(results)} photos analysées"
         elif has_douche:
-            justification = f"Douche détectée sur {sum(douches)}/{len(results)} photos analysées"
+            detected_photos = sorted(douches_photos)
+            justification = f"Douche détectée sur {len(douches_photos)}/{len(results)} photos analysées"
         else:
+            detected_photos = []
             justification = f"Aucune baignoire ni douche clairement visible sur {len(results)} photos"
         
         return {
@@ -506,7 +508,8 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
             'has_douche': has_douche,
             'confidence': avg_confidence,
             'justification': justification,
-            'photos_analyzed': len(results)
+            'photos_analyzed': len(results),
+            'detected_photos': detected_photos
         }
     
     def analyze_photos_cuisine(self, photos_urls: List[str]) -> Dict:
@@ -516,18 +519,21 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
                 'ouverte': None,
                 'confidence': 0.0,
                 'justification': 'Aucune photo disponible',
-                'photos_analyzed': 0
+                'photos_analyzed': 0,
+                'detected_photos': []
             }
         
         try:
-            # Analyser les premières photos (max 3)
-            photos_to_analyze = photos_urls[:3]
+            # Analyser les 5 premières photos
+            photos_to_analyze = photos_urls[:5]
             analysis_results = []
             
             for i, photo_url in enumerate(photos_to_analyze):
                 print(f"   📸 Analyse photo cuisine {i+1}/{len(photos_to_analyze)}: {photo_url[:50]}...")
                 result = self._analyze_single_photo_cuisine(photo_url)
                 if result:
+                    # Ajouter le numéro de la photo (1-indexed)
+                    result['photo_number'] = i + 1
                     analysis_results.append(result)
             
             # Agréger les résultats
@@ -538,7 +544,8 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
                 'ouverte': None,
                 'confidence': 0.0,
                 'justification': f'Erreur analyse photos: {e}',
-                'photos_analyzed': 0
+                'photos_analyzed': 0,
+                'detected_photos': []
             }
     
     def _analyze_single_photo_cuisine(self, photo_url: str) -> Optional[Dict]:
@@ -635,31 +642,45 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
                 'ouverte': None,
                 'confidence': 0.0,
                 'justification': 'Aucune photo analysée avec succès',
-                'photos_analyzed': 0
+                'photos_analyzed': 0,
+                'detected_photos': []
             }
         
-        # Compter les détections
-        cuisines_ouvertes = [r.get('cuisine_ouverte', False) for r in results if r.get('cuisine_ouverte') is not None]
-        cuisines_fermees = [r.get('cuisine_ouverte', True) == False for r in results if r.get('cuisine_ouverte') is not None]
+        # Compter les détections avec numéros d'images
+        cuisines_ouvertes = []
+        cuisines_fermees = []
+        
+        for r in results:
+            cuisine_ouverte = r.get('cuisine_ouverte')
+            photo_number = r.get('photo_number', 0)
+            
+            if cuisine_ouverte is True:
+                cuisines_ouvertes.append(photo_number)
+            elif cuisine_ouverte is False:
+                cuisines_fermees.append(photo_number)
         
         if not cuisines_ouvertes and not cuisines_fermees:
             return {
                 'ouverte': None,
                 'confidence': 0.0,
                 'justification': 'Cuisine non visible sur les photos analysées',
-                'photos_analyzed': len(results)
+                'photos_analyzed': len(results),
+                'detected_photos': []
             }
         
         # Déterminer si ouverte (majorité)
-        count_ouverte = sum(cuisines_ouvertes)
-        count_fermee = sum(cuisines_fermees)
+        count_ouverte = len(cuisines_ouvertes)
+        count_fermee = len(cuisines_fermees)
         
         if count_ouverte > count_fermee:
             ouverte = True
+            detected_photos = sorted(cuisines_ouvertes)
         elif count_fermee > count_ouverte:
             ouverte = False
+            detected_photos = sorted(cuisines_fermees)
         else:
             ouverte = None  # Ambigu
+            detected_photos = sorted(cuisines_ouvertes + cuisines_fermees)
         
         # Confiance moyenne
         confidences = [r.get('confidence', 0.5) for r in results]
@@ -677,7 +698,8 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
             'ouverte': ouverte,
             'confidence': avg_confidence,
             'justification': justification,
-            'photos_analyzed': len(results)
+            'photos_analyzed': len(results),
+            'detected_photos': detected_photos
         }
     
     def validate_text_with_photos(self, text_result: Dict, photo_result: Dict, criterion: str) -> Dict:
@@ -731,10 +753,24 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
     def _check_consistency(self, text_result: Dict, photo_result: Dict, criterion: str) -> bool:
         """Vérifie la cohérence entre texte et photo"""
         if criterion == 'exposition':
-            text_expo = text_result.get('exposition')
-            photo_expo = photo_result.get('exposition')
-            # Cohérent si même exposition ou si l'un est None (pas de contradiction)
-            return text_expo == photo_expo or text_expo is None or photo_expo is None
+            # Plus de détection d'exposition depuis photos, on compare la luminosité
+            text_luminosite = text_result.get('luminosite', 'inconnue')
+            photo_luminosite = photo_result.get('luminosite', 'inconnue')
+            
+            # Mapping des niveaux de luminosité pour comparaison
+            luminosite_map = {
+                'excellent': 10,
+                'bon': 7,
+                'moyen': 5,
+                'faible': 3,
+                'inconnue': 5  # Par défaut
+            }
+            
+            text_score = luminosite_map.get(text_luminosite, 5)
+            photo_score = luminosite_map.get(photo_luminosite, 5)
+            
+            # Cohérent si différence de score <= 2 points
+            return abs(text_score - photo_score) <= 2
         
         elif criterion == 'baignoire':
             text_has = text_result.get('has_baignoire')

@@ -145,3 +145,24 @@
     display: inline-block;
 }
 
+.criterion-sub-details {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+.indices-icon {
+    flex-shrink: 0;
+    opacity: 0.8;
+}
+
+.indices-text {
+    color: #6c757d;
+    font-size: 13px;
+    line-height: 1.4;
+}
+

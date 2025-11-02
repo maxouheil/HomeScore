@@ -1,5 +1,6 @@
 /* Cera Pro - Design System Standard - Chargement via CDN */
-@import url('https://fonts.cdnfonts.com/css/cera-pro');
+/* Désactivé temporairement (erreur 500 sur cdnfonts.com) */
+/* @import url('https://fonts.cdnfonts.com/css/cera-pro'); */
 
 * {
     margin: 0;
@@ -35,7 +36,7 @@ body {
     grid-auto-flow: row;
 }
 
-@media (max-width: 1000px) {
+@media (max-width: 1100px) {
     .apartments-grid {
         grid-template-columns: repeat(2, 1fr);
     }

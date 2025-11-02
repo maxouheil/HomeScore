@@ -47,3 +47,4 @@ if __name__ == "__main__":
     # Exécuter automatiquement sans confirmation (script batch)
     asyncio.run(main())
 
+

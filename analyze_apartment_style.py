@@ -31,61 +31,93 @@ class ApartmentStyleAnalyzer:
         
     def analyze_apartment_photos_from_data(self, apartment_data):
         """Analyse les photos directement depuis les données d'appartement
-        ET combine avec l'analyse texte IA si disponible
+        PRIORITÉ: Analyse textuelle pour mention explicite + caractéristiques
+        Si non trouvé → analyse visuelle sur top 5 photos avec indices précis
         """
         description = apartment_data.get('description', '')
         caracteristiques = apartment_data.get('caracteristiques', '')
         photos = apartment_data.get('photos', [])
         
-        # Analyser le texte d'abord (IA intelligente)
+        # PRIORITÉ 1: Analyser le texte d'abord (IA intelligente)
         text_analysis = None
         if self.use_text_analysis:
             text_analysis = self.analyze_text(description, caracteristiques)
+            
+            # Si mention explicite + caractéristiques détectées → confiance 100%
+            if text_analysis and text_analysis.get('style'):
+                style_data = text_analysis.get('style', {})
+                # Si confiance = 1.0 (100%), on retourne immédiatement
+                if style_data.get('confidence', 0) >= 1.0:
+                    return {
+                        'style': style_data,
+                        'cuisine': text_analysis.get('cuisine', {}),
+                        'luminosite': {'type': 'inconnue', 'confidence': 0, 'score': 0},
+                        'photos_analyzed': 0,
+                        'method': 'text_explicit_100pc'
+                    }
         
-        # Analyser les photos
+        # PRIORITÉ 2: Si pas de mention explicite → analyser les photos
         photo_analysis = None
         if photos:
-            # Prendre seulement les 3 premières photos pour économiser
-            photos_to_analyze = photos[:3]
+            # Prendre les 5 premières photos pour analyse détaillée (suffisant pour détecter le style)
+            photos_to_analyze = photos[:5]
             
-            # Télécharger temporairement les photos
-            temp_photos = []
-            for i, photo in enumerate(photos_to_analyze):
-                try:
-                    if isinstance(photo, dict):
-                        url = photo.get('url')
-                    else:
-                        url = photo
-                    
-                    if url:
-                        # Télécharger l'image
-                        response = requests.get(url, timeout=5)
-                        if response.status_code == 200:
-                            temp_file = f"temp_photo_{i}.jpg"
-                            with open(temp_file, 'wb') as f:
-                                f.write(response.content)
-                            temp_photos.append(temp_file)
-                except:
-                    continue
+            # Extraire les URLs directement (pas besoin de télécharger)
+            apartment_id = apartment_data.get('id', 'unknown')
+            photo_urls = []
+            for photo in photos_to_analyze:
+                if isinstance(photo, dict):
+                    url = photo.get('url')
+                else:
+                    url = photo
+                if url:
+                    photo_urls.append(url)
             
-            if temp_photos:
-                # Analyser les photos
+            if photo_urls:
+                # Analyser les photos en parallèle avec les URLs directement
+                from concurrent.futures import ThreadPoolExecutor, as_completed
                 analyses = []
-                for photo_path in temp_photos:
-                    analysis = self.analyze_single_photo(photo_path)
-                    if analysis:
-                        analyses.append(analysis)
-                    # Nettoyer le fichier temporaire
-                    try:
-                        os.remove(photo_path)
-                    except:
-                        pass
+                
+                def analyze_one_photo(photo_url):
+                    return self.analyze_single_photo(photo_url, apartment_id=apartment_id, photo_url=photo_url)
+                
+                # Paralléliser les appels API (max 5 workers pour éviter rate limit)
+                with ThreadPoolExecutor(max_workers=5) as executor:
+                    future_to_url = {executor.submit(analyze_one_photo, url): url for url in photo_urls}
+                    for future in as_completed(future_to_url):
+                        url = future_to_url[future]
+                        try:
+                            analysis = future.result()
+                            if analysis:
+                                analyses.append(analysis)
+                        except Exception as e:
+                            print(f"   ⚠️ Erreur analyse photo {url[:50]}...: {e}")
                 
                 if analyses:
                     photo_analysis = self.aggregate_analyses(analyses)
         
-        # Combiner texte + photos (priorité aux photos mais texte comme validation)
-        return self.combine_text_and_photo_analysis(text_analysis, photo_analysis)
+        # Si on arrive ici, pas de mention explicite trouvée dans le texte
+        # Utiliser l'analyse visuelle comme source principale
+        if photo_analysis:
+            return {
+                'style': photo_analysis.get('style', {}),
+                'cuisine': photo_analysis.get('cuisine', {}),
+                'luminosite': photo_analysis.get('luminosite', {}),
+                'photos_analyzed': photo_analysis.get('photos_analyzed', 0),
+                'method': 'photo_analysis'
+            }
+        
+        # Fallback: utiliser texte même si pas 100% confiance
+        if text_analysis:
+            return {
+                'style': text_analysis.get('style', {}),
+                'cuisine': text_analysis.get('cuisine', {}),
+                'luminosite': {'type': 'inconnue', 'confidence': 0, 'score': 0},
+                'photos_analyzed': 0,
+                'method': 'text_fallback'
+            }
+        
+        return None
     
     def analyze_text(self, description: str, caracteristiques: str = ""):
         """Analyse le style et la cuisine depuis le texte avec IA"""
@@ -120,44 +152,76 @@ class ApartmentStyleAnalyzer:
                 est_conversion = contexte_detection.get('est_conversion', False)
                 type_conversion = contexte_detection.get('type_conversion', '')
                 
-                # Construire une justification enrichie
-                justification_parts = [style_result.get('justification', '')]
+                # Construire une justification courte en format tags (max 3 tags)
+                tags = []
                 
-                if est_conversion:
-                    conversion_desc = f"Conversion d'ancien {type_conversion}" if type_conversion else "Conversion d'ancien espace"
-                    justification_parts.append(f"🏭 {conversion_desc}")
-                
-                if contexte_detection.get('periode_mentionnee'):
-                    justification_parts.append(f"📅 Période: {contexte_detection.get('periode_mentionnee')}")
-                
-                # Ajouter les indices architecturaux détectés
+                # Extraire les indices architecturaux principaux
                 elements_haussmannien = indices_architecturaux.get('elements_haussmannien', [])
                 elements_atypique = indices_architecturaux.get('elements_atypique', [])
                 elements_moderne = indices_architecturaux.get('elements_moderne', [])
                 
-                if elements_haussmannien:
-                    justification_parts.append(f"🏛️ Éléments haussmanniens: {', '.join(elements_haussmannien[:3])}")
-                if elements_atypique:
-                    justification_parts.append(f"🏭 Éléments atypiques: {', '.join(elements_atypique[:3])}")
-                if elements_moderne:
-                    justification_parts.append(f"✨ Éléments modernes: {', '.join(elements_moderne[:3])}")
+                # Prioriser les éléments selon le style détecté
+                if style_type == 'haussmannien' and elements_haussmannien:
+                    # Prendre les 3-4 premiers éléments, limiter à 3 mots chacun
+                    for elem in elements_haussmannien[:4]:
+                        words = elem.split()[:3]  # Max 3 mots par tag
+                        tags.append(' '.join(words))
+                elif style_type in ['atypique', 'loft']:
+                    if est_conversion and type_conversion:
+                        tags.append('loft')
+                    if elements_atypique:
+                        for elem in elements_atypique[:3]:
+                            words = elem.split()[:3]
+                            tags.append(' '.join(words))
+                elif elements_moderne:
+                    for elem in elements_moderne[:3]:
+                        words = elem.split()[:3]
+                        tags.append(' '.join(words))
                 
-                justification = " | ".join(justification_parts)
+                # Si pas assez de tags, ajouter le style
+                if len(tags) < 2:
+                    if style_type == 'haussmannien':
+                        tags.extend(['moulures', 'parquet', 'cheminée'])
+                    elif style_type == 'atypique':
+                        tags.extend(['loft', 'poutres'])
+                    else:
+                        tags.append('moderne')
+                
+                # Limiter à 4-5 tags max et joindre
+                justification = ', '.join(tags[:5])
                 
                 # Calculer le score
                 base_score = self.calculate_style_score(style_type)
                 
-                # Si confiance globale très élevée (>0.85) et style atypique/haussmannien, on peut augmenter légèrement la confiance
-                # Mais le score reste basé sur le style uniquement
+                # Vérifier si mention explicite + caractéristiques détectées
+                # Si style explicite mentionné ET indices architecturaux présents → confiance 100%
+                style_explicite = style_result.get('style', '').lower() in ['haussmannien', 'atypique', 'loft']
+                
+                # Vérifier que les indices correspondent au style détecté
+                has_indices = False
+                if style_type == 'haussmannien':
+                    has_indices = bool(indices_architecturaux.get('elements_haussmannien'))
+                elif style_type in ['atypique', 'loft']:
+                    has_indices = bool(indices_architecturaux.get('elements_atypique') or 
+                                     contexte_detection.get('est_conversion'))
+                else:
+                    # Pour moderne, vérifier éléments modernes
+                    has_indices = bool(indices_architecturaux.get('elements_moderne'))
+                
+                # Si mention explicite du style + caractéristiques correspondantes détectées → confiance 100%
+                final_confidence = 1.0 if (style_explicite and has_indices) else style_confidence
                 
                 result['style'] = {
                     'type': style_type,
-                    'confidence': style_confidence,
+                    'confidence': final_confidence,
                     'score': base_score,
                     'justification': justification,
                     'indices': style_result.get('indices', []),
                     'details': {
                         'confiance_globale': style_confidence,
+                        'confiance_finale': final_confidence,
+                        'mention_explicite': style_explicite,
+                        'caracteristiques_detectees': has_indices,
                         'contexte_detection': contexte_detection,
                         'indices_architecturaux': indices_architecturaux,
                         'est_conversion': est_conversion,
@@ -269,7 +333,7 @@ class ApartmentStyleAnalyzer:
         
         return combined
     
-    def analyze_apartment_photos(self, photos_dir="data/photos"):
+    def analyze_apartment_photos(self, photos_dir="data/photos", apartment_id=None):
         """Analyse toutes les photos d'appartement"""
         print("🏠 ANALYSE VISUELLE DES PHOTOS D'APPARTEMENT")
         print("=" * 60)
@@ -287,11 +351,23 @@ class ApartmentStyleAnalyzer:
         
         print(f"📸 {len(photo_files)} photos trouvées")
         
+        # Extraire apartment_id depuis le nom du fichier si pas fourni
+        if not apartment_id and photo_files:
+            # Essayer d'extraire depuis le nom du fichier ou du répertoire
+            first_file = photo_files[0]
+            if 'apartment_' in first_file:
+                # Chercher dans le chemin
+                parts = first_file.split('/')
+                for part in parts:
+                    if part.startswith('apartment_'):
+                        apartment_id = part.replace('apartment_', '').split('_')[0]
+                        break
+        
         # Analyser chaque photo
         analyses = []
         for i, photo_path in enumerate(photo_files, 1):
             print(f"\n📸 Analyse photo {i}: {os.path.basename(photo_path)}")
-            analysis = self.analyze_single_photo(photo_path)
+            analysis = self.analyze_single_photo(photo_path, apartment_id=apartment_id)
             if analysis:
                 analyses.append(analysis)
         
@@ -301,11 +377,21 @@ class ApartmentStyleAnalyzer:
         else:
             return None
     
-    def analyze_single_photo(self, photo_path):
-        """Analyse une photo individuelle avec cache"""
-        # Générer une clé de cache basée sur le chemin du fichier
-        # Pour les URLs, utiliser l'URL directement
-        cache_key = photo_path if photo_path.startswith('http') else f"file:{photo_path}"
+    def analyze_single_photo(self, photo_path_or_url, apartment_id=None, photo_url=None):
+        """Analyse une photo individuelle avec cache - accepte URL ou chemin de fichier"""
+        # Déterminer l'URL réelle de la photo
+        is_local_file = False
+        if photo_url:
+            actual_url = photo_url
+        elif isinstance(photo_path_or_url, str) and photo_path_or_url.startswith('http'):
+            actual_url = photo_path_or_url
+        else:
+            # Fichier local - encoder en base64 (pour compatibilité avec ancien code)
+            is_local_file = True
+            actual_url = photo_path_or_url
+        
+        # Générer une clé de cache basée sur l'URL de la photo ET l'ID de l'appartement
+        cache_key = f"{apartment_id}:{actual_url}" if apartment_id else actual_url
         
         # Vérifier le cache d'abord
         cached_result = self.cache.get('style_photo', cache_key)
@@ -313,11 +399,26 @@ class ApartmentStyleAnalyzer:
             return cached_result
         
         try:
-            # Encoder l'image en base64
-            with open(photo_path, 'rb') as image_file:
-                image_base64 = base64.b64encode(image_file.read()).decode('utf-8')
+            # Préparer l'image pour l'API Vision
+            if is_local_file:
+                # Encoder le fichier local en base64
+                with open(photo_path_or_url, 'rb') as image_file:
+                    image_base64 = base64.b64encode(image_file.read()).decode('utf-8')
+                image_content = {
+                    'type': 'image_url',
+                    'image_url': {
+                        'url': f'data:image/jpeg;base64,{image_base64}'
+                    }
+                }
+            else:
+                # Utiliser l'URL directement (beaucoup plus rapide!)
+                image_content = {
+                    'type': 'image_url',
+                    'image_url': {
+                        'url': actual_url
+                    }
+                }
             
-            # Appel à OpenAI Vision
             headers = {
                 'Authorization': f'Bearer {self.openai_api_key}',
                 'Content-Type': 'application/json'
@@ -331,49 +432,57 @@ class ApartmentStyleAnalyzer:
                         'content': [
                             {
                                 'type': 'text',
-                                'text': """Analyse cette photo d'appartement et estime:
+                                'text': """Analyse cette photo d'appartement pour déterminer le STYLE ARCHITECTURAL.
 
-1. STYLE ARCHITECTURAL (Ancien / Atypique / Neuf):
-   - Ancien (20 pts): Haussmannien - moulures, parquet, hauteur sous plafond, cheminée, balcon en fer forgé
-   - Atypique (10 pts): Loft, atypique, unique, original - espaces ouverts, volumes généreux, caractère unique
-   - Neuf (0 pts): Tout le reste (moderne, contemporain, récent, années 20-70) - terrasse métal, vue, sol moderne, fenêtre moderne, hauteur plafond réduite, lignes épurées, matériaux modernes, design minimaliste
-   - Autre: décris le style observé
+## TÂCHE PRINCIPALE : Classifier le style en Ancien / Neuf / Atypique
 
-2. CUISINE OUVERTE:
-   - Oui: cuisine visible depuis le salon, pas de séparation murale
-   - Non: cuisine fermée, séparée du salon
+### STYLE À DÉTERMINER :
 
-3. LUMINOSITÉ:
-   - Excellente: très lumineux, nombreuses fenêtres, lumière naturelle abondante
-   - Bonne: bien éclairé, quelques fenêtres, luminosité correcte
-   - Moyenne: éclairage correct mais limité
-   - Faible: peu lumineux, fenêtres petites ou peu nombreuses
+1. **ANCIEN (Haussmannien)** :
+   - Caractéristiques : Moulures au plafond, cheminée, parquet pointe de Hongrie, balcon fer forgé, balcons en fer forgé, hauteur sous plafond importante, éléments architecturaux décoratifs, poutres apparentes (si contexte ancien)
+   - Contexte : Immeuble haussmannien, appartement rénové avec conservation des éléments d'origine
 
-Réponds au format JSON:
+2. **NEUF (Moderne/Contemporain)** :
+   - Caractéristiques : Design épuré, sol moderne (carrelage/stratifié), terrasse métal, fenêtres modernes, plafond bas/réduit, lignes minimalistes
+   - **INDICES FORTS** : Vue sur Paris + étage élevé (5ème+, 10ème+, dernier étage) = très caractéristique du Neuf
+   - Contexte : Construction récente, rénovation complète sans éléments anciens, étages élevés avec vue panoramique
+
+3. **ATYPIQUE (Loft/Unique)** :
+   - Caractéristiques : Espaces ouverts, volumes généreux, poutres apparentes, béton brut, caractère industriel, conversion d'entrepôt/atelier
+   - Contexte : Loft, ancien entrepôt réhabilité, espace atypique
+
+### CUISINE OUVERTE :
+- Oui: cuisine visible depuis le salon, pas de séparation murale
+- Non: cuisine fermée, séparée du salon
+
+### LUMINOSITÉ :
+- Excellente/Bonne/Moyenne/Faible selon la lumière naturelle visible
+
+### FORMAT DE LA JUSTIFICATION :
+La justification doit être COURTE (4-5 tags de 1-3 mots chacun), format tags/adjectifs séparés par des virgules.
+Exemples :
+- Pour Ancien : "moulures, parquet pointe de Hongrie, cheminée, balcon fer forgé"
+- Pour Neuf : "design épuré, matériaux modernes, vue sur Paris, étage élevé"
+- Pour Atypique : "loft, ancien immeuble industriel, poutres apparentes"
+
+Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
 {
-    "style": "haussmannien|moderne|autre",
-    "note": "Pour le scoring: 'haussmannien' = ancien (20pts), tout le reste = neuf (0pts)",
+    "style": "haussmannien|atypique|moderne|autre",
     "style_confidence": 0.0-1.0,
-    "style_details": "description détaillée des éléments observés",
+    "style_justification": "tags très courts séparés par virgules, max 15-20 mots (ex: 'moulures, parquet, cheminée' ou 'design épuré, matériaux modernes')",
     "cuisine_ouverte": true|false,
     "cuisine_confidence": 0.0-1.0,
     "cuisine_details": "description de la cuisine",
     "luminosite": "excellente|bonne|moyenne|faible",
     "luminosite_confidence": 0.0-1.0,
-    "luminosite_details": "description de la luminosité",
-    "elements_visuels": ["liste des éléments architecturaux observés"]
+    "luminosite_details": "description de la luminosité"
 }"""
                             },
-                            {
-                                'type': 'image_url',
-                                'image_url': {
-                                    'url': f'data:image/jpeg;base64,{image_base64}'
-                                }
-                            }
+                            image_content
                         ]
                     }
                 ],
-                'max_tokens': 800
+                'max_tokens': 300  # Réduit car les justifications sont maintenant très courtes (tags)
             }
             
             response = requests.post(
@@ -401,6 +510,12 @@ Réponds au format JSON:
                 analysis = json.loads(content)
                 print(f"   ✅ Analyse réussie")
                 print(f"      Style: {analysis.get('style', 'N/A')} (confiance: {analysis.get('style_confidence', 0):.2f})")
+                
+                # Afficher la justification du style
+                justification = analysis.get('style_justification', '')
+                if justification:
+                    print(f"      Justification: {justification}")
+                
                 print(f"      Cuisine: {'Ouverte' if analysis.get('cuisine_ouverte') else 'Fermée'} (confiance: {analysis.get('cuisine_confidence', 0):.2f})")
                 print(f"      Luminosité: {analysis.get('luminosite', 'N/A')} (confiance: {analysis.get('luminosite_confidence', 0):.2f})")
                 
@@ -445,9 +560,14 @@ Réponds au format JSON:
             luminosite_match = re.search(r'"luminosite":\s*"([^"]+)"', content)
             luminosite = luminosite_match.group(1) if luminosite_match else 'inconnue'
             
+            # Essayer d'extraire la justification aussi
+            justification_match = re.search(r'"style_justification":\s*"([^"]+)"', content)
+            style_justification = justification_match.group(1) if justification_match else f"Style {style} détecté"
+            
             analysis = {
                 'style': style,
                 'style_confidence': 0.7,
+                'style_justification': style_justification,
                 'cuisine_ouverte': cuisine_ouverte,
                 'cuisine_confidence': 0.7,
                 'luminosite': luminosite,
@@ -466,21 +586,46 @@ Réponds au format JSON:
             return None
     
     def aggregate_analyses(self, analyses):
-        """Agrège les analyses de toutes les photos"""
+        """Agrège les analyses de toutes les photos - Vote majoritaire pour le style avec justification"""
         print(f"\n📊 AGRÉGATION DES {len(analyses)} ANALYSES")
         print("-" * 40)
         
         # Compter les styles (fusionner 70s avec moderne)
-        styles = [a.get('style', 'inconnu') for a in analyses if a.get('style')]
+        styles = []
+        style_justifications = []  # Stocker les justifications pour chaque style
+        
+        for a in analyses:
+            style = a.get('style', '')
+            justification = a.get('style_justification', '')
+            if style:  # Vérifier que style existe et n'est pas vide
+                styles.append(style)
+                if justification:
+                    style_justifications.append((style, justification))
+        
         style_counts = {}
+        style_justifications_by_style = {}  # Regrouper les justifications par style
+        
         for style in styles:
             # Fusionner 70s et 60s avec moderne
             style_normalized = style.lower()
             if '70' in style_normalized or 'seventies' in style_normalized or '60' in style_normalized:
                 style_normalized = 'moderne'
-            elif style_normalized not in ['moderne', 'contemporain']:
+            elif style_normalized not in ['moderne', 'contemporain', 'haussmannien', 'atypique', 'loft']:
+                # Si pas dans les styles connus, garder tel quel mais logger
                 style_normalized = style.lower()
             style_counts[style_normalized] = style_counts.get(style_normalized, 0) + 1
+        
+        # Regrouper les justifications par style détecté
+        for style, justification in style_justifications:
+            style_normalized = style.lower()
+            if '70' in style_normalized or 'seventies' in style_normalized or '60' in style_normalized:
+                style_normalized = 'moderne'
+            elif style_normalized not in ['moderne', 'contemporain', 'haussmannien', 'atypique', 'loft']:
+                style_normalized = style.lower()
+            
+            if style_normalized not in style_justifications_by_style:
+                style_justifications_by_style[style_normalized] = []
+            style_justifications_by_style[style_normalized].append(justification)
         
         # Compter les cuisines ouvertes
         cuisines_ouvertes = [a.get('cuisine_ouverte', False) for a in analyses if 'cuisine_ouverte' in a]
@@ -497,10 +642,77 @@ Réponds au format JSON:
         cuisine_confidences = [a.get('cuisine_confidence', 0) for a in analyses if a.get('cuisine_confidence')]
         luminosite_confidences = [a.get('luminosite_confidence', 0) for a in analyses if a.get('luminosite_confidence')]
         
-        # Déterminer les résultats finaux
+        # Déterminer le style final par vote majoritaire
         final_style = max(style_counts, key=style_counts.get) if style_counts else 'inconnu'
         final_cuisine_ouverte = cuisine_ouverte_ratio > 0.5
         final_luminosite = max(luminosite_counts, key=luminosite_counts.get) if luminosite_counts else 'inconnue'
+        
+        # Sélectionner et combiner les justifications pour le style final
+        # Les justifications sont au format tags séparés par virgules, on les combine intelligemment
+        final_justification = ""
+        if final_style in style_justifications_by_style and style_justifications_by_style[final_style]:
+            justifications = style_justifications_by_style[final_style]
+            
+            # Extraire tous les tags uniques de toutes les justifications
+            all_tags = []
+            for just in justifications:
+                # Séparer par virgules et nettoyer
+                tags = [tag.strip().lower() for tag in just.split(',') if tag.strip()]
+                all_tags.extend(tags)
+            
+            # Dédupliquer intelligemment (éviter les doublons sémantiques)
+            from collections import Counter
+            tag_counts = Counter(all_tags)
+            
+            # Filtrer les doublons sémantiques et limiter la longueur des tags
+            filtered_tags = []
+            
+            # Trier par fréquence décroissante
+            sorted_tags = tag_counts.most_common()
+            
+            for tag, count in sorted_tags:
+                # Limiter chaque tag à max 3 mots (raccourcir si trop long)
+                tag_words = tag.split()
+                if len(tag_words) > 3:
+                    # Prendre les 3 premiers mots seulement
+                    tag = ' '.join(tag_words[:3])
+                    tag_words = tag_words[:3]
+                
+                # Vérifier si ce tag n'est pas un sous-ensemble d'un tag déjà ajouté
+                is_duplicate = False
+                for existing_tag in filtered_tags:
+                    existing_words = set(existing_tag.split())
+                    tag_words_set = set(tag_words)
+                    # Si tous les mots du tag sont dans un tag existant, c'est un doublon
+                    if tag_words_set.issubset(existing_words) and len(tag_words_set) < len(existing_words):
+                        is_duplicate = True
+                        break
+                    # Si un tag existant est contenu dans celui-ci, remplacer
+                    if existing_words.issubset(tag_words_set) and len(existing_words) < len(tag_words_set):
+                        filtered_tags.remove(existing_tag)
+                        break
+                
+                if not is_duplicate and len(filtered_tags) < 5:  # Limiter à 4-5 tags max
+                    filtered_tags.append(tag)
+            
+            unique_tags = filtered_tags[:5]  # Maximum 4-5 tags
+            
+            # Combiner en une seule chaîne de tags
+            if unique_tags:
+                final_justification = ", ".join(unique_tags)
+            else:
+                final_justification = justifications[0] if justifications else ""
+        
+        # Si pas de justification, créer une justification par défaut basée sur le style
+        if not final_justification:
+            if final_style == 'haussmannien':
+                final_justification = "moulures, parquet, cheminée, balcon fer forgé"
+            elif final_style == 'atypique':
+                final_justification = "loft, poutres apparentes, espace ouvert"
+            elif final_style == 'moderne':
+                final_justification = "design épuré, matériaux modernes"
+            else:
+                final_justification = f"style {final_style}"
         
         # Calculer les scores
         style_score = self.calculate_style_score(final_style)
@@ -512,7 +724,8 @@ Réponds au format JSON:
                 'type': final_style,
                 'confidence': sum(style_confidences) / len(style_confidences) if style_confidences else 0,
                 'score': style_score,
-                'details': f"Style détecté: {final_style} (apparaît {style_counts.get(final_style, 0)} fois)"
+                'details': f"Style détecté: {final_style} (apparaît {style_counts.get(final_style, 0)}/{len(analyses)} photos)",
+                'justification': final_justification  # Justification en 1 phrase pour affichage dans indices
             },
             'cuisine': {
                 'ouverte': final_cuisine_ouverte,

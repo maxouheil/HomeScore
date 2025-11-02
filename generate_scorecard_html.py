@@ -40,8 +40,22 @@ def load_scored_apartments():
                 # Fusionner d'autres données utiles si nécessaire
                 if 'photos' in scraped_apt:
                     apartment['photos'] = scraped_apt['photos']
+                # Fusionner l'exposition depuis scraped_apt pour avoir brightness_value
                 if 'exposition' in scraped_apt:
-                    apartment['exposition'] = scraped_apt['exposition']
+                    scraped_expo = scraped_apt['exposition']
+                    # Si l'appartement a déjà une exposition, fusionner les détails
+                    if 'exposition' in apartment:
+                        # Fusionner les détails pour avoir brightness_value
+                        if 'details' in scraped_expo:
+                            if 'details' not in apartment['exposition']:
+                                apartment['exposition']['details'] = {}
+                            apartment['exposition']['details'].update(scraped_expo['details'])
+                        # Mettre à jour l'exposition principale si elle existe dans scraped
+                        if scraped_expo.get('exposition'):
+                            apartment['exposition']['exposition'] = scraped_expo['exposition']
+                    else:
+                        # Sinon, utiliser directement l'exposition scrapée
+                        apartment['exposition'] = scraped_expo
         
         return scored_apartments
     except FileNotFoundError:
@@ -538,7 +552,11 @@ def format_style_criterion(apartment):
     
     indices_str = None
     if indices:
-        indices_str = "Indices: " + " · ".join(indices)
+        indices_str = "Style Indice: " + " · ".join(indices)
+    
+    # Ajouter systématiquement une phrase indice si pas déjà présente
+    if not indices_str:
+        indices_str = "Style Indice: Style expo cuisine et baignoire"
     
     return {
         'main_value': style_name,
@@ -570,9 +588,12 @@ def format_exposition_criterion(apartment):
         elif isinstance(confidence, (int, float)) and 0 <= confidence <= 100:
             confidence_pct = int(confidence)
     
-    # Extraire les indices depuis exposition
+    # Extraire les indices depuis exposition - même format que criteria/exposition.py
     indices_parts = []
     exposition = apartment.get('exposition', {})
+    description = apartment.get('description', '').lower()
+    caracteristiques = apartment.get('caracteristiques', '').lower()
+    text = f"{description} {caracteristiques}"
     
     # Étage
     etage = apartment.get('etage', '')
@@ -591,20 +612,55 @@ def format_exposition_criterion(apartment):
                     else:
                         indices_parts.append(f"{num}e étage")
     
-    # Vis-à-vis depuis description ou exposition
-    description = apartment.get('description', '').lower()
-    if 'vis-à-vis' in description or 'vis à vis' in description or 'pas de vis' in description:
-        if 'pas de vis' in description:
-            indices_parts.append("pas de vis à vis")
-        else:
-            indices_parts.append("vis à vis")
-    
-    # Exposition directionnelle
+    # Exposition directionnelle - chercher dans le texte d'abord
     exposition_dir = exposition.get('exposition', '')
     if exposition_dir and exposition_dir.lower() not in ['inconnue', 'inconnu', 'non spécifiée']:
-        indices_parts.append(f"Exposition {exposition_dir} détectée")
+        # Vérifier si mentionné dans le texte
+        expo_lower = exposition_dir.lower()
+        if expo_lower in text:
+            indices_parts.append(f"{exposition_dir} mentionné")
+        else:
+            indices_parts.append(f"{exposition_dir} détecté")
     
-    indices_str = " · ".join(indices_parts) if indices_parts else None
+    # Chercher aussi dans le texte pour des expositions non détectées par l'extracteur
+    expo_keywords = {
+        'nord': 'Nord',
+        'nord-est': 'Nord Est',
+        'nord est': 'Nord Est',
+        'nord-ouest': 'Nord Ouest',
+        'nord ouest': 'Nord Ouest',
+        'sud': 'Sud',
+        'sud-est': 'Sud Est',
+        'sud est': 'Sud Est',
+        'sud-ouest': 'Sud Ouest',
+        'sud ouest': 'Sud Ouest',
+        'est': 'Est',
+        'ouest': 'Ouest'
+    }
+    for keyword, label in expo_keywords.items():
+        if keyword in text and not any(label.lower() in part.lower() for part in indices_parts):
+            indices_parts.append(f"{label} mentionné")
+            break
+    
+    # Vis-à-vis depuis description ou exposition
+    if 'vis-à-vis' in text or 'vis à vis' in text or 'pas de vis' in text:
+        if 'pas de vis' in text:
+            indices_parts.append("Pas de vis à vis")
+        else:
+            indices_parts.append("Vis à vis")
+    
+    # Terrasse/Balcon - chercher dans le texte
+    if 'grande terrasse' in text or 'grand terrasse' in text:
+        indices_parts.append("Grande terrasse")
+    elif 'terrasse' in text:
+        indices_parts.append("Terrasse mentionnée")
+    elif 'balcon' in text:
+        indices_parts.append("Balcon mentionné")
+    
+    # Formater avec le préfixe "Expo Indice:"
+    indices_str = None
+    if indices_parts:
+        indices_str = "Expo Indice: " + " · ".join(indices_parts)
     
     return {
         'main_value': main_value,
@@ -614,12 +670,36 @@ def format_exposition_criterion(apartment):
 
 def format_cuisine_criterion(apartment):
     """Formate le critère Cuisine: "Ouverte / Fermée (X% confiance) + indices" """
+    # PRIORITÉ: Utiliser le résultat final depuis scores_detaille (après validation croisée texte + photos)
+    scores_detaille = apartment.get('scores_detaille', {})
+    cuisine_score = scores_detaille.get('cuisine', {})
+    cuisine_details = cuisine_score.get('details', {})
+    photo_validation = cuisine_details.get('photo_validation', {})
+    
+    # Chercher la valeur depuis photo_result (résultat final après validation)
+    cuisine_ouverte = None
+    confidence = cuisine_details.get('confidence')
+    
+    if isinstance(photo_validation, dict):
+        photo_result = photo_validation.get('photo_result', {})
+        # Le résultat final est dans photo_result après validation croisée
+        cuisine_ouverte = photo_result.get('ouverte')
+    
+    # Fallback: utiliser style_analysis si pas trouvé
     style_analysis = apartment.get('style_analysis', {})
     cuisine_data = style_analysis.get('cuisine', {})
-    
-    cuisine_ouverte = cuisine_data.get('ouverte', False)
-    confidence = cuisine_data.get('confidence')
     details = cuisine_data.get('details', '')
+    
+    if cuisine_ouverte is None:
+        cuisine_ouverte = cuisine_data.get('ouverte', False)
+        if confidence is None:
+            confidence = cuisine_data.get('confidence')
+    
+    # Si toujours None, vérifier le tier pour déduire
+    if cuisine_ouverte is None:
+        tier = cuisine_score.get('tier', 'tier3')
+        # tier1 = ouverte (10pts), tier3 = fermée (0pts)
+        cuisine_ouverte = (tier == 'tier1')
     
     # Simplifié: seulement Ouverte ou Fermée (plus de Semi Ouverte)
     if cuisine_ouverte:
@@ -635,27 +715,83 @@ def format_cuisine_criterion(apartment):
         elif isinstance(confidence, (int, float)) and 0 <= confidence <= 100:
             confidence_pct = int(confidence)
     
-    # Extraire les indices
-    indices = None
-    if details:
-        # Chercher des mots-clés dans les détails pour les indices
-        if 'analyse photo' in details.lower() or 'photo' in details.lower():
-            indices = f"Analyse photo : Cuisine {main_value.lower()} détectée"
+    # Chercher les numéros d'images détectées depuis différentes sources
+    detected_photos = []
+    
+    # Source 1: Depuis photo_validation (déjà récupéré plus haut)
+    if isinstance(photo_validation, dict):
+        photo_result = photo_validation.get('photo_result', {})
+        detected_photos = photo_result.get('detected_photos', [])
+    
+    # Source 2: Si pas trouvé, chercher dans style_analysis directement (via photo_validation)
+    if not detected_photos:
+        photo_validation_cuisine = cuisine_data.get('photo_validation', {})
+        if isinstance(photo_validation_cuisine, dict):
+            photo_result = photo_validation_cuisine.get('photo_result', {})
+            detected_photos = photo_result.get('detected_photos', [])
+    
+    # Source 3: Chercher dans les détails du style_analysis
+    if not detected_photos and details:
+        # Essayer d'extraire depuis details si formaté différemment
+        import re
+        photo_matches = re.findall(r'photo\s*(\d+)', details.lower())
+        if photo_matches:
+            detected_photos = [int(p) for p in photo_matches]
+    
+    # Formater les indices avec les numéros d'images
+    indices_parts = []
+    
+    # Vérifier le statut de validation pour savoir si on peut utiliser detected_photos
+    validation_status = cuisine_details.get('validation_status', '')
+    
+    # Récupérer photo_result.ouverte pour vérifier la cohérence
+    photo_ouverte_result = None
+    if isinstance(photo_validation, dict):
+        photo_result_for_check = photo_validation.get('photo_result', {})
+        photo_ouverte_result = photo_result_for_check.get('ouverte')
+    
+    # Si détecté par photos ET que le résultat photo correspond au résultat final
+    # (pas de conflit ou photos confirment le résultat final)
+    if detected_photos and validation_status != 'conflict':
+        # Pas de conflit → utiliser detected_photos avec main_value
+        photos_str = ", ".join([f"image {p}" for p in detected_photos])
+        if main_value == "Ouverte":
+            indices_parts.append(f"Cuisine ouverte détectée {photos_str}")
         else:
-            # Extraire des indices pertinents depuis details
-            keywords_found = []
-            if 'bar' in details.lower() or 'comptoir' in details.lower():
-                keywords_found.append('bar détecté')
-            if 'ouverte' in details.lower() and main_value == "Ouverte":
-                keywords_found.append('cuisine intégrée')
-            
-            if keywords_found:
-                indices = " · ".join(keywords_found[:3])
+            indices_parts.append(f"Cuisine fermée détectée {photos_str}")
+    elif detected_photos and validation_status == 'conflict':
+        # Conflit détecté → vérifier si photo_result correspond au résultat final
+        # Si photo_result.ouverte correspond à main_value, on peut utiliser detected_photos
+        # Sinon, ne pas utiliser detected_photos car elles contredisent le résultat final
+        if (photo_ouverte_result is True and main_value == "Ouverte") or \
+           (photo_ouverte_result is False and main_value == "Fermée"):
+            # Les photos confirment le résultat final → utiliser detected_photos
+            photos_str = ", ".join([f"image {p}" for p in detected_photos])
+            if main_value == "Ouverte":
+                indices_parts.append(f"Cuisine ouverte détectée {photos_str}")
+            else:
+                indices_parts.append(f"Cuisine fermée détectée {photos_str}")
+        else:
+            # Les photos contredisent le résultat final → ne pas afficher detected_photos
+            # Afficher seulement que c'est détecté sans numéros d'images
+            if main_value == "Ouverte":
+                indices_parts.append("Cuisine ouverte détectée")
+            else:
+                indices_parts.append("Cuisine fermée détectée")
+    elif details and ('analyse photo' in details.lower() or 'photo' in details.lower()):
+        # Fallback: utiliser les détails existants
+        indices_parts.append(f"Analyse photo : Cuisine {main_value.lower()} détectée")
+    else:
+        # Si aucune détection photo, dire qu'on a analysé les 5 premières images
+        indices_parts.append(f"Cuisine {main_value.lower()} - 5 premières images analysées")
+    
+    # Formater avec le préfixe "Cuisine Indice:"
+    indices_str = "Cuisine Indice: " + " · ".join(indices_parts)
     
     return {
         'main_value': main_value,
         'confidence': confidence_pct,
-        'indices': indices
+        'indices': indices_str
     }
 
 def format_baignoire_criterion(apartment, baignoire_extractor=None):
@@ -684,7 +820,7 @@ def format_baignoire_criterion(apartment, baignoire_extractor=None):
             elif isinstance(confidence, (int, float)) and 0 <= confidence <= 100:
                 confidence_pct = int(confidence)
         
-        # Extraire les indices depuis justification
+        # Extraire les indices depuis justification - systématiquement ajoutés
         indices = None
         if justification:
             if 'photo' in justification.lower() or 'détectée' in justification.lower() or 'analysée' in justification.lower():
@@ -703,17 +839,25 @@ def format_baignoire_criterion(apartment, baignoire_extractor=None):
                 if len(justification) < 100:
                     indices = justification
         
+        # Formater avec le préfixe "Baignoire:"
+        indices_str = None
+        if indices:
+            indices_str = "Baignoire: " + indices
+        else:
+            # Fallback si aucun indice trouvé
+            indices_str = "Baignoire: Non spécifié"
+        
         return {
             'main_value': main_value,
             'confidence': confidence_pct,
-            'indices': indices
+            'indices': indices_str
         }
     except Exception as e:
-        # Fallback si erreur
+        # Fallback si erreur - toujours ajouter la phrase indice
         return {
             'main_value': "Non",
             'confidence': None,
-            'indices': None
+            'indices': "Baignoire: Non spécifié"
         }
 
 def get_all_apartment_photos(apartment):
@@ -1379,7 +1523,7 @@ def generate_scorecard_html(apartments):
             'prix': {'name': 'Prix', 'max': 20, 'formatter': format_prix_criterion},
             'style': {'name': 'Style', 'max': 20, 'formatter': format_style_criterion},
             'ensoleillement': {'name': 'Exposition', 'max': 10, 'formatter': format_exposition_criterion},
-            'cuisine': {'name': 'Cuisine ouverte', 'max': 10, 'formatter': format_cuisine_criterion},
+            'cuisine': {'name': 'Cuisine', 'max': 10, 'formatter': format_cuisine_criterion},
             'baignoire': {'name': 'Baignoire', 'max': 10, 'formatter': format_baignoire_criterion}
         }
         

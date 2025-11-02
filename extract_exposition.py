@@ -9,7 +9,9 @@ import re
 import json
 import os
 import requests
+import unicodedata
 from typing import Dict, List, Optional, Tuple
+from collections import Counter
 from analyze_photos import PhotoAnalyzer
 from analyze_contextual_exposition import ContextualExpositionAnalyzer
 from analyze_text_ai import TextAIAnalyzer
@@ -82,6 +84,27 @@ class ExpositionExtractor:
             'faible': ['vis-à-vis', 'vue obstruée', 'pas de vue', 'vue sur mur']
         }
     
+    def _add_brightness_to_result(self, result: Dict, photos: List[str]) -> Dict:
+        """Ajoute brightness_value aux détails d'un résultat, même si exposition déjà trouvée"""
+        if not photos or not result:
+            return result
+        
+        try:
+            photo_result = self.extract_exposition_photos(photos)
+            if photo_result and photo_result.get('photos_analyzed', 0) > 0:
+                photo_details = photo_result.get('details', {})
+                brightness_value = photo_details.get('brightness_value')
+                if brightness_value is not None:
+                    if 'details' not in result:
+                        result['details'] = {}
+                    result['details']['brightness_value'] = brightness_value
+                    result['details']['image_brightness'] = brightness_value
+        except Exception:
+            # En cas d'erreur, continuer sans brightness_value
+            pass
+        
+        return result
+    
     def extract_exposition_textuelle(self, description: str, caracteristiques: str = "", etage: str = "") -> Dict:
         """Extrait l'exposition depuis le texte (Phase 1)"""
         try:
@@ -134,6 +157,14 @@ class ExpositionExtractor:
                     etage_analyse = ai_result.get('etage_analyse', {})
                     vue_mentionnee = ai_result.get('vue_mentionnee', {})
                     indices_trouves = ai_result.get('indices_trouves', [])
+                    
+                    # NOUVELLE LOGIQUE : Si mention explicite étage ET/OU exposition → confiance 70%
+                    etage_trouve = etage_analyse.get('etage_trouve')
+                    exposition_explicite_detectee = bool(exposition_ia and not est_faux_positif)
+                    
+                    if (etage_trouve or exposition_explicite_detectee):
+                        # Monter à 70% de confiance si étage ET/OU exposition mentionnés
+                        confiance_globale = max(confiance_globale, 0.7)
                     
                     if not est_faux_positif and exposition_ia:
                         # Trouver l'exposition validée dans la liste
@@ -353,30 +384,53 @@ class ExpositionExtractor:
     def extract_exposition_complete(self, description: str, caracteristiques: str = "", photos_urls: List[str] = None, etage: str = "") -> Dict:
         """Extrait l'exposition en combinant analyse textuelle et photos (Phase 1 + 2)
         
-        Nouvelle logique:
-        1. Si exposition explicite trouvée → retourner directement
-        2. Sinon → analyser les photos
-        3. Si photos analysées → utiliser résultat photos
-        4. Sinon → retourner résultat textuel
+        NOUVELLE LOGIQUE:
+        1. PRIORITÉ 1: Analyse textuelle - Si mention explicite étage ET/OU exposition → confiance 70%
+        2. PRIORITÉ 2: Si confiance < 70% → analyser les photos (top 5) pour mesurer la luminosité moyenne
+        3. Agrégation basée sur la luminosité moyenne des photos (brightness)
         """
         # Phase 1: Analyse textuelle (avec bonus étage)
         text_result = self.extract_exposition_textuelle(description, caracteristiques, etage)
         
-        # Phase 2: Analyse des photos si disponibles
+        # Vérifier si confiance >= 70% (mention explicite détectée)
+        confiance_textuelle = 0.0
+        if text_result and isinstance(text_result, dict):
+            ai_analysis = text_result.get('details', {}).get('ai_analysis')
+            if ai_analysis:
+                confiance_textuelle = ai_analysis.get('confiance_globale', 0.0)
+        
+        # Même si confiance >= 70%, analyser les photos pour obtenir brightness_value
+        # Si confiance >= 70% → retourner directement (mais avec brightness_value si disponible)
+        if text_result and isinstance(text_result, dict) and confiance_textuelle >= 0.7:
+            # Toujours analyser les photos pour obtenir brightness_value
+            text_result = self._add_brightness_to_result(text_result, photos_urls)
+            return text_result
+        
+        # Phase 2: Si confiance < 70% → analyser les photos
         photo_result = None
         if photos_urls:
-            photo_result = self.extract_exposition_photos(photos_urls)
+            # Analyser les 5 premières photos pour détection précise
+            photos_to_analyze = photos_urls[:5]
+            photo_result = self.extract_exposition_photos(photos_to_analyze)
         
-        # Phase 3: Validation croisée texte + photos pour ajuster la confiance
+        # Phase 3: Si photos analysées → combiner avec résultat textuel
         if photo_result and photo_result.get('photos_analyzed', 0) > 0:
-            validation = self.photo_analyzer.validate_text_with_photos(text_result, photo_result, 'exposition')
-            
-            # Utiliser la confiance ajustée
-            confiance_ajustee = validation.get('confidence_adjusted', text_result.get('details', {}).get('ai_analysis', {}).get('confiance_globale', 0.5))
-            validation_status = validation.get('validation_status', 'text_only')
-            
-            # Construire résultat final enrichi
-            final_result = text_result.copy()
+            if text_result and isinstance(text_result, dict):
+                validation = self.photo_analyzer.validate_text_with_photos(text_result, photo_result, 'exposition')
+                
+                # Utiliser la confiance ajustée
+                ai_analysis = text_result.get('details', {}).get('ai_analysis')
+                confiance_textuelle_base = ai_analysis.get('confiance_globale', 0.5) if ai_analysis else 0.5
+                confiance_ajustee = validation.get('confidence_adjusted', confiance_textuelle_base)
+                validation_status = validation.get('validation_status', 'text_only')
+                
+                # Construire résultat final enrichi
+                final_result = text_result.copy()
+            else:
+                # Pas de résultat textuel → utiliser uniquement les photos
+                final_result = photo_result.copy()
+                confiance_ajustee = photo_result.get('confidence', 0.5)
+                validation_status = 'photo_only'
             
             # Mettre à jour la justification avec info de validation
             if validation_status == 'validated':
@@ -388,13 +442,25 @@ class ExpositionExtractor:
             if 'details' not in final_result:
                 final_result['details'] = {}
             final_result['details']['photo_validation'] = validation.get('cross_validation')
-            final_result['details']['ai_analysis'] = final_result['details'].get('ai_analysis', {})
+            
+            # Initialiser ai_analysis si nécessaire
+            if 'ai_analysis' not in final_result['details'] or final_result['details']['ai_analysis'] is None:
+                final_result['details']['ai_analysis'] = {}
             final_result['details']['ai_analysis']['confiance_globale'] = confiance_ajustee
             final_result['details']['ai_analysis']['validation_status'] = validation_status
             
+            # brightness_value est déjà dans photo_result.details, le copier si nécessaire
+            if 'brightness_value' not in final_result.get('details', {}):
+                photo_brightness = photo_result.get('details', {}).get('brightness_value')
+                if photo_brightness is not None:
+                    if 'details' not in final_result:
+                        final_result['details'] = {}
+                    final_result['details']['brightness_value'] = photo_brightness
+                    final_result['details']['image_brightness'] = photo_brightness
+            
             return final_result
         
-        # Pas de photos → retourner résultat textuel uniquement
+        # Pas de photos → retourner résultat textuel uniquement (brightness_value déjà ajouté si disponible)
         return text_result
     
     def extract_exposition_contextual(self, apartment_data: Dict) -> Dict:
@@ -419,8 +485,10 @@ class ExpositionExtractor:
         # Phase 1: Analyse textuelle (avec bonus étage)
         text_result = self.extract_exposition_textuelle(description, caracteristiques, etage)
         
-        # Si exposition explicite trouvée → retourner directement
+        # Si exposition explicite trouvée → analyser quand même les photos pour brightness_value
         if text_result.get('exposition_explicite', False) and text_result.get('exposition'):
+            # Toujours analyser les photos pour obtenir brightness_value
+            text_result = self._add_brightness_to_result(text_result, photos)
             return text_result
         
         # Phase 2: Analyse des photos (si pas d'exposition explicite)
@@ -437,9 +505,15 @@ class ExpositionExtractor:
         
         # Si contextuel confiant → combiner avec textuel
         if contextual_result.get('confidence', 0) > 0.5:
-            return self._combine_results(contextual_result, text_result)
+            combined = self._combine_results(contextual_result, text_result)
+            # Toujours ajouter brightness_value si photos disponibles
+            combined = self._add_brightness_to_result(combined, photos)
+            return combined
         
         # Sinon → retourner résultat textuel (peut être None si aucune info)
+        # Toujours ajouter brightness_value si photos disponibles
+        if text_result:
+            text_result = self._add_brightness_to_result(text_result, photos)
         return text_result
     
     def _combine_all_results(self, text_result: Dict, photo_result: Optional[Dict], contextual_result: Dict) -> Dict:
@@ -500,6 +574,277 @@ class ExpositionExtractor:
                 'text_details': text_result.get('details', {})
             }
         }
+    
+    def _normalize_orientation(self, text: str) -> str:
+        """Normalise l'orientation: minuscules, sans accents, sans espaces/traits"""
+        # Enlever accents
+        text = unicodedata.normalize('NFD', text.lower())
+        text = ''.join(c for c in text if unicodedata.category(c) != 'Mn')
+        # Enlever espaces et traits
+        text = text.replace(' ', '').replace('-', '').replace('_', '')
+        return text
+    
+    def _classify_orientation(self, orientation_text: str) -> Optional[str]:
+        """Classe l'orientation: Lumineux, Moyen, ou Sombre"""
+        if not orientation_text:
+            return None
+        
+        normalized = self._normalize_orientation(orientation_text)
+        
+        # Lumineux: sud, sudouest, sudest
+        if 'sudouest' in normalized or normalized == 'sudouest':
+            return 'Lumineux'
+        if 'sudest' in normalized or normalized == 'sudest':
+            return 'Lumineux'
+        if normalized == 'sud':
+            return 'Lumineux'
+        
+        # Sombre: nord, nordouest, nordest (vérifier AVANT est/ouest)
+        if 'nordouest' in normalized or normalized == 'nordouest':
+            return 'Sombre'
+        if 'nordest' in normalized or normalized == 'nordest':
+            return 'Sombre'
+        if normalized == 'nord':
+            return 'Sombre'
+        
+        # Moyen: est, ouest (seulement si pas de sud/nord)
+        if normalized == 'est':
+            return 'Moyen'
+        if normalized == 'ouest':
+            return 'Moyen'
+        
+        return None
+    
+    def _extract_etage_number(self, caracteristiques: str, etage: str = "") -> Optional[int]:
+        """Extrait le numéro d'étage depuis le texte"""
+        text = f"{caracteristiques} {etage}".lower()
+        
+        # Patterns pour détecter étage
+        patterns = [
+            r'\b(\d+)[èe]?me?\s*étage',
+            r'\bétage\s*(\d+)',
+            r'\b(\d+)[èe]?\s*étage',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                try:
+                    return int(match.group(1))
+                except (ValueError, IndexError):
+                    continue
+        
+        # Vérifier RDC
+        if re.search(r'\b(rdc|rez[\s-]de[\s-]chaussée|rez[\s-]de[\s-]chaussee)\b', text, re.IGNORECASE):
+            return 0
+        
+        return None
+    
+    def _classify_etage(self, etage_num: Optional[int]) -> Optional[str]:
+        """Classe l'étage: Lumineux, Moyen, ou Sombre"""
+        if etage_num is None:
+            return None
+        
+        if etage_num >= 5:
+            return 'Lumineux'
+        elif 2 <= etage_num <= 4:
+            return 'Moyen'
+        else:  # <= 1 ou RDC (0)
+            return 'Sombre'
+    
+    def _classify_image_brightness(self, brightness_value: float) -> Optional[str]:
+        """Classe l'exposition image: Lumineux, Moyen, ou Sombre"""
+        if brightness_value is None:
+            return None
+        
+        if brightness_value >= 0.70:
+            return 'Lumineux'
+        elif brightness_value >= 0.40:
+            return 'Moyen'
+        else:
+            return 'Sombre'
+    
+    def _get_image_intensity(self, brightness_value: float) -> str:
+        """Détermine l'intensité du signal image: Fort, Faible, ou Normal"""
+        if brightness_value is None:
+            return 'Normal'
+        
+        if brightness_value >= 0.85 or brightness_value <= 0.25:
+            return 'Fort'
+        elif 0.45 <= brightness_value <= 0.55:
+            return 'Faible'
+        else:
+            return 'Normal'
+    
+    def extract_exposition_voting(self, description: str, caracteristiques: str = "", 
+                                   etage: str = "", photos_urls: List[str] = None) -> Dict:
+        """Extrait l'exposition avec système de vote selon règles explicites
+        
+        Règles:
+        1. Classification par signal (orientation, étage, image)
+        2. Vote majoritaire pour décision finale
+        3. Calcul de confiance selon règles précises
+        """
+        try:
+            # 1. CLASSIFICATION PAR SIGNAL
+            
+            # Signal orientation
+            text = f"{description} {caracteristiques} {etage}".lower()
+            orientation_class = None
+            orientation_found = None
+            
+            # Chercher orientation dans le texte
+            for expo, details in self.expositions.items():
+                for keyword in details['keywords']:
+                    pattern = r'\b' + re.escape(keyword) + r'\b'
+                    if re.search(pattern, text, re.IGNORECASE):
+                        orientation_found = expo
+                        orientation_class = self._classify_orientation(expo)
+                        break
+                if orientation_class:
+                    break
+            
+            # Signal étage
+            etage_num = self._extract_etage_number(caracteristiques, etage)
+            etage_class = self._classify_etage(etage_num)
+            
+            # Signal image
+            image_class = None
+            image_brightness = None
+            image_intensity = 'Normal'
+            
+            if photos_urls:
+                photo_result = self.extract_exposition_photos(photos_urls[:5])
+                if photo_result and photo_result.get('photos_analyzed', 0) > 0:
+                    details = photo_result.get('details', {})
+                    image_brightness = details.get('brightness_value')
+                    if image_brightness is not None:
+                        image_class = self._classify_image_brightness(image_brightness)
+                        image_intensity = self._get_image_intensity(image_brightness)
+            
+            # 2. DÉCISION FINALE (vote majoritaire)
+            signals = []
+            if orientation_class:
+                signals.append(('orientation', orientation_class))
+            if etage_class:
+                signals.append(('etage', etage_class))
+            if image_class:
+                signals.append(('image', image_class))
+            
+            if not signals:
+                # Aucun signal → Moyen, 50%
+                return {
+                    'exposition': None,
+                    'score': 10,  # Moyen = 10 points
+                    'tier': 'tier2',
+                    'justification': 'Aucun signal disponible',
+                    'luminosite': 'moyen',
+                    'vue': 'inconnue',
+                    'confidence': 50,
+                    'details': {
+                        'method': 'voting',
+                        'signals': [],
+                        'final_class': 'Moyen',
+                        'vote_result': {}
+                    }
+                }
+            
+            # Compter les votes
+            votes = Counter([cls for _, cls in signals])
+            final_class = votes.most_common(1)[0][0] if votes else 'Moyen'
+            
+            # En cas d'égalité parfaite, tranche avec l'image
+            if len(votes) > 1 and len(set(votes.values())) == 1:  # Égalité parfaite
+                if image_class:
+                    final_class = image_class
+                    if image_intensity == 'Faible':
+                        final_class = 'Moyen'
+                else:
+                    final_class = 'Moyen'
+            
+            # Points selon classe finale
+            points_map = {'Lumineux': 20, 'Moyen': 10, 'Sombre': 0}
+            score = points_map.get(final_class, 10)
+            
+            # 3. CALCUL DE CONFIANCE
+            
+            # Base: 60% si un seul signal
+            if len(signals) == 1:
+                confidence = 60
+            else:
+                # Base: 60% pour plusieurs signaux
+                confidence = 60
+                # +20% pour chaque signal d'accord avec la classe finale
+                # -15% pour chaque signal en désaccord
+                for signal_name, signal_class in signals:
+                    if signal_class == final_class:
+                        confidence += 20
+                    else:
+                        confidence -= 15
+            
+            # +10% si image forte et d'accord avec classe finale
+            if image_intensity == 'Fort' and image_class == final_class:
+                confidence += 10
+            
+            # -10% si image faible (quelle que soit la classe)
+            if image_intensity == 'Faible':
+                confidence -= 10
+            
+            # Bornes: min 50%, max 95%
+            confidence = max(50, min(95, confidence))
+            
+            # Construire justification
+            justification_parts = []
+            if orientation_class:
+                justification_parts.append(f"Orientation: {orientation_class}")
+            if etage_class:
+                justification_parts.append(f"Étage: {etage_class}")
+            if image_class:
+                justification_parts.append(f"Image: {image_class} (brightness: {image_brightness:.2f}, intensity: {image_intensity})")
+            justification_parts.append(f"Vote: {final_class} ({confidence}% confiance)")
+            
+            justification = " | ".join(justification_parts)
+            
+            # Déterminer tier
+            if final_class == 'Lumineux':
+                tier = 'tier1'
+            elif final_class == 'Moyen':
+                tier = 'tier2'
+            else:
+                tier = 'tier3'
+            
+            return {
+                'exposition': orientation_found,
+                'score': score,
+                'tier': tier,
+                'justification': justification,
+                'luminosite': final_class.lower(),
+                'vue': 'inconnue',
+                'confidence': confidence,
+                'details': {
+                    'method': 'voting',
+                    'signals': [
+                        {'name': name, 'class': cls} for name, cls in signals
+                    ],
+                    'final_class': final_class,
+                    'vote_result': dict(votes),
+                    'image_brightness': image_brightness,
+                    'image_intensity': image_intensity,
+                    'etage_num': etage_num
+                }
+            }
+            
+        except Exception as e:
+            return {
+                'exposition': None,
+                'score': 10,
+                'tier': 'tier2',
+                'justification': f"Erreur extraction voting: {e}",
+                'luminosite': 'moyen',
+                'vue': 'inconnue',
+                'confidence': 50,
+                'details': {'error': str(e)}
+            }
 
 def test_exposition_extraction():
     """Test de l'extraction d'exposition"""

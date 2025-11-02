@@ -29,7 +29,7 @@ class CuisineTextExtractor:
                 if cuisine_ouverte is True:
                     return {
                         'ouverte': True,
-                        'confidence': confidence,
+                        'confidence': 0.8,  # Mentionné seulement → 80%
                         'justification': f"Analyse IA: {justification}",
                         'method': 'ai_text_analysis',
                         'indices': indices
@@ -37,7 +37,7 @@ class CuisineTextExtractor:
                 elif cuisine_ouverte is False:
                     return {
                         'ouverte': False,
-                        'confidence': confidence,
+                        'confidence': 0.8,  # Mentionné seulement → 80%
                         'justification': f"Analyse IA: {justification}",
                         'method': 'ai_text_analysis',
                         'indices': indices
@@ -103,44 +103,76 @@ class CuisineTextExtractor:
         # Phase 3: Validation croisée texte + photos
         if photo_result and photo_result.get('photos_analyzed', 0) > 0:
             validation = self.photo_analyzer.validate_text_with_photos(text_result, photo_result, 'cuisine')
-            
-            # Utiliser la confiance ajustée
-            confiance_ajustee = validation.get('confidence_adjusted', text_result.get('confidence', 0))
             validation_status = validation.get('validation_status', 'text_only')
             
             # Construire résultat final enrichi
             final_result = text_result.copy()
             
+            # Vérifier si le texte a un résultat valide (pas None) = mentionné
+            text_has_result = text_result.get('ouverte') is not None
+            
+            # Vérifier si les photos ont détecté quelque chose
+            photo_has_result = photo_result.get('ouverte') is not None
+            
+            # Calculer la confiance selon les règles simples :
+            # - Si seulement mentionné dans le texte : 80%
+            # - Si seulement détecté par photos : 60%
+            # - Si les deux (mentionné + détecté) : 90%
+            if text_has_result and photo_has_result:
+                confiance_finale = 0.9  # Les deux : 90%
+            elif text_has_result:
+                confiance_finale = 0.8  # Seulement mentionné : 80%
+            elif photo_has_result:
+                confiance_finale = 0.6  # Seulement détecté : 60%
+            else:
+                confiance_finale = 0.0  # Aucun des deux
+            
             # Si photos confirment ou contredisent, ajuster le résultat
             if validation_status == 'validated':
-                # Cohérent → utiliser résultat texte mais avec confiance augmentée
-                final_result['confidence'] = confiance_ajustee
-                final_result['justification'] += f" | ✅ Validé par photos (confiance: {confiance_ajustee:.0%})"
-            elif validation_status == 'conflict':
-                # Incohérent → préférer photos si plus confiantes
-                photo_confidence = photo_result.get('confidence', 0)
-                text_confidence = text_result.get('confidence', 0)
-                
-                if photo_confidence > text_confidence:
-                    # Photos plus confiantes → utiliser résultat photos
+                # Cohérent → utiliser résultat texte si disponible, sinon utiliser photos
+                if text_has_result:
+                    # Texte a un résultat → utiliser texte avec confiance calculée
+                    final_result['confidence'] = confiance_finale
+                    if photo_has_result:
+                        final_result['justification'] += f" | ✅ Validé par photos (confiance: {confiance_finale:.0%})"
+                    else:
+                        final_result['justification'] += f" | (confiance: {confiance_finale:.0%})"
+                else:
+                    # Texte n'a pas de résultat → utiliser résultat photos
                     final_result = {
                         'ouverte': photo_result.get('ouverte'),
-                        'confidence': confiance_ajustee,
-                        'justification': f"{photo_result.get('justification', '')} | ⚠️ Conflit avec texte, photos prioritaires",
+                        'confidence': confiance_finale,
+                        'justification': f"{photo_result.get('justification', '')} | ✅ Détecté par photos (confiance: {confiance_finale:.0%})",
+                        'method': 'photo_analysis',
+                        'indices': text_result.get('indices', [])
+                    }
+            elif validation_status == 'conflict':
+                # Incohérent → préférer photos si plus confiantes OU si texte n'a pas de résultat
+                # En cas de conflit, utiliser quand même la règle de confiance simple
+                if not text_has_result or (photo_has_result and not text_has_result):
+                    # Photos disponibles OU texte sans résultat → utiliser résultat photos
+                    final_result = {
+                        'ouverte': photo_result.get('ouverte'),
+                        'confidence': confiance_finale,
+                        'justification': f"{photo_result.get('justification', '')} | ⚠️ Conflit avec texte, photos prioritaires (confiance: {confiance_finale:.0%})",
                         'method': 'photo_analysis',
                         'indices': text_result.get('indices', [])
                     }
                 else:
-                    # Texte plus confiant → garder texte mais réduire confiance
-                    final_result['confidence'] = confiance_ajustee
-                    final_result['justification'] += f" | ⚠️ Conflit avec photos (confiance: {confiance_ajustee:.0%})"
+                    # Texte disponible → garder texte avec confiance calculée
+                    final_result['confidence'] = confiance_finale
+                    final_result['justification'] += f" | ⚠️ Conflit avec photos (confiance: {confiance_finale:.0%})"
             
-            # Ajouter les infos de validation
+            # Ajouter les infos de validation et les numéros d'images détectées
             final_result['photo_validation'] = validation.get('cross_validation')
             final_result['validation_status'] = validation_status
+            final_result['detected_photos'] = photo_result.get('detected_photos', [])
             
             return final_result
         
-        # Pas de photos → retourner résultat textuel uniquement
+        # Pas de photos → retourner résultat textuel uniquement avec confiance 80% si mentionné
+        if text_result.get('ouverte') is not None:
+            # Mentionné dans le texte seulement → confiance 80%
+            text_result['confidence'] = 0.8
         return text_result
 

@@ -408,18 +408,37 @@ Réponds au format JSON STRICT:
             # Construire résultat final enrichi
             final_result = text_result.copy()
             
+            # Vérifier si le texte a un résultat valide (pas None) = mentionné
+            text_has_result = text_result.get('has_baignoire') is not None or text_result.get('has_douche') is not None
+            
+            # Vérifier si les photos ont détecté quelque chose
+            photo_has_result = photo_result.get('has_baignoire') is not None or photo_result.get('has_douche') is not None
+            
+            # Calculer la confiance selon les règles simples :
+            # - Si seulement mentionné dans le texte : 80%
+            # - Si seulement détecté par photos : 60%
+            # - Si les deux (mentionné + détecté) : 90%
+            if text_has_result and photo_has_result:
+                confiance_finale = 0.9  # Les deux : 90%
+            elif text_has_result:
+                confiance_finale = 0.8  # Seulement mentionné : 80%
+            elif photo_has_result:
+                confiance_finale = 0.6  # Seulement détecté : 60%
+            else:
+                confiance_finale = 0.0  # Aucun des deux
+            
             # Si photos confirment ou contredisent, ajuster le résultat
             if validation_status == 'validated':
-                # Cohérent → utiliser résultat texte mais avec confiance augmentée
-                final_result['confidence'] = int(confiance_ajustee * 100)
-                final_result['justification'] += f" | ✅ Validé par photos (confiance: {confiance_ajustee:.0%})"
-            elif validation_status == 'conflict':
-                # Incohérent → préférer photos si plus confiantes
-                photo_confidence = photo_result.get('confidence', 0)
-                text_confidence = text_result.get('confidence', 0) / 100
-                
-                if photo_confidence > text_confidence:
-                    # Photos plus confiantes → utiliser résultat photos
+                # Cohérent → utiliser résultat texte si disponible, sinon utiliser photos
+                if text_has_result:
+                    # Texte a un résultat → utiliser texte avec confiance calculée
+                    final_result['confidence'] = int(confiance_finale * 100)
+                    if photo_has_result:
+                        final_result['justification'] += f" | ✅ Validé par photos (confiance: {confiance_finale:.0%})"
+                    else:
+                        final_result['justification'] += f" | (confiance: {confiance_finale:.0%})"
+                else:
+                    # Texte n'a pas de résultat → utiliser résultat photos
                     final_result = {
                         'has_baignoire': photo_result.get('has_baignoire', False),
                         'has_douche': photo_result.get('has_douche', False),
@@ -428,24 +447,57 @@ Réponds au format JSON STRICT:
                         'found_in_caracteristiques': False,
                         'score': photo_result.get('score', 0),
                         'tier': photo_result.get('tier', 'tier3'),
-                        'justification': f"{photo_result.get('justification', '')} | ⚠️ Conflit avec texte, photos prioritaires",
-                        'confidence': int(confiance_ajustee * 100),
+                        'justification': f"{photo_result.get('justification', '')} | ✅ Détecté par photos (confiance: {confiance_finale:.0%})",
+                        'confidence': int(confiance_finale * 100),
+                        'photos_analyzed': photo_result.get('photos_analyzed', 0)
+                    }
+            elif validation_status == 'conflict':
+                # Incohérent → préférer photos si plus confiantes OU si texte n'a pas de résultat
+                # En cas de conflit, utiliser quand même la règle de confiance simple
+                if not text_has_result or (photo_has_result and not text_has_result):
+                    # Photos disponibles OU texte sans résultat → utiliser résultat photos
+                    final_result = {
+                        'has_baignoire': photo_result.get('has_baignoire', False),
+                        'has_douche': photo_result.get('has_douche', False),
+                        'detected_from_text': False,
+                        'found_in_description': False,
+                        'found_in_caracteristiques': False,
+                        'score': photo_result.get('score', 0),
+                        'tier': photo_result.get('tier', 'tier3'),
+                        'justification': f"{photo_result.get('justification', '')} | ⚠️ Conflit avec texte, photos prioritaires (confiance: {confiance_finale:.0%})",
+                        'confidence': int(confiance_finale * 100),
                         'photos_analyzed': photo_result.get('photos_analyzed', 0)
                     }
                 else:
-                    # Texte plus confiant → garder texte mais réduire confiance
-                    final_result['confidence'] = int(confiance_ajustee * 100)
-                    final_result['justification'] += f" | ⚠️ Conflit avec photos (confiance: {confiance_ajustee:.0%})"
+                    # Texte disponible → garder texte avec confiance calculée
+                    final_result['confidence'] = int(confiance_finale * 100)
+                    final_result['justification'] += f" | ⚠️ Conflit avec photos (confiance: {confiance_finale:.0%})"
             
-            # Ajouter les infos de validation dans les détails
+            # Ajouter les infos de validation et les numéros d'images détectées
+            # Structurer comme pour la cuisine avec photo_validation.photo_result
             if 'details' not in final_result:
                 final_result['details'] = {}
-            final_result['details']['photo_validation'] = validation.get('cross_validation')
+            
+            # Créer photo_result pour compatibilité avec le formatage cuisine
+            photo_result_formatted = {
+                'has_baignoire': photo_result.get('has_baignoire'),
+                'has_douche': photo_result.get('has_douche'),
+                'detected_photos': photo_result.get('detected_photos', [])
+            }
+            
+            final_result['details']['photo_validation'] = {
+                'cross_validation': validation.get('cross_validation'),
+                'photo_result': photo_result_formatted
+            }
             final_result['details']['validation_status'] = validation_status
+            final_result['detected_photos'] = photo_result.get('detected_photos', [])
             
             return final_result
         
-        # Pas de photos → retourner résultat textuel uniquement
+        # Pas de photos → retourner résultat textuel uniquement avec confiance 80% si mentionné
+        if text_result.get('has_baignoire') is not None or text_result.get('has_douche') is not None:
+            # Mentionné dans le texte seulement → confiance 80%
+            text_result['confidence'] = 80
         return text_result
     
     def extract_baignoire_ultimate(self, apartment_data: Dict) -> Dict:

@@ -99,29 +99,6 @@
         }
       }
     },
-    "etage": {
-      "poids": 10,
-      "description": "Étage et présence d'ascenseur",
-      "tiers": {
-        "tier1": {
-          "score": 10,
-          "etages": ["3e", "4e"],
-          "conditions": ["Avec ascenseur", "Plus si ascenseur"],
-          "description": "Étages optimaux"
-        },
-        "tier2": {
-          "score": 5,
-          "etages": ["5e", "6e", "2e"],
-          "conditions": ["Sans ascenseur pour 5e-6e"],
-          "description": "Étages corrects"
-        },
-        "tier3": {
-          "score": 0,
-          "etages": ["RDC", "1er"],
-          "description": "Étages moins recherchés"
-        }
-      }
-    },
     "surface": {
       "poids": 5,
       "description": "Surface habitable",
@@ -162,6 +139,24 @@
           "score": 0,
           "conditions": ["Pas ouverte et peu de travaux possibles"],
           "description": "Cuisine fermée sans possibilité d'ouverture"
+        }
+      }
+    },
+    "etage": {
+      "poids": 5,
+      "description": "Étage de l'appartement",
+      "tiers": {
+        "tier1": {
+          "score": 5,
+          "description": "3e, 4e étage ou étage supérieur avec ascenseur"
+        },
+        "tier2": {
+          "score": 2.5,
+          "description": "2e, 5e, 6e étage"
+        },
+        "tier3": {
+          "score": 0,
+          "description": "RDC, 1er étage ou étage supérieur sans ascenseur"
         }
       }
     },

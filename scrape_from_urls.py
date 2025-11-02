@@ -9,21 +9,69 @@ import json
 import os
 from scrape_jinka import JinkaScraper
 
-async def scrape_from_urls():
-    """Scrape directement depuis les URLs"""
+async def scrape_from_urls(urls_file=None):
+    """
+    Scrape directement depuis les URLs
+    
+    Args:
+        urls_file: Chemin vers le fichier JSON contenant les URLs (optionnel)
+                   Par défaut, essaie plusieurs sources dans l'ordre:
+                   1. all_apartment_urls_merged.json (fusion de toutes les sources)
+                   2. all_apartment_urls_from_email.json (depuis emails)
+                   3. apartment_urls_page1.json (depuis dashboard)
+                   4. all_apartments_scores.json (depuis scores existants)
+    """
     print("🏠 SCRAPING DIRECT DEPUIS LES URLs")
     print("=" * 50)
     
-    # Charger les URLs depuis all_apartments_scores.json
-    scores_file = "data/scores/all_apartments_scores.json"
-    if os.path.exists(scores_file):
-        with open(scores_file, 'r', encoding='utf-8') as f:
-            scored_data = json.load(f)
-        apartment_urls = [apt.get('url', '') for apt in scored_data if apt.get('url')]
-        print(f"{len(apartment_urls)} appartements détectés depuis {scores_file} !")
+    apartment_urls = []
+    
+    # Déterminer le fichier source
+    if urls_file:
+        source_files = [urls_file]
     else:
-        print("❌ Fichier all_apartments_scores.json non trouvé")
-        apartment_urls = []
+        # Ordre de priorité pour les fichiers sources
+        source_files = [
+            "data/all_apartment_urls_merged.json",
+            "data/all_apartment_urls_from_email.json",
+            "data/apartment_urls_page1.json",
+            "data/scores/all_apartments_scores.json"
+        ]
+    
+    # Charger depuis le premier fichier disponible
+    for file_path in source_files:
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                # Gérer différents formats
+                if isinstance(data, list):
+                    apartment_urls = [url if isinstance(url, str) else url.get('url', '') for url in data if url]
+                elif isinstance(data, dict):
+                    if 'urls' in data:
+                        apartment_urls = data['urls']
+                    else:
+                        # Peut être un dict d'objets avec 'url'
+                        apartment_urls = [item.get('url', '') for item in data.values() if isinstance(item, dict) and item.get('url')]
+                
+                # Filtrer les URLs vides
+                apartment_urls = [url for url in apartment_urls if url and isinstance(url, str)]
+                
+                if apartment_urls:
+                    print(f"✅ {len(apartment_urls)} URLs chargées depuis: {file_path}")
+                    break
+            except Exception as e:
+                print(f"⚠️ Erreur lors du chargement de {file_path}: {e}")
+                continue
+    
+    if not apartment_urls:
+        print("❌ Aucune URL trouvée dans les fichiers sources")
+        print("   Fichiers essayés:")
+        for f in source_files:
+            exists = "✅" if os.path.exists(f) else "❌"
+            print(f"   {exists} {f}")
+        return False
     
     print()
     

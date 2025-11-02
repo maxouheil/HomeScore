@@ -567,7 +567,7 @@ def generate_html(apartments):
         'prix': {'name': 'PRIX', 'max': 20, 'formatter': format_prix},
         'style': {'name': 'STYLE', 'max': 20, 'formatter': format_style},
         'ensoleillement': {'name': 'EXPOSITION', 'max': 10, 'formatter': format_exposition},
-        'cuisine': {'name': 'CUISINE OUVERTE', 'max': 10, 'formatter': format_cuisine},
+        'cuisine': {'name': 'CUISINE', 'max': 10, 'formatter': format_cuisine},
         'baignoire': {'name': 'BAIGNOIRE', 'max': 10, 'formatter': format_baignoire}
     }
     

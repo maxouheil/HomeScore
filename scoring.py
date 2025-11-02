@@ -330,149 +330,57 @@ def score_style(apartment, config):
 
 
 def score_ensoleillement(apartment, config):
-    """Score ensoleillement avec validation croisée texte + photos
-    Utilise extract_exposition_complete() pour analyse enrichie
+    """Score ensoleillement selon règles de vote par signal
     Barème: Lumineux = 20 pts, Moyenne = 10 pts, Sombre = 0 pts
     """
     tier_config = config['axes']['ensoleillement']['tiers']
     
-    # Utiliser la nouvelle méthode avec validation croisée
+    # Utiliser format_exposition qui implémente déjà les règles de vote
+    from criteria.exposition import format_exposition
+    
     try:
-        from extract_exposition import ExpositionExtractor
-        extractor = ExpositionExtractor()
+        result = format_exposition(apartment)
+        main_value = result.get('main_value', 'Luminosité moyenne')
+        confidence = result.get('confidence', 50)
         
-        description = apartment.get('description', '')
-        caracteristiques = apartment.get('caracteristiques', '')
-        etage = apartment.get('etage', '')
-        photos = apartment.get('photos', [])
+        # Convertir main_value en tier et score
+        if main_value == 'Lumineux':
+            tier = 'tier1'
+            score = tier_config['tier1']['score']
+        elif main_value == 'Luminosité moyenne':
+            tier = 'tier2'
+            score = tier_config['tier2']['score']
+        else:  # Sombre
+            tier = 'tier3'
+            score = tier_config['tier3']['score']
         
-        # Extraire les URLs des photos si liste de dicts
-        photos_urls = []
-        if photos:
-            for photo in photos:
-                if isinstance(photo, dict):
-                    photos_urls.append(photo.get('url', ''))
-                elif isinstance(photo, str):
-                    photos_urls.append(photo)
+        # Construire la justification
+        indices = result.get('indices', '')
+        justification = main_value
+        if indices:
+            justification = f"{main_value} ({indices})"
         
-        exposition_result = extractor.extract_exposition_complete(
-            description, caracteristiques, photos_urls, etage
-        )
-        
-        exposition_dir_raw = exposition_result.get('exposition') or ''
-        exposition_dir = exposition_dir_raw.lower() if exposition_dir_raw else ''
-        exposition_score = exposition_result.get('score', 0)
-        exposition_tier = exposition_result.get('tier', 'tier3')
-        
-        # Convertir score exposition (0-10) vers score ensoleillement (0-20)
-        # Score 10 = tier1 = 20pts, Score 7 = tier2 = 10pts, Score <7 = tier3 = 0pts
-        if exposition_score >= 10 or exposition_tier == 'tier1':
-            return {
-                'score': tier_config['tier1']['score'],
-                'tier': 'tier1',
-                'justification': exposition_result.get('justification', f"Exposition {exposition_dir}"),
-                'details': exposition_result.get('details', {})
-            }
-        elif exposition_score >= 7 or exposition_tier == 'tier2':
-            return {
-                'score': tier_config['tier2']['score'],
-                'tier': 'tier2',
-                'justification': exposition_result.get('justification', f"Exposition {exposition_dir}"),
-                'details': exposition_result.get('details', {})
-            }
-        else:
-            return {
-                'score': tier_config['tier3']['score'],
-                'tier': 'tier3',
-                'justification': exposition_result.get('justification', f"Exposition {exposition_dir}"),
-                'details': exposition_result.get('details', {})
-            }
-    except Exception as e:
-        # Fallback sur méthode ancienne si erreur
-        pass
-    
-    # Fallback: méthode ancienne
-    style_analysis = apartment.get('style_analysis', {})
-    luminosite_data = style_analysis.get('luminosite', {})
-    luminosite_type = (luminosite_data.get('type') or '').lower()
-    
-    exposition = apartment.get('exposition', {})
-    exposition_dir_raw = exposition.get('exposition') or ''
-    exposition_dir = exposition_dir_raw.lower() if exposition_dir_raw else ''
-    
-    # Tier1: Lumineux = 20 pts
-    # Détecter "lumineux", "excellente", "excellent"
-    if 'lumineux' in luminosite_type or 'excellente' in luminosite_type or 'excellent' in luminosite_type:
-        if exposition_dir in ['sud', 'sud-ouest', 'sud-ouest']:
-            return {
-                'score': tier_config['tier1']['score'],
-                'tier': 'tier1',
-                'justification': f"Lumineux, exposition {exposition_dir}"
-            }
-        # Si lumineux mais exposition différente → tier1 quand même (20 pts)
-        elif exposition_dir:
-            return {
-                'score': tier_config['tier1']['score'],
-                'tier': 'tier1',
-                'justification': f"Lumineux, exposition {exposition_dir}"
-            }
-        # Lumineux mais pas d'exposition → tier1 (20 pts)
-        else:
-            return {
-                'score': tier_config['tier1']['score'],
-                'tier': 'tier1',
-                'justification': f"Lumineux"
-            }
-    
-    # Tier2: Luminosité moyenne = 10 pts
-    # Détecter "moyenne", "moyen", "bonne", "bon"
-    if 'moyenne' in luminosite_type or 'moyen' in luminosite_type or 'bonne' in luminosite_type or 'bon' in luminosite_type:
         return {
-            'score': tier_config['tier2']['score'],
-            'tier': 'tier2',
-            'justification': f"Luminosité moyenne{', exposition ' + exposition_dir if exposition_dir else ''}"
+            'score': score,
+            'tier': tier,
+            'justification': justification,
+            'confidence': confidence,
+            'details': apartment.get('exposition', {}).get('details', {})
         }
-    
-    # Tier3: Sombre = 0 pts
-    # Détecter "sombre", "faible", "limitée", "limitée"
-    if 'sombre' in luminosite_type or 'faible' in luminosite_type or 'limitée' in luminosite_type or 'limitee' in luminosite_type:
+    except Exception as e:
+        # Fallback en cas d'erreur
+        import traceback
+        print(f"⚠️ Erreur dans score_ensoleillement: {e}")
+        traceback.print_exc()
+        
+        # Fallback minimal
         return {
             'score': tier_config['tier3']['score'],
             'tier': 'tier3',
-            'justification': f"Sombre{', exposition ' + exposition_dir if exposition_dir else ''}"
+            'justification': 'Erreur de calcul',
+            'confidence': 50,
+            'details': {}
         }
-    
-    # Si luminosité manquante mais exposition disponible, utiliser l'exposition comme fallback
-    if not luminosite_type or luminosite_type == 'inconnue' or luminosite_type == 'inconnu':
-        if exposition_dir:
-            # Tier1: Sud, Sud-Ouest → considéré comme lumineux (20 pts)
-            if exposition_dir in ['sud', 'sud-ouest', 'sud-ouest']:
-                return {
-                    'score': tier_config['tier1']['score'],
-                    'tier': 'tier1',
-                    'justification': f"Exposition {exposition_dir} (Sud/Sud-Ouest considéré comme lumineux)"
-                }
-            # Tier2: Ouest, Est → considéré comme moyenne (10 pts)
-            elif exposition_dir in ['ouest', 'est']:
-                return {
-                    'score': tier_config['tier2']['score'],
-                    'tier': 'tier2',
-                    'justification': f"Exposition {exposition_dir} (Ouest/Est considéré comme moyenne)"
-                }
-            # Tier3: Nord, Nord-Est → considéré comme sombre (0 pts)
-            elif exposition_dir in ['nord', 'nord-est']:
-                return {
-                    'score': tier_config['tier3']['score'],
-                    'tier': 'tier3',
-                    'justification': f"Exposition {exposition_dir} (Nord/Nord-Est considéré comme sombre)"
-                }
-    
-    # tier3 par défaut (aucune info ou luminosité non reconnue)
-    return {
-        'score': tier_config['tier3']['score'],
-        'tier': 'tier3',
-        'justification': f"Luminosité: {luminosite_type if luminosite_type else 'non disponible'} (0 pts par défaut)"
-    }
 
 
 def score_etage(apartment, config):

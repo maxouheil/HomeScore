@@ -35,3 +35,4 @@
 - [ ] Les modifications sont dans `generate_scorecard_html.py`
 - [ ] Le HTML a été régénéré avec la commande correcte
 
+

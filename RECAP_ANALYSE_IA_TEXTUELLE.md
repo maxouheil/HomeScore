@@ -252,3 +252,4 @@ Si l'IA n'est pas disponible (pas de clé API, erreur, timeout) :
 **Date de création** : 2025-01-31  
 **Version** : 1.0 - Analyse IA textuelle intelligente
 
+

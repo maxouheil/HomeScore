@@ -35,19 +35,53 @@ function getEtage(apartment) {
 }
 
 function formatExpositionCriterion(apartment, etage) {
-  const styleAnalysis = apartment.style_analysis || {}
-  const luminositeData = styleAnalysis.luminosite || {}
-  const luminositeType = luminositeData.type || ''
+  // Utiliser les données formatées depuis le backend si disponibles
+  if (apartment.formatted_data?.exposition) {
+    return {
+      mainValue: apartment.formatted_data.exposition.main_value || 'Sombre',
+      indices: apartment.formatted_data.exposition.indices || null,
+      confidence: apartment.formatted_data.exposition.confidence || null
+    }
+  }
   
-  let mainValue = 'Sombre'
-  if (luminositeType.toLowerCase().includes('excellente')) {
-    mainValue = 'Lumineux'
-  } else if (luminositeType.toLowerCase().includes('bonne') || luminositeType.toLowerCase().includes('moyenne')) {
-    mainValue = 'Luminosité moyenne'
+  // Fallback: utiliser directement apartment.exposition si disponible
+  const exposition = apartment.exposition || {}
+  const expositionDir = exposition.exposition || ''
+  
+  // Classifier l'orientation pour déterminer mainValue
+  let mainValue = 'Luminosité moyenne' // Par défaut
+  if (expositionDir) {
+    const expoNormalized = expositionDir.toLowerCase().replace(/[_\s-]/g, '')
+    // Lumineux: sud, sudouest, sudest
+    if (expoNormalized === 'sud' || expoNormalized === 'sudouest' || expoNormalized === 'sudest') {
+      mainValue = 'Lumineux'
+    }
+    // Sombre: nord, nordouest, nordest
+    else if (expoNormalized === 'nord' || expoNormalized === 'nordouest' || expoNormalized === 'nordest') {
+      mainValue = 'Sombre'
+    }
+    // Moyen: est, ouest (déjà la valeur par défaut)
+  }
+  
+  // Si pas d'exposition directionnelle, essayer style_analysis
+  if (!expositionDir) {
+    const styleAnalysis = apartment.style_analysis || {}
+    const luminositeData = styleAnalysis.luminosite || {}
+    const luminositeType = luminositeData.type || ''
+    
+    if (luminositeType.toLowerCase().includes('excellente')) {
+      mainValue = 'Lumineux'
+    } else if (luminositeType.toLowerCase().includes('bonne') || luminositeType.toLowerCase().includes('moyenne')) {
+      mainValue = 'Luminosité moyenne'
+    } else {
+      mainValue = 'Sombre'
+    }
   }
   
   return {
-    mainValue
+    mainValue,
+    indices: null,
+    confidence: exposition.confidence || null
   }
 }
 

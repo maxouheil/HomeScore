@@ -54,3 +54,4 @@ ls -lh output/homepage.html
 
 ✅ **Le fichier central est maintenant à jour et ne bloque plus !**
 
+

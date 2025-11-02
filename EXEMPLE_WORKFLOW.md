@@ -194,3 +194,4 @@ Quand vous avez fini vos modifications :
 - Les modifications dans `output/` ne déclenchent pas de régénération (évite les boucles)
 - Si le script de génération plante, le watch continue de tourner
 
+

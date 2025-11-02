@@ -56,8 +56,9 @@ Détecte si une VUE est mentionnée (dégagée, panoramique, sur cour, vis-à-vi
 
 ### 4. CONFIDENCE GLOBALE
 Calcule une confiance globale (0.0-1.0) basée sur :
-- Exposition explicite trouvée = +0.4 à +0.6
-- Étage élevé (4ème+) = +0.1 à +0.2
+- **MENTION EXPLICITE ÉTAGE ET/OU EXPOSITION** = **0.7 (70%)** : Si étage mentionné ET/OU exposition (points cardinaux) mentionnée explicitement
+- Exposition explicite seule = 0.5-0.6
+- Étage élevé (4ème+) seul = 0.4-0.5
 - Vue dégagée mentionnée = +0.1 à +0.2
 - Combinaison de plusieurs indices positifs = +0.1 bonus
 - Faux positif détecté = confiance très faible (0.0-0.2)
@@ -155,7 +156,9 @@ Détermine le style parmi ces catégories :
 
 **"haussmannien"** (Ancien - 20pts) :
 - Bâtiments 1850-1900 (période Haussmann)
-- Éléments caractéristiques : parquet ancien, moulures, corniches, cheminée, hauteur sous plafond élevée (3m+), balcon en fer forgé, fenêtres hautes, plafonds moulurés
+- Éléments caractéristiques : parquet ancien, moulures, corniches, cheminée, hauteur sous plafond élevée (3m+), balcon en fer forgé, balcons en fer forgé, fenêtres hautes, plafonds moulurés
+- Mentions importantes : "immeuble entièrement restauré", "restauré", "rénové", "ancien immeuble"
+- Poutres apparentes dans un ancien immeuble restauré = haussmannien (pas atypique si contexte ancien)
 
 **"atypique"** (Atypique - 10pts) :
 - Loft, ancien entrepôt aménagé, ancienne usine, ancien atelier
@@ -170,6 +173,8 @@ Détermine le style parmi ces catégories :
 - Design moderne, contemporain, clean, minimaliste
 - Terrasse métal, sol moderne, fenêtres modernes, hauteur plafond réduite
 - Lignes épurées, matériaux modernes
+- **INDICES FORTS** : "vue sur Paris" + "étage élevé" (5ème+, 10ème+) = très caractéristique du Neuf
+- Étages élevés (10ème+, dernier étage) avec vue = souvent Neuf
 
 **"autre"** :
 - Autres styles non catégorisés
@@ -184,6 +189,12 @@ Détermine le style parmi ces catégories :
 - "volume atypique" = **atypique**
 - "caractère unique" + indices anciens = **atypique**
 - "haussmannien" explicite = **haussmannien**
+- "immeuble entièrement restauré" + indices anciens = **haussmannien** (fort indice!)
+- "restauré" ou "rénové" + moulures/parquet/balcon fer forgé = **haussmannien**
+- "poutres apparentes" + contexte ancien/immeuble restauré = **haussmannien** (pas atypique!)
+- "balcon en fer forgé" ou "balcons en fer forgé" = **haussmannien** (très caractéristique!)
+- "vue sur Paris" + "étage élevé" (5ème+, 10ème+) = **moderne/Neuf** (très caractéristique!)
+- "dernier étage" + "vue panoramique" = souvent **moderne/Neuf**
 - "années 70" ou "design années 70" = **moderne** (pas atypique !)
 - "contemporain" ou "moderne" = **moderne**
 
@@ -196,12 +207,12 @@ Identifie TOUS les indices présents :
 
 ### 4. CONFIDENCE GLOBALE
 Calcule une confiance globale (0.0-1.0) basée sur :
-- Style explicite mentionné ("haussmannien", "loft", "ancien entrepôt") = +0.4 à +0.6
+- **MENTION EXPLICITE + CARACTÉRISTIQUES** = **1.0 (100%)** : Si style explicite mentionné ("haussmannien", "loft", "ancien entrepôt") ET au moins un indice architectural correspondant présent
+- Style explicite mentionné seul = 0.7-0.9
 - Plusieurs indices cohérents avec le style = +0.2 à +0.3
 - Contexte clair (conversion d'entrepôt mentionnée) = +0.2
 - Indices contradictoires = -0.2 à -0.3
 - Peu d'indices = confiance faible (0.3-0.5)
-- Indices très clairs et nombreux = confiance élevée (0.8-1.0)
 
 Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
 {{
@@ -216,8 +227,8 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
         "confiance_contexte": 0.0-1.0
     }},
     "indices_architecturaux": {{
-        "elements_haussmannien": ["parquet", "moulures", "cheminée", ...],
-        "elements_atypique": ["poutres", "briques", "volumes", ...],
+        "elements_haussmannien": ["parquet", "moulures", "cheminée", "balcon fer forgé", "balcons fer forgé", "poutres apparentes" (si contexte ancien), "restauré", "rénové", ...],
+        "elements_atypique": ["poutres" (si contexte industriel/entrepôt), "briques", "volumes", ...],
         "elements_moderne": ["design", "contemporain", ...],
         "confiance_indices": 0.0-1.0
     }},

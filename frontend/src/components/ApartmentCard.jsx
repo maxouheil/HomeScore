@@ -344,15 +344,70 @@ function ApartmentCard({ apartment }) {
                 />
               )
             })()}
-            {apartment.scores_detaille.style && (
-              <Criterion 
-                name="Style"
-                score={apartment.scores_detaille.style.score || 0}
-                tier={apartment.scores_detaille.style.tier || 'tier3'}
-                value={formatStyleCriterion(apartment)}
-                confidence={apartment.style_analysis?.style?.confidence}
-              />
-            )}
+            {apartment.scores_detaille.style && (() => {
+              // Récupérer les indices depuis formatted_data (backend) ou utiliser fallback
+              let styleIndices = apartment.formatted_data?.style?.indices
+              
+              // Si les indices viennent du backend mais sont null/undefined/vide, ne pas utiliser
+              if (styleIndices === null || styleIndices === undefined || styleIndices === '') {
+                styleIndices = null
+              }
+              
+              // Fallback: chercher dans style_analysis si pas disponible depuis backend
+              if (!styleIndices) {
+                const styleAnalysis = apartment.style_analysis || {}
+                const styleData = styleAnalysis.style || {}
+                const details = styleData.details || ''
+                const justification = styleData.justification || ''
+                const styleType = styleData.type || ''
+                
+                // Chercher dans details et justification
+                const textToSearch = `${details} ${justification}`.toLowerCase()
+                
+                // Déterminer les keywords selon le tier
+                const tier = apartment.scores_detaille.style.tier || 'tier3'
+                let keywords = []
+                
+                if (tier === 'tier1') {
+                  // Ancien
+                  keywords = ['moulures', 'cheminée', 'parquet', 'hauteur sous plafond', 'moldings', 'fireplace', 'balcon fer forgé', 'corniche', 'rosace']
+                } else if (tier === 'tier2') {
+                  // Atypique
+                  keywords = ['loft', 'atypique', 'unique', 'original', 'espace ouvert', 'volume généreux', 'caractère unique', 'poutres', 'béton brut', 'entrepôt', 'atelier']
+                } else {
+                  // Neuf
+                  keywords = ['moderne', 'contemporain', 'récent', 'terrasse', 'vue', 'carrelage', 'fenêtre moderne', 'balcon', 'ascenseur']
+                }
+                
+                const foundKeywords = keywords.filter(kw => textToSearch.includes(kw.toLowerCase()))
+                if (foundKeywords.length > 0) {
+                  styleIndices = "Style Indice: " + foundKeywords.slice(0, 3).join(" · ")
+                } else if (styleType && styleType !== 'autre' && styleType !== 'inconnu') {
+                  // Utiliser le type de style comme indice
+                  let styleName = styleType.charAt(0).toUpperCase() + styleType.slice(1)
+                  if (styleType.includes('70') || styleType.toLowerCase().includes('seventies')) {
+                    styleName = "Années 70"
+                  }
+                  styleIndices = "Style Indice: " + styleName
+                }
+              }
+              
+              // Filtrer le fallback "Style expo cuisine et baignoire" s'il apparaît encore
+              if (styleIndices && styleIndices.includes('Style expo cuisine et baignoire')) {
+                styleIndices = null
+              }
+              
+              return (
+                <Criterion 
+                  name="Style"
+                  score={apartment.scores_detaille.style.score || 0}
+                  tier={apartment.scores_detaille.style.tier || 'tier3'}
+                  value={formatStyleCriterion(apartment)}
+                  indices={styleIndices}
+                  confidence={apartment.style_analysis?.style?.confidence}
+                />
+              )
+            })()}
             {apartment.scores_detaille.ensoleillement && (() => {
               const expoData = formatExpositionCriterion(apartment, etage)
               let tier = apartment.scores_detaille.ensoleillement.tier || 'tier3'
@@ -377,13 +432,42 @@ function ApartmentCard({ apartment }) {
                   tier={tier}
                   value={expoData.mainValue}
                   indices={expoData.indices}
-                  confidence={apartment.style_analysis?.luminosite?.confidence}
+                  confidence={expoData.confidence}
                 />
               )
             })()}
             {apartment.scores_detaille.cuisine && (() => {
-              const cuisineValue = apartment.style_analysis?.cuisine?.ouverte ? 'Ouverte' : 'Fermée'
-              let tier = apartment.scores_detaille.cuisine.tier || 'tier3'
+              // PRIORITÉ: Utiliser le résultat final depuis scores_detaille (après validation croisée texte + photos)
+              const cuisineScore = apartment.scores_detaille.cuisine || {}
+              const cuisineDetails = cuisineScore.details || {}
+              const photoValidation = cuisineDetails.photo_validation || {}
+              const validationStatus = cuisineDetails.validation_status || ''
+              
+              // Chercher la valeur depuis photo_result (résultat final après validation)
+              let cuisineOuverte = null
+              if (photoValidation.photo_result) {
+                // Si pas de conflit, utiliser photo_result.ouverte
+                // Si conflit, le tier représente le résultat final (texte peut gagner)
+                if (validationStatus !== 'conflict') {
+                  cuisineOuverte = photoValidation.photo_result.ouverte
+                }
+              }
+              
+              // Fallback: utiliser style_analysis si pas trouvé
+              if (cuisineOuverte === null || cuisineOuverte === undefined) {
+                cuisineOuverte = apartment.style_analysis?.cuisine?.ouverte
+              }
+              
+              // Si toujours None OU si conflit, vérifier le tier pour déduire (tier = résultat final après validation)
+              if (cuisineOuverte === null || cuisineOuverte === undefined || validationStatus === 'conflict') {
+                const tier = cuisineScore.tier || 'tier3'
+                // tier1 = ouverte (10pts), tier3 = fermée (0pts)
+                // En cas de conflit, le tier représente le résultat final après validation croisée
+                cuisineOuverte = (tier === 'tier1')
+              }
+              
+              const cuisineValue = cuisineOuverte ? 'Ouverte' : 'Fermée'
+              let tier = cuisineScore.tier || 'tier3'
               
               // Vérifier la cohérence entre la valeur affichée et le tier
               // Si "Ouverte" est affiché, le tier doit être tier1 (10 pts)
@@ -398,13 +482,21 @@ function ApartmentCard({ apartment }) {
               // Calculer le score selon le tier pour garantir la cohérence
               // tier1 (Ouverte) = 10 pts, tier2 (Modifiable) = 5 pts, tier3 (Fermée) = 0 pts
               const scoreFromTier = tier === 'tier1' ? 10 : tier === 'tier2' ? 5 : 0
+              
+              // Récupérer les indices depuis formatted_data (backend) ou utiliser fallback
+              const cuisineIndices = apartment.formatted_data?.cuisine?.indices || "Style expo cuisine et baignoire"
+              
+              // Récupérer la confiance depuis cuisineDetails ou style_analysis
+              const confidence = cuisineDetails.confidence || apartment.style_analysis?.cuisine?.confidence
+              
               return (
                 <Criterion 
-                  name="Cuisine ouverte"
+                  name="Cuisine"
                   score={scoreFromTier}
                   tier={tier}
                   value={cuisineValue}
-                  confidence={apartment.style_analysis?.cuisine?.confidence}
+                  indices={cuisineIndices}
+                  confidence={confidence}
                 />
               )
             })()}
@@ -492,37 +584,85 @@ function formatStyleCriterion(apartment) {
 }
 
 function formatExpositionCriterion(apartment, etage) {
-  const styleAnalysis = apartment.style_analysis || {}
-  const luminositeData = styleAnalysis.luminosite || {}
-  const luminositeType = luminositeData.type || ''
-  
-  let mainValue = 'Sombre'
-  if (luminositeType.toLowerCase().includes('excellente')) {
-    mainValue = 'Lumineux'
-  } else if (luminositeType.toLowerCase().includes('bonne') || luminositeType.toLowerCase().includes('moyenne')) {
-    mainValue = 'Luminosité moyenne'
+  // Utiliser les données formatées depuis le backend si disponibles
+  if (apartment.formatted_data?.exposition) {
+    return {
+      mainValue: apartment.formatted_data.exposition.main_value || 'Sombre',
+      indices: apartment.formatted_data.exposition.indices || null,
+      confidence: apartment.formatted_data.exposition.confidence || null
+    }
   }
   
-  // Ajouter l'étage comme indice
+  // Fallback: utiliser directement apartment.exposition si disponible
+  const exposition = apartment.exposition || {}
+  const expositionDir = exposition.exposition || ''
+  
+  // Classifier l'orientation pour déterminer mainValue
+  let mainValue = 'Luminosité moyenne' // Par défaut
+  if (expositionDir) {
+    const expoNormalized = expositionDir.toLowerCase().replace(/[_\s-]/g, '')
+    // Lumineux: sud, sudouest, sudest
+    if (expoNormalized === 'sud' || expoNormalized === 'sudouest' || expoNormalized === 'sudest') {
+      mainValue = 'Lumineux'
+    }
+    // Sombre: nord, nordouest, nordest
+    else if (expoNormalized === 'nord' || expoNormalized === 'nordouest' || expoNormalized === 'nordest') {
+      mainValue = 'Sombre'
+    }
+    // Moyen: est, ouest (déjà la valeur par défaut)
+  }
+  
+  // Si pas d'exposition directionnelle, essayer style_analysis
+  if (!expositionDir) {
+    const styleAnalysis = apartment.style_analysis || {}
+    const luminositeData = styleAnalysis.luminosite || {}
+    const luminositeType = luminositeData.type || ''
+    
+    if (luminositeType.toLowerCase().includes('excellente')) {
+      mainValue = 'Lumineux'
+    } else if (luminositeType.toLowerCase().includes('bonne') || luminositeType.toLowerCase().includes('moyenne')) {
+      mainValue = 'Luminosité moyenne'
+    } else {
+      mainValue = 'Sombre'
+    }
+  }
+  
+  // Construire les indices
   const indices = []
   if (etage) {
     indices.push(etage)
   }
   
-  // Ajouter exposition directionnelle si disponible
-  const exposition = apartment.exposition || {}
-  const expositionDir = exposition.exposition || ''
-  if (expositionDir && !['inconnue', 'inconnu', 'non spécifiée'].includes(expositionDir.toLowerCase())) {
-    indices.push(`Exposition ${expositionDir} détectée`)
+  // Ajouter exposition directionnelle UNIQUEMENT si explicitement mentionnée dans le texte
+  const expositionExplicite = exposition.exposition_explicite || false
+  if (expositionExplicite && expositionDir && !['inconnue', 'inconnu', 'non spécifiée', 'none', 'null'].includes(expositionDir.toLowerCase())) {
+    // Formater avec majuscules : "sud" -> "Sud", "sud-ouest" -> "Sud-Ouest"
+    const formattedDir = expositionDir
+      .replace(/_/g, '-')
+      .split('-')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join('-')
+    indices.push(`Exposé ${formattedDir}`)
+  }
+  
+  // Ajouter brightness_value si disponible
+  const brightnessValue = exposition.details?.brightness_value || exposition.details?.image_brightness
+  if (brightnessValue !== null && brightnessValue !== undefined) {
+    indices.push(`Luminosité ${brightnessValue.toFixed(1)}`)
   }
   
   return {
     mainValue,
-    indices: indices.length > 0 ? indices.join(' · ') : null
+    indices: indices.length > 0 ? indices.join(' · ') : null,
+    confidence: exposition.confidence || null
   }
 }
 
 function formatBaignoireCriterion(apartment) {
+  // PRIORITÉ: Utiliser formatted_data depuis le backend (comme pour cuisine)
+  // Récupérer les indices depuis formatted_data (backend) en priorité
+  let indices = apartment.formatted_data?.baignoire?.indices || null
+  
   // Utiliser les scores depuis scores_detaille.baignoire
   const scoresDetaille = apartment.scores_detaille || {}
   const baignoireScore = scoresDetaille.baignoire || {}
@@ -530,45 +670,55 @@ function formatBaignoireCriterion(apartment) {
   // Récupérer le score et le tier depuis scores_detaille
   const score = baignoireScore.score || 0
   const tier = baignoireScore.tier || 'tier3'
-  const justification = baignoireScore.justification || ''
   
   // Chercher les données baignoire depuis différentes sources pour les détails
   const baignoireData = apartment.baignoire_data || apartment.baignoire || {}
   const hasBaignoire = baignoireData.has_baignoire || baignoireData.has_baignoire === true
-  const hasDouche = baignoireData.has_douche || baignoireData.has_douche === true
-  const confidence = baignoireData.confidence || baignoireScore.details?.photo_validation?.photo_confidence || 0
+  const confidence = baignoireData.confidence || baignoireScore.details?.confidence || 0
   
-  // Valeur principale
-  const mainValue = hasBaignoire ? 'Oui' : 'Non'
+  // Valeur principale - utiliser formatted_data si disponible, sinon déduire depuis hasBaignoire
+  let mainValue = apartment.formatted_data?.baignoire?.main_value
+  if (!mainValue) {
+    mainValue = hasBaignoire ? 'Oui' : 'Non'
+  }
   
   // Calculer la confiance en pourcentage
-  let confidencePct = null
-  if (confidence !== null && confidence !== undefined) {
-    if (typeof confidence === 'number' && confidence <= 1) {
-      confidencePct = Math.round(confidence * 100)
-    } else if (typeof confidence === 'number' && confidence <= 100) {
-      confidencePct = Math.round(confidence)
+  let confidencePct = apartment.formatted_data?.baignoire?.confidence
+  if (confidencePct === null || confidencePct === undefined) {
+    if (confidence !== null && confidence !== undefined) {
+      if (typeof confidence === 'number' && confidence <= 1) {
+        confidencePct = Math.round(confidence * 100)
+      } else if (typeof confidence === 'number' && confidence <= 100) {
+        confidencePct = Math.round(confidence)
+      }
     }
   }
   
-  // Extraire les indices depuis justification ou details
-  let indices = null
-  if (justification) {
-    const justificationLower = justification.toLowerCase()
-    if (justificationLower.includes('photo') || justificationLower.includes('détectée') || justificationLower.includes('analysée')) {
-      if (hasBaignoire) {
-        indices = 'Analyse photo : Baignoire détectée'
-      } else if (hasDouche) {
-        indices = 'Analyse photo : Douche détectée'
+  // Fallback sur justification si formatted_data n'est pas disponible
+  if (!indices) {
+    const justification = baignoireScore.justification || ''
+    if (justification) {
+      const justificationLower = justification.toLowerCase()
+      if (justificationLower.includes('photo') || justificationLower.includes('détectée') || justificationLower.includes('analysée')) {
+        if (hasBaignoire) {
+          indices = 'Analyse photo : Baignoire détectée'
+        } else {
+          indices = 'Analyse photo : Douche détectée'
+        }
+      } else if (justificationLower.includes('description') || justificationLower.includes('caractéristiques')) {
+        if (hasBaignoire) {
+          indices = 'Baignoire mentionnée dans le texte'
+        } else {
+          indices = 'Douche mentionnée dans le texte'
+        }
+      } else if (justification.length < 100) {
+        indices = justification
       }
-    } else if (justificationLower.includes('description') || justificationLower.includes('caractéristiques')) {
-      if (hasBaignoire) {
-        indices = 'Baignoire mentionnée dans le texte'
-      } else if (hasDouche) {
-        indices = 'Douche mentionnée dans le texte'
-      }
-    } else if (justification.length < 100) {
-      indices = justification
+    }
+    
+    // Dernier fallback
+    if (!indices) {
+      indices = 'Style expo cuisine et baignoire'
     }
   }
   
@@ -617,7 +767,26 @@ function Criterion({ name, score, tier, value, confidence, indices, tierLabel, t
             </span>
           )}
           {displayIndices && (
-            <div className="criterion-sub-details">{displayIndices}</div>
+            <div className="criterion-sub-details">
+              <svg 
+                className="indices-icon" 
+                width="16" 
+                height="16" 
+                viewBox="0 0 16 16" 
+                fill="none" 
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path d="M11.5474 5.63862C11.5474 3.63498 9.91239 2 7.90875 2C5.9051 2 4.27012 3.63498 4.27012 5.63862C4.27012 5.92714 4.30218 6.21566 4.38233 6.50419C4.47851 6.96903 4.65483 7.25756 4.89527 7.65829C4.94335 7.75446 5.00747 7.85064 5.07158 7.96285C5.15173 8.09108 5.21585 8.21931 5.29599 8.33152C5.61658 8.86048 5.80893 9.16504 5.80893 9.79017V11.2969C5.80893 11.6816 6.08143 11.9862 6.4501 12.0503C6.61039 12.8678 7.09126 13.3807 7.90875 13.3807C8.72623 13.3807 9.22313 12.8678 9.3674 12.0503C9.73607 11.9862 10.0086 11.6656 10.0086 11.2969V9.79017C10.0086 9.16504 10.2009 8.84445 10.5215 8.33152C10.5856 8.21931 10.6658 8.09108 10.7459 7.96285C10.81 7.85064 10.8741 7.75446 10.9222 7.65829C11.1627 7.25756 11.339 6.96903 11.4352 6.50419C11.5153 6.21566 11.5474 5.92714 11.5474 5.63862ZM9.38343 10.1749H6.46612V9.8062C6.46612 9.72605 6.46613 9.66193 6.4501 9.59781H9.38343C9.38343 9.66193 9.3674 9.72605 9.3674 9.8062V10.1749H9.38343ZM9.23916 11.4412H6.57833C6.49818 11.4412 6.4501 11.3771 6.4501 11.3129V10.816H9.3674V11.3129C9.38342 11.3771 9.31931 11.4412 9.23916 11.4412ZM7.90875 12.7556C7.73242 12.7556 7.28361 12.7556 7.10729 12.0823H8.72623C8.54991 12.7556 8.08507 12.7556 7.90875 12.7556ZM10.81 6.37596C10.7299 6.7286 10.6016 6.96904 10.3772 7.33771C10.3131 7.43388 10.265 7.53006 10.2009 7.64226C10.1208 7.7705 10.0567 7.89872 9.99254 7.9949C9.80019 8.31548 9.62387 8.60401 9.51166 8.94062H6.33789C6.22569 8.60401 6.06539 8.31548 5.85702 7.9949C5.7929 7.88269 5.71275 7.7705 5.64864 7.64226C5.58452 7.53006 5.5204 7.41785 5.47231 7.33771C5.2479 6.95301 5.11967 6.7286 5.03952 6.35993C4.97541 6.11949 4.94335 5.87906 4.94335 5.63862C4.94335 3.98762 6.2898 2.64117 7.94081 2.64117C9.59181 2.64117 10.9383 3.98762 10.9383 5.63862C10.9062 5.87906 10.8741 6.11949 10.81 6.37596Z" fill="#7B7F87"/>
+              </svg>
+              <span className="indices-text">
+                {displayIndices
+                  .replace(/^Style Indice: /, '')
+                  .replace(/^Expo Indice: /, '')
+                  .replace(/^Cuisine Indice: /, '')
+                  .replace(/^Baignoire Indice: /, '')
+                  .replace(/^Baignoire: /, '')}
+              </span>
+            </div>
           )}
         </div>
       </div>

@@ -197,3 +197,4 @@ print("   → Actuellement: +10 pts bonus moyen pour tous (pas discriminant)")
 print("   → Suggestion: Bonus uniquement si vraiment présents")
 print("   → Ou réduire valeurs si détection systématique")
 
+

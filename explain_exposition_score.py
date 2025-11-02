@@ -136,3 +136,4 @@ Le calcul dépend de la méthode utilisée (photos ou contextuel).
 Voir les détails ci-dessus pour comprendre le calcul exact.
     """)
 
+

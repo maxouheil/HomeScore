@@ -29,7 +29,14 @@ class JinkaScraper:
         """Initialise le navigateur et la page"""
         playwright = await async_playwright().start()
         self.browser = await playwright.chromium.launch(headless=False)  # Mode visible
-        self.context = await self.browser.new_context()
+        
+        # Créer un contexte avec un user-agent réaliste pour éviter les 403
+        self.context = await self.browser.new_context(
+            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            viewport={'width': 1920, 'height': 1080},
+            locale='fr-FR',
+            timezone_id='Europe/Paris'
+        )
         self.page = await self.context.new_page()
         
     async def login(self):
@@ -190,6 +197,11 @@ class JinkaScraper:
             description = await self.extract_description()
             caracteristiques = await self.extract_caracteristiques()
             photos = await self.extract_photos()
+            etage = await self.extract_etage()
+            if etage:
+                print(f"   🏢 Étage trouvé: {etage}")
+            else:
+                print(f"   ⚠️ Étage non trouvé")
             
             # Télécharger les photos localement
             await self.download_apartment_photos(apartment_id, photos)
@@ -211,6 +223,7 @@ class JinkaScraper:
                 'description': description,
                 'photos': photos,
                 'caracteristiques': caracteristiques,
+                'etage': etage,
                 'agence': await self.extract_agence(),
                 'style_haussmannien': await self.extract_style_haussmannien()
             }
@@ -279,13 +292,97 @@ class JinkaScraper:
     async def extract_etage(self):
         """Extrait l'étage de la page d'appartement"""
         try:
-            page_content = await self.page.content()
+            # Chercher d'abord dans les caractéristiques (section dédiée)
+            try:
+                # Chercher la section caractéristiques avec plusieurs sélecteurs possibles
+                caracteristiques_selectors = [
+                    'h3:has-text("Caractéristiques")',
+                    'h2:has-text("Caractéristiques")',
+                    '[class*="caracteristiques"]',
+                    '[class*="Caractéristiques"]',
+                ]
+                
+                caracteristiques_text = ""
+                for selector in caracteristiques_selectors:
+                    try:
+                        char_header = self.page.locator(selector)
+                        if await char_header.count() > 0:
+                            # Récupérer tout le contenu de la section caractéristiques
+                            # Chercher le parent ou le conteneur suivant
+                            parent_elem = char_header.locator('..')
+                            if await parent_elem.count() > 0:
+                                caracteristiques_text = await parent_elem.first.text_content() or ""
+                            else:
+                                # Chercher l'élément suivant
+                                next_elem = self.page.locator(f'{selector} + *')
+                                if await next_elem.count() > 0:
+                                    caracteristiques_text = await next_elem.first.text_content() or ""
+                                else:
+                                    # Chercher tous les éléments dans le même conteneur
+                                    char_section = self.page.locator(f'{selector}').locator('..')
+                                    if await char_section.count() > 0:
+                                        caracteristiques_text = await char_section.first.text_content() or ""
+                            
+                            if caracteristiques_text:
+                                break
+                    except:
+                        continue
+                
+                # Si pas trouvé avec les sélecteurs, chercher dans toute la page autour du titre "Caractéristiques"
+                if not caracteristiques_text:
+                    try:
+                        # Chercher tous les éléments contenant "Caractéristiques"
+                        all_text = await self.page.text_content('body') or ""
+                        # Extraire la section après "Caractéristiques"
+                        match = re.search(r'Caractéristiques[:\s]*(.*?)(?:\n\n|\n[A-Z]|$)', all_text, re.IGNORECASE | re.DOTALL)
+                        if match:
+                            caracteristiques_text = match.group(1)
+                    except:
+                        pass
+                
+                if caracteristiques_text:
+                    # Patterns pour trouver l'étage dans les caractéristiques (plus complets)
+                    etage_patterns = [
+                        r'(\d+)(?:er?|e|ème?)\s*étage',
+                        r'étage\s*(\d+)',
+                        r'(\d+)(?:er?|e|ème?)\s*ét\.',
+                        r'Étage[:\s]+(\d+)',
+                        r'étage[:\s]+(\d+)',
+                        r'(\d+)\s*étage',  # Format simple "2 étage"
+                        r'étage\s*:\s*(\d+)',  # Format "étage: 2"
+                        r'(\d+)(?:er|e|ème)',  # Format "2e" ou "2ème" sans "étage"
+                    ]
+                    
+                    for pattern in etage_patterns:
+                        matches = re.findall(pattern, caracteristiques_text, re.IGNORECASE)
+                        if matches:
+                            etage_num = matches[0]
+                            if etage_num == '1':
+                                return "1er étage"
+                            else:
+                                return f"{etage_num}e étage"
+                    
+                    # Chercher RDC dans les caractéristiques
+                    if re.search(r'RDC|rez-de-chaussée|rez de chaussée', caracteristiques_text, re.IGNORECASE):
+                        return "RDC"
+            except Exception as e:
+                print(f"  ⚠️ Erreur extraction étage depuis caractéristiques: {e}")
+                pass  # Continuer si l'extraction depuis caractéristiques échoue
             
-            # Patterns pour trouver l'étage
+            # Chercher dans toute la page si pas trouvé dans caractéristiques
+            page_content = await self.page.content()
+            page_text = await self.page.text_content('body') or ""
+            
+            # Patterns pour trouver l'étage (plus robustes)
+            # Priorité aux patterns avec "étage" explicite
             etage_patterns = [
                 r'(\d+)(?:er?|e|ème?)\s*étage',
                 r'étage\s*(\d+)',
                 r'(\d+)(?:er?|e|ème?)\s*ét\.',
+                r'au\s+(\d+)(?:er?|e|ème?)\s*étage',
+                r'(\d+)(?:er?|e|ème?)\s*étage\s*(?:avec|sans)',
+                r'étage\s*:\s*(\d+)',
+                r'(\d+)\s*étage',  # Format simple "2 étage"
             ]
             
             for pattern in etage_patterns:
@@ -297,6 +394,44 @@ class JinkaScraper:
                         return "1er étage"
                     else:
                         return f"{etage_num}e étage"
+            
+            # Chercher les formats courts comme "2e" dans la section Caractéristiques uniquement
+            # (pour éviter les faux positifs comme "10e arrondissement")
+            try:
+                caracteristiques_elem = self.page.locator('h3:has-text("Caractéristiques"), h2:has-text("Caractéristiques")')
+                if await caracteristiques_elem.count() > 0:
+                    # Récupérer le conteneur de la section caractéristiques
+                    char_container = caracteristiques_elem.first.locator('..')
+                    char_text = await char_container.text_content() or ""
+                    
+                    # Patterns pour formats courts dans caractéristiques
+                    short_patterns = [
+                        r'(\d+)(?:er|e|ème)(?:\s|,|\.|$)',  # Format "2e" suivi d'espace/ponctuation
+                    ]
+                    
+                    for pattern in short_patterns:
+                        matches = re.findall(pattern, char_text, re.IGNORECASE)
+                        if matches:
+                            # Prendre le premier match qui est probablement l'étage
+                            # Les caractéristiques listent généralement: pièces, étage, exposition, etc.
+                            for match in matches[:3]:  # Vérifier les 3 premiers matches au cas où
+                                etage_num = match if isinstance(match, str) else str(match)
+                                # Vérifier le contexte autour pour confirmer
+                                match_obj = re.search(re.escape(etage_num) + r'(?:er|e|ème)?', char_text, re.IGNORECASE)
+                                if match_obj:
+                                    start = max(0, match_obj.start() - 30)
+                                    end = min(len(char_text), match_obj.end() + 30)
+                                    context = char_text[start:end].lower()
+                                    # Si le contexte suggère un étage (pas un arrondissement ou autre)
+                                    if any(word in context for word in ['étage', 'ét.', 'ét', 'ascenseur', 'rdc', 'rez']):
+                                        # Éviter les faux positifs comme "10e arrondissement"
+                                        if not any(word in context for word in ['arrondissement', 'arr.', 'arr ']):
+                                            if etage_num == '1':
+                                                return "1er étage"
+                                            else:
+                                                return f"{etage_num}e étage"
+            except:
+                pass
             
             # Chercher RDC
             if re.search(r'RDC|rez-de-chaussée|rez de chaussée', page_content, re.IGNORECASE):
@@ -1227,19 +1362,31 @@ class JinkaScraper:
         except:
             return "Agence non trouvée"
     
-    async def save_apartment(self, apartment_data):
-        """Sauvegarde les données d'un appartement"""
+    async def save_apartment(self, apartment_data, skip_if_exists=False):
+        """Sauvegarde les données d'un appartement
+        
+        Args:
+            apartment_data: Données de l'appartement à sauvegarder
+            skip_if_exists: Si True, ne pas écraser un fichier existant
+        """
         try:
             os.makedirs('data/appartements', exist_ok=True)
             filename = f"data/appartements/{apartment_data['id']}.json"
+            
+            # Vérifier si le fichier existe déjà
+            if skip_if_exists and os.path.exists(filename):
+                print(f"⏭️  Appartement {apartment_data['id']} déjà sauvegardé - SKIP")
+                return False
             
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(apartment_data, f, ensure_ascii=False, indent=2)
             
             print(f"💾 Appartement {apartment_data['id']} sauvegardé")
+            return True
             
         except Exception as e:
             print(f"❌ Erreur sauvegarde: {e}")
+            return False
     
     async def download_apartment_photos(self, apartment_id, photos):
         """Télécharge les photos d'un appartement localement avec filtrage par taille"""
