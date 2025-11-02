@@ -63,7 +63,7 @@ Le scoring se base uniquement sur **6 critères** :
 1. **Localisation** (20-25 pts max, 25 si Place de la Réunion)
 2. **Prix** (20 pts max)
 3. **Style** (20 pts max)
-4. **Ensoleillement** (20 pts max - Très ensoleillé = GOOD = 20 pts)
+4. **Ensoleillement** (20 pts max - Barème: Lumineux = 20 pts, Moyenne = 10 pts, Sombre = 0 pts)
 5. **Cuisine ouverte** (10 pts max)
 6. **Baignoire** (10 pts max)
 

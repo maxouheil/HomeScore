@@ -164,15 +164,15 @@ def score_prix(apartment, config):
             'justification': "Prix/m² non disponible"
         }
     
-    # Vérifier tier1 (< 9000)
-    if prix_m2 < tier_config['tier1']['prix_m2_max']:
+    # Vérifier tier1 (< 9500)
+    if prix_m2 <= tier_config['tier1']['prix_m2_max']:
         return {
             'score': tier_config['tier1']['score'],
             'tier': 'tier1',
             'justification': f"Excellent rapport qualité/prix: {prix_m2}€/m²"
         }
     
-    # Vérifier tier2 (9000-10999)
+    # Vérifier tier2 (9500-11000)
     if tier_config['tier2']['prix_m2_min'] <= prix_m2 <= tier_config['tier2']['prix_m2_max']:
         return {
             'score': tier_config['tier2']['score'],
@@ -253,7 +253,9 @@ def score_style(apartment, config):
 
 
 def score_ensoleillement(apartment, config):
-    """Score ensoleillement depuis style_analysis.luminosite + exposition"""
+    """Score ensoleillement depuis style_analysis.luminosite + exposition
+    Barème: Lumineux = 20 pts, Moyenne = 10 pts, Sombre = 0 pts
+    """
     tier_config = config['axes']['ensoleillement']['tiers']
     style_analysis = apartment.get('style_analysis', {})
     luminosite_data = style_analysis.get('luminosite', {})
@@ -262,75 +264,78 @@ def score_ensoleillement(apartment, config):
     exposition = apartment.get('exposition', {})
     exposition_dir = exposition.get('exposition', '').lower()
     
-    # Vérifier tier1 (excellente luminosité + Sud/Sud-Ouest)
-    if 'excellente' in luminosite_type:
+    # Tier1: Lumineux = 20 pts
+    # Détecter "lumineux", "excellente", "excellent"
+    if 'lumineux' in luminosite_type or 'excellente' in luminosite_type or 'excellent' in luminosite_type:
         if exposition_dir in ['sud', 'sud-ouest', 'sud-ouest']:
             return {
                 'score': tier_config['tier1']['score'],
                 'tier': 'tier1',
-                'justification': f"Excellente luminosité, exposition {exposition_dir}"
+                'justification': f"Lumineux, exposition {exposition_dir}"
             }
-        # Si luminosité excellente mais exposition différente → tier2 quand même
+        # Si lumineux mais exposition différente → tier1 quand même (20 pts)
         elif exposition_dir:
             return {
-                'score': tier_config['tier2']['score'],
-                'tier': 'tier2',
-                'justification': f"Excellente luminosité, exposition {exposition_dir}"
+                'score': tier_config['tier1']['score'],
+                'tier': 'tier1',
+                'justification': f"Lumineux, exposition {exposition_dir}"
             }
-        # Luminosité excellente mais pas d'exposition → tier2
+        # Lumineux mais pas d'exposition → tier1 (20 pts)
         else:
             return {
-                'score': tier_config['tier2']['score'],
-                'tier': 'tier2',
-                'justification': f"Excellente luminosité"
+                'score': tier_config['tier1']['score'],
+                'tier': 'tier1',
+                'justification': f"Lumineux"
             }
     
-    # Vérifier tier2 (bonne OU moyenne luminosité)
-    if 'bonne' in luminosite_type or 'moyenne' in luminosite_type or 'moyen' in luminosite_type:
-        # Si exposition Ouest/Est ou Sud-Ouest → tier2
-        if exposition_dir in ['ouest', 'est', 'sud-ouest']:
-            return {
-                'score': tier_config['tier2']['score'],
-                'tier': 'tier2',
-                'justification': f"Luminosité {luminosite_type}, exposition {exposition_dir}"
-            }
-        # Sinon, même avec moyenne luminosité → tier2 (10pts selon config)
+    # Tier2: Luminosité moyenne = 10 pts
+    # Détecter "moyenne", "moyen", "bonne", "bon"
+    if 'moyenne' in luminosite_type or 'moyen' in luminosite_type or 'bonne' in luminosite_type or 'bon' in luminosite_type:
         return {
             'score': tier_config['tier2']['score'],
             'tier': 'tier2',
-            'justification': f"Luminosité {luminosite_type}"
+            'justification': f"Luminosité moyenne{', exposition ' + exposition_dir if exposition_dir else ''}"
         }
     
-    # Si luminosité manquante mais exposition disponible, utiliser l'exposition
+    # Tier3: Sombre = 0 pts
+    # Détecter "sombre", "faible", "limitée", "limitée"
+    if 'sombre' in luminosite_type or 'faible' in luminosite_type or 'limitée' in luminosite_type or 'limitee' in luminosite_type:
+        return {
+            'score': tier_config['tier3']['score'],
+            'tier': 'tier3',
+            'justification': f"Sombre{', exposition ' + exposition_dir if exposition_dir else ''}"
+        }
+    
+    # Si luminosité manquante mais exposition disponible, utiliser l'exposition comme fallback
     if not luminosite_type or luminosite_type == 'inconnue' or luminosite_type == 'inconnu':
         if exposition_dir:
-            # Tier1: Sud, Sud-Ouest
+            # Tier1: Sud, Sud-Ouest → considéré comme lumineux (20 pts)
             if exposition_dir in ['sud', 'sud-ouest', 'sud-ouest']:
                 return {
                     'score': tier_config['tier1']['score'],
                     'tier': 'tier1',
-                    'justification': f"Exposition {exposition_dir} détectée"
+                    'justification': f"Exposition {exposition_dir} (Sud/Sud-Ouest considéré comme lumineux)"
                 }
-            # Tier2: Ouest, Est
+            # Tier2: Ouest, Est → considéré comme moyenne (10 pts)
             elif exposition_dir in ['ouest', 'est']:
                 return {
                     'score': tier_config['tier2']['score'],
                     'tier': 'tier2',
-                    'justification': f"Exposition {exposition_dir} détectée"
+                    'justification': f"Exposition {exposition_dir} (Ouest/Est considéré comme moyenne)"
                 }
-            # Tier3: Nord, Nord-Est
+            # Tier3: Nord, Nord-Est → considéré comme sombre (0 pts)
             elif exposition_dir in ['nord', 'nord-est']:
                 return {
                     'score': tier_config['tier3']['score'],
                     'tier': 'tier3',
-                    'justification': f"Exposition {exposition_dir} détectée"
+                    'justification': f"Exposition {exposition_dir} (Nord/Nord-Est considéré comme sombre)"
                 }
     
-    # tier3 par défaut (faible luminosité ou aucune info)
+    # tier3 par défaut (aucune info ou luminosité non reconnue)
     return {
         'score': tier_config['tier3']['score'],
         'tier': 'tier3',
-        'justification': f"Luminosité: {luminosite_type if luminosite_type else 'non disponible'}"
+        'justification': f"Luminosité: {luminosite_type if luminosite_type else 'non disponible'} (0 pts par défaut)"
     }
 
 

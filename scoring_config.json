@@ -74,25 +74,28 @@
     },
     "ensoleillement": {
       "poids": 20,
-      "description": "Orientation et qualité de la vue",
+      "description": "Luminosité et qualité de la vue",
       "tiers": {
         "tier1": {
           "score": 20,
+          "luminosite": ["Lumineux", "Excellente"],
           "orientations": ["Sud", "Sud-Ouest"],
           "conditions": ["Vue dégagée", "Croisement de rue", "Pas de vis-à-vis"],
-          "description": "Très ensoleillé - Excellente luminosité et vue"
+          "description": "Lumineux - Excellente luminosité et vue"
         },
         "tier2": {
-          "score": 12,
+          "score": 10,
+          "luminosite": ["Moyenne", "Bonne"],
           "orientations": ["Ouest", "Est"],
           "conditions": ["Vue semi-dégagée"],
-          "description": "Bonne luminosité"
+          "description": "Luminosité moyenne"
         },
         "tier3": {
-          "score": 2,
+          "score": 0,
+          "luminosite": ["Sombre", "Faible"],
           "orientations": ["Nord", "Nord-Est"],
           "conditions": ["Vis-à-vis", "Pas dégagé"],
-          "description": "Luminosité limitée"
+          "description": "Sombre - Luminosité limitée"
         }
       }
     },

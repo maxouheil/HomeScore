@@ -30,7 +30,7 @@ Toutes les modifications notables de ce projet seront documentées dans ce fichi
 - ✅ **Bonus/Malus supprimés**: Tous les bonus et malus généraux ont été retirés car jamais validés
 - ✅ **Score simplifié**: Le mega score se base maintenant uniquement sur 6 critères (localisation, prix, style, ensoleillement, cuisine, baignoire)
 - ✅ **Exception**: Bonus Place de la Réunion (+5) conservé et intégré dans le score de localisation (20 → 25 pts max)
-- ✅ **Ensoleillement corrigé**: 20 pts max (au lieu de 10) - Très ensoleillé = GOOD (20 pts)
+- ✅ **Ensoleillement corrigé**: 20 pts max - Barème simplifié: Lumineux = 20 pts, Moyenne = 10 pts, Sombre = 0 pts
 - ✅ **Documentation**: `RECAP_BONUS_MALUS.md` documente la suppression et les raisons
 - ✅ **Impact**: Score max = 105 pts (100 pts base + 5 pts bonus Place de la Réunion)
 
@@ -77,7 +77,7 @@ Toutes les modifications notables de ce projet seront documentées dans ce fichi
 **Scoring**:
 - **Simplification**: Score basé uniquement sur 6 critères (plus de bonus/malus généraux)
 - **Clarté**: Calcul plus transparent et prévisible
-- **Ensoleillement**: Corrigé à 20 pts max (très ensoleillé = GOOD = 20 pts)
+- **Ensoleillement**: Corrigé à 20 pts max - Barème: Lumineux = 20 pts, Moyenne = 10 pts, Sombre = 0 pts
 - **Score max**: 105 pts (100 pts base + 5 pts bonus Place de la Réunion intégré dans localisation)
 
 ---

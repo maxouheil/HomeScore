@@ -25,9 +25,9 @@ Tu es un expert en immobilier parisien spécialisé dans l'évaluation d'apparte
 **TIER 3 - NEUF (0 pts)** : Tout le reste (moderne, contemporain, récent, années 20-70) - Indices: terrasse métal, vue, sol moderne, fenêtre moderne, hauteur plafond réduite
 
 ### 4. ENSOLEILLEMENT (20 points)
-**TIER 1 - GOOD (20 pts)** : Très ensoleillé - Sud, Sud-Ouest, vue dégagée, croisement rue, pas de vis-à-vis
-**TIER 2 - MOYEN (12 pts)** : Ouest, Est, vue semi-dégagée
-**TIER 3 - BAD (2 pts)** : Nord, Nord-Est, vis-à-vis, pas dégagé
+**TIER 1 - GOOD (20 pts)** : Lumineux - Sud, Sud-Ouest, vue dégagée, croisement rue, pas de vis-à-vis
+**TIER 2 - MOYEN (10 pts)** : Luminosité moyenne - Ouest, Est, vue semi-dégagée
+**TIER 3 - BAD (0 pts)** : Sombre - Nord, Nord-Est, vis-à-vis, pas dégagé
 
 ### 5. ÉTAGE (10 points)
 **TIER 1 - GOOD (10 pts)** : 3e, 4e, plus si ascenseur
