@@ -38,8 +38,12 @@ ENV/
 # Data files
 data/
 output/
+# Exclure les JSON de données mais garder package.json
+!frontend/package.json
 *.json
-*.html
+# Exclure les HTML générés mais garder index.html frontend
+!frontend/index.html
+output/*.html
 
 # Logs
 *.log
