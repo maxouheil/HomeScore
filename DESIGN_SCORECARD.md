@@ -140,33 +140,43 @@ font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI
 - **Padding-bottom** : `0`
 - **Margin-bottom** : `0`
 
-### `.criterion-header`
-- **Display** : `flex`
-- **Justify-content** : `space-between`
-- **Align-items** : `center` (pour centrer verticalement la pill score avec le texte du critère)
-- **Margin-bottom** : `0` (pas de gap entre titre et output)
-- **Gap** : `12px`
+### `.criterion`
+- **Display** : `grid`
+- **Grid-template-columns** : `1fr auto` (colonne gauche flexible, droite adaptée au badge)
+- **Align-items** : `center` (pour centrer verticalement la pill score avec tout le contenu du critère)
+- **Gap** : `16px` entre les deux colonnes
+- **Margin-bottom** : `16px`
+- **Padding-bottom** : `16px`
+- **Border-bottom** : `1px solid rgba(0, 0, 0, 0.06)`
 
-**Structure en deux colonnes** :
-- **Colonne gauche** (`.criterion-name`) : `flex: 1` + `min-width: 0` pour occuper tout l'espace disponible et éviter que le texte passe en dessous
-- **Colonne droite** (`.criterion-score-badge`) : `flex-shrink: 0` pour garder sa largeur naturelle et s'adapter à la largeur de la pastille
-- Les deux colonnes sont centrées verticalement avec `align-items: center` sur le conteneur flex
+**Structure en deux colonnes distinctes** :
+- **Colonne gauche** (`.criterion-content`) : `1fr` - occupe tout l'espace disponible pour le texte
+- **Colonne droite** (`.criterion-score-badge`) : `auto` - s'adapte à la largeur de la pastille
+- Les deux colonnes sont centrées verticalement avec `align-items: center` sur `.criterion`
+- Le texte (titre + détails) reste dans la colonne de gauche et ne passe jamais sous le badge
+
+### `.criterion-content`
+- **Display** : `flex`
+- **Flex-direction** : `column` (empile titre et détails verticalement)
+- **Min-width** : `0` (permet au texte de se réduire si nécessaire)
+- Contient `.criterion-name` et `.criterion-details`
 
 ### `.criterion-name`
 - **Font-family** : `'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important`
-- **Font-size** : `14px`
+- **Font-size** : `16px`
 - **Font-weight** : `500` (Medium)
 - **Color** : `#212529`
-- **Flex** : `1`
-- **Min-width** : `0`
-- **Note** : Pas de `display: flex` sur `.criterion-name` car le centrage vertical est géré par `align-items: center` sur `.criterion-header`
+- **Margin-bottom** : `0`
+- **Word-wrap** : `break-word`
+- **Overflow-wrap** : `break-word`
 
 ### `.criterion-details`
 - **Font-family** : `'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important`
 - **Font-size** : `13px`
 - **Font-weight** : `400`
-- **Color** : `#6c757d`
+- **Color** : `#212529`
 - **Margin-top** : `4px`
+- Reste dans la colonne de gauche (`.criterion-content`), ne passe jamais sous le badge
 
 ### `.criterion-sub-details`
 - **Font-family** : `'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important`
@@ -191,7 +201,9 @@ font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI
 - **Flex-shrink** : `0`
 - **Height** : `fit-content`
 - **Line-height** : `1.2`
-- **Alignement** : Centré verticalement avec le texte du critère grâce à `align-items: center` sur `.criterion-header`
+- **Align-self** : `center` (centré verticalement dans sa colonne)
+- **White-space** : `nowrap` (le badge reste sur une seule ligne)
+- **Alignement** : Centré verticalement avec tout le contenu du critère (titre + détails) grâce à `align-items: center` sur `.criterion`
 
 ### Couleurs POINTS
 
@@ -244,12 +256,12 @@ font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI
         <div class="apartment-subtitle">68m2 • 9e étage • 70s</div>
         
         <div class="criterion">
-            <div class="criterion-header">
-                <span class="criterion-name">Localisation</span>
-                <span class="criterion-score-badge green">20 pts</span>
+            <div class="criterion-content">
+                <div class="criterion-name">Localisation</div>
+                <div class="criterion-details">Description du critère<span class="confidence-badge">90% confiance</span></div>
+                <div class="criterion-sub-details">Détails supplémentaires</div>
             </div>
-            <div class="criterion-details">Description du critère<span class="confidence-badge">90% confiance</span></div>
-            <div class="criterion-sub-details">Détails supplémentaires</div>
+            <span class="criterion-score-badge green">20 pts</span>
         </div>
         
         <!-- Autres critères -->
@@ -262,10 +274,14 @@ font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI
 ## Règles importantes
 
 ### Structure en deux colonnes pour les critères
-- **Colonne gauche** (`.criterion-name`) : `flex: 1` + `min-width: 0` pour occuper tout l'espace disponible et éviter que le texte passe en dessous
-- **Colonne droite** (`.criterion-score-badge`) : `flex-shrink: 0` pour garder sa largeur naturelle et s'adapter à la largeur de la pastille
-- **Gap** : `12px` entre les deux colonnes
-- **Align-items** : `center` sur `.criterion-header` pour centrer verticalement les deux éléments dans leur ligne, afin que la pastille soit parfaitement alignée avec le texte, quelle que soit sa hauteur
+- **Structure** : `.criterion` utilise `display: grid` avec `grid-template-columns: 1fr auto`
+- **Colonne gauche** (`.criterion-content`) : `1fr` - occupe tout l'espace disponible pour le texte (titre + détails)
+  - Contient `.criterion-name` (titre) et `.criterion-details` (détails) empilés verticalement
+  - Le texte reste dans cette colonne et ne passe jamais sous le badge
+- **Colonne droite** (`.criterion-score-badge`) : `auto` - s'adapte à la largeur de la pastille
+- **Gap** : `16px` entre les deux colonnes
+- **Align-items** : `center` sur `.criterion` pour centrer verticalement la pastille par rapport à tout le contenu (titre + détails), quelle que soit la hauteur du texte
+- **Avantage** : Même si les détails font plusieurs lignes, ils restent dans la colonne de gauche et la pastille reste centrée verticalement
 
 ### Séparateurs entre critères
 - **Opacité** : `rgba(0, 0, 0, 0.06)` (très clair, 70% plus clair que 0.2)
@@ -295,8 +311,10 @@ font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI
 - [ ] Mega score : texte blanc, pas de shadow, Cera Pro Medium 20px
 - [ ] Séparateurs entre critères : rgba(0, 0, 0, 0.06)
 - [ ] Pas de gap entre titre critère et output (margin-bottom: 0)
-- [ ] Structure en deux colonnes avec flex pour éviter que le texte passe en dessous
-- [ ] Pill score centrée verticalement avec le critère (align-items: center sur .criterion-header)
+- [ ] Structure en deux colonnes avec grid (`.criterion` en grid, colonnes `1fr auto`)
+- [ ] Colonne gauche (`.criterion-content`) contient titre + détails, colonne droite contient le badge
+- [ ] Le texte ne passe jamais sous le badge grâce à la structure grid
+- [ ] Pill score centrée verticalement avec tout le contenu du critère (align-items: center sur .criterion)
 
 ---
 
@@ -308,4 +326,6 @@ font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI
 - Mega score toujours blanc, sans shadow
 - Séparateurs très clairs (0.06)
 - Typographie Cera Pro Medium partout avec `!important`
-- Centrage vertical avec `align-items: center` sur `.criterion-header`
+- Centrage vertical avec `align-items: center` sur `.criterion` (grid layout)
+- Structure grid avec deux colonnes distinctes : `.criterion-content` (texte) et `.criterion-score-badge` (badge)
+- Le texte (titre + détails) reste dans la colonne de gauche et ne passe jamais sous le badge

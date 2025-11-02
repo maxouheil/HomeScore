@@ -84,6 +84,7 @@ class ScorecardWatcherServer:
         # Fichiers Python backend
         python_files = [
             'generate_scorecard_html.py',
+            'scoring.py',  # Ajouté pour détecter les changements de règles de scoring
             'extract_baignoire.py',
             'analyze_photos.py',
             'analyze_apartment_style.py',
@@ -164,13 +165,39 @@ class ScorecardWatcherServer:
         
         return changed_files
     
-    def regenerate_html(self):
-        """Régénère le HTML"""
+    def regenerate_html(self, changed_files=None):
+        """Régénère le HTML, et recalcule les scores si nécessaire"""
         current_time = time.time()
         if current_time - self.last_regenerated < self.debounce_seconds:
             return False
         
         self.last_regenerated = current_time
+        
+        # Vérifier si scoring.py ou scoring_config.json ont changé
+        needs_rescoring = False
+        if changed_files:
+            scoring_files = ['scoring.py', 'scoring_config.json']
+            needs_rescoring = any(f in changed_files for f in scoring_files)
+        
+        # Recalculer les scores si nécessaire
+        if needs_rescoring:
+            timestamp = datetime.now().strftime('%H:%M:%S')
+            print(f"[{timestamp}] 🔄 Recalcul des scores...", end=' ')
+            
+            try:
+                result = subprocess.run(
+                    ['python', 'homescore.py'],
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+                
+                if result.returncode == 0:
+                    print("✅")
+                else:
+                    print("⚠️")
+            except Exception as e:
+                print(f"⚠️ ({e})")
         
         timestamp = datetime.now().strftime('%H:%M:%S')
         print(f"[{timestamp}] 🔄 Régénération du HTML...", end=' ')
@@ -199,7 +226,7 @@ class ScorecardWatcherServer:
         while True:
             changed_files = self.check_changes()
             if changed_files:
-                self.regenerate_html()
+                self.regenerate_html(changed_files=changed_files)
             time.sleep(1)
     
     def start_http_server(self):

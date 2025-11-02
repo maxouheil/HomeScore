@@ -44,6 +44,7 @@ class ScorecardWatcher:
         # Fichiers Python backend qui influencent la génération
         python_files = [
             'generate_scorecard_html.py',
+            'scoring.py',  # Ajouté pour détecter les changements de règles de scoring
             'extract_baignoire.py',
             'analyze_photos.py',
             'analyze_apartment_style.py',
@@ -135,14 +136,52 @@ class ScorecardWatcher:
         
         return changed_files
     
-    def regenerate_html(self):
-        """Régénère le HTML"""
+    def regenerate_html(self, changed_files=None):
+        """Régénère le HTML, et recalcule les scores si nécessaire"""
         # Vérifier le debounce
         current_time = time.time()
         if current_time - self.last_regenerated < self.debounce_seconds:
             return False
         
         self.last_regenerated = current_time
+        
+        # Vérifier si scoring.py ou scoring_config.json ont changé
+        needs_rescoring = False
+        if changed_files:
+            scoring_files = ['scoring.py', 'scoring_config.json']
+            needs_rescoring = any(f in changed_files for f in scoring_files)
+        
+        # Recalculer les scores si nécessaire
+        if needs_rescoring:
+            print(f"\n{'='*60}")
+            print(f"🔄 [{datetime.now().strftime('%H:%M:%S')}] Recalcul des scores...")
+            print(f"{'='*60}")
+            
+            try:
+                # Utiliser homescore.py pour recalculer les scores
+                result = subprocess.run(
+                    ['python', 'homescore.py'],
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # Timeout de 5 minutes pour le scoring
+                )
+                
+                if result.returncode == 0:
+                    print("✅ Scores recalculés avec succès!")
+                    # Afficher seulement les lignes importantes
+                    for line in result.stdout.split('\n'):
+                        if line.strip() and ('✅' in line or '📊' in line):
+                            print(f"   {line}")
+                else:
+                    print("⚠️  Erreur lors du recalcul des scores (continuons quand même)")
+                    error_lines = result.stderr.split('\n')[:5]
+                    for line in error_lines:
+                        if line.strip():
+                            print(f"   {line}")
+            except subprocess.TimeoutExpired:
+                print("⚠️  Timeout lors du recalcul des scores (continuons quand même)")
+            except Exception as e:
+                print(f"⚠️  Erreur lors du recalcul: {e} (continuons quand même)")
         
         print(f"\n{'='*60}")
         print(f"🔄 [{datetime.now().strftime('%H:%M:%S')}] Régénération du scorecard HTML...")
@@ -199,7 +238,7 @@ class ScorecardWatcher:
                     for filepath in changed_files:
                         print(f"   • {filepath}")
                     
-                    self.regenerate_html()
+                    self.regenerate_html(changed_files=changed_files)
                 
                 time.sleep(poll_interval)
         except KeyboardInterrupt:

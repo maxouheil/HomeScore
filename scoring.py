@@ -6,7 +6,12 @@ Utilise scoring_config.json pour les règles de scoring
 import json
 import os
 import re
-from criteria.localisation import get_metro_name, get_quartier_name
+from criteria.localisation import get_metro_name, get_quartier_name, get_all_metro_stations
+
+
+def round_to_nearest_5(score):
+    """Arrondit un score au multiple de 5 le plus proche"""
+    return round(score / 5) * 5
 
 
 def load_scoring_config():
@@ -54,40 +59,89 @@ def calculate_prix_m2(apartment):
 
 
 def score_localisation(apartment, config):
-    """Score localisation selon zones définies dans config"""
+    """Score localisation selon zones définies dans config - utilise TOUTES les stations et rues"""
     tier_config = config['axes']['localisation']['tiers']
     
-    # Récupérer localisation, quartier, métro
+    # Récupérer localisation, quartier, description, toutes les stations de métro
     localisation = apartment.get('localisation', '').lower()
+    description = apartment.get('description', '').lower()
+    caracteristiques = apartment.get('caracteristiques', '').lower()
+    text_combined = f"{localisation} {description} {caracteristiques}"
+    
     quartier = get_quartier_name(apartment)
     if quartier:
         quartier = quartier.lower()
-    metro = get_metro_name(apartment)
-    if metro:
-        metro = metro.lower()
     
-    # Vérifier tier1 (zones premium)
+    # Récupérer TOUTES les stations de métro (pas seulement la meilleure pour l'affichage)
+    all_stations = get_all_metro_stations(apartment)
+    all_stations_lower = [s.lower() for s in all_stations] if all_stations else []
+    
+    # Vérifier tier1 (zones premium) - vérifier toutes les stations et dans le texte
     tier1_zones = [z.lower() for z in tier_config['tier1']['zones']]
     for zone in tier1_zones:
-        if zone in localisation or (quartier and zone in quartier) or (metro and zone in metro):
+        # Vérifier dans localisation, quartier, texte combiné, ou n'importe quelle station
+        zone_matched = False
+        matched_station = None
+        
+        if zone in localisation or zone in text_combined:
+            zone_matched = True
+        elif quartier and zone in quartier:
+            zone_matched = True
+        else:
+            # Vérifier toutes les stations
+            for station in all_stations_lower:
+                if zone in station or station in zone:
+                    zone_matched = True
+                    matched_station = station
+                    break
+        
+        if zone_matched:
             score = tier_config['tier1']['score']
             # Bonus Place de la Réunion
-            if 'place de la réunion' in localisation or (quartier and 'place de la réunion' in quartier):
+            if 'place de la réunion' in localisation or (quartier and 'place de la réunion' in quartier) or 'place de la réunion' in text_combined:
                 score += config['bonus']['place_reunion']
+            
+            # Construire la justification avec la station trouvée
+            if matched_station:
+                justification = f"Zone premium: {zone} (métro {matched_station})"
+            else:
+                justification = f"Zone premium: {zone}"
+            
             return {
                 'score': score,
                 'tier': 'tier1',
-                'justification': f"Zone premium: {zone}"
+                'justification': justification
             }
     
-    # Vérifier tier2 (bonnes zones)
+    # Vérifier tier2 (bonnes zones) - vérifier toutes les stations ET dans le texte (pour "Rue des Boulets", "Nation")
     tier2_zones = [z.lower() for z in tier_config['tier2']['zones']]
     for zone in tier2_zones:
-        if zone in localisation or (quartier and zone in quartier) or (metro and zone in metro):
+        # Vérifier dans localisation, quartier, texte combiné, ou n'importe quelle station
+        zone_matched = False
+        matched_station = None
+        
+        # Chercher dans le texte combiné (description, caractéristiques) pour détecter les rues comme "Rue des Boulets"
+        if zone in localisation or zone in text_combined:
+            zone_matched = True
+        elif quartier and zone in quartier:
+            zone_matched = True
+        else:
+            # Vérifier toutes les stations (pour "Nation" par exemple)
+            for station in all_stations_lower:
+                if zone in station or station in zone:
+                    zone_matched = True
+                    matched_station = station
+                    break
+        
+        if zone_matched:
+            justification = f"Bonne zone: {zone}"
+            if matched_station:
+                justification += f" (métro {matched_station})"
+            
             return {
                 'score': tier_config['tier2']['score'],
                 'tier': 'tier2',
-                'justification': f"Bonne zone: {zone}"
+                'justification': justification
             }
     
     # Par défaut tier3
@@ -135,42 +189,66 @@ def score_prix(apartment, config):
 
 
 def score_style(apartment, config):
-    """Score style depuis style_analysis (IA images)"""
+    """Score style depuis style_analysis (IA images) + analyse texte - Ancien (20pts) / Atypique (10pts) / Neuf (0pts)"""
     tier_config = config['axes']['style']['tiers']
     style_analysis = apartment.get('style_analysis', {})
     style_data = style_analysis.get('style', {})
     style_type = style_data.get('type', '').lower()
     
-    # Vérifier tier1 (haussmannien, loft, atypique)
+    # Analyser le texte pour détecter "Atypique" (loft, atypique, unique, original, ancien entrepôt, etc.)
+    description = apartment.get('description', '').lower()
+    caracteristiques = apartment.get('caracteristiques', '').lower()
+    titre = apartment.get('titre', '').lower()
+    text_combined = f"{titre} {description} {caracteristiques}"
+    
+    # Mots-clés directs pour détecter "Atypique"
+    atypique_direct = ['loft', 'atypique', 'unique', 'original', 'atypiques', 'lofts', 'originaux', 'uniques']
+    
+    # Concepts atypiques (ancien entrepôt, atelier, hangar rénové, etc.)
+    atypique_concepts = [
+        'ancien entrepôt', 'ancien entrepot', 'ancien atelier', 'ancien hangar', 'ancien garage',
+        'entrepôt rénové', 'entrepot renove', 'atelier rénové', 'atelier renove',
+        'hangar rénové', 'hangar renove', 'garage rénové', 'garage renove',
+        'réhabilité', 'rehabilite', 'réhabilitée', 'rehabilitee',
+        'transformé', 'transforme', 'transformée', 'transformee',
+        'reconverti', 'reconvertie', 'reconversion',
+        'volume généreux', 'volume genereux', 'volumes généreux',
+        'hauteur sous plafond importante', 'hauteur plafond importante',
+        'caractère industriel', 'caractere industriel', 'style industriel',
+        'poutres apparentes', 'poutre apparente', 'béton brut', 'beton brut',
+        'espaces ouverts', 'espace ouvert', 'grands volumes'
+    ]
+    
+    # Vérifier les mots-clés directs
+    is_atypique_direct = any(keyword in text_combined for keyword in atypique_direct)
+    
+    # Vérifier les concepts atypiques
+    is_atypique_concept = any(concept in text_combined for concept in atypique_concepts)
+    
+    is_atypique = is_atypique_direct or is_atypique_concept
+    
+    # Tier1: Ancien (Haussmannien) = 20 pts
     tier1_styles = [s.lower() for s in tier_config['tier1']['styles']]
     if style_type in tier1_styles or 'haussmann' in style_type:
         return {
             'score': tier_config['tier1']['score'],
             'tier': 'tier1',
-            'justification': f"Style premium: {style_type}"
+            'justification': f"Style ancien: {style_type}"
         }
     
-    # Vérifier tier3 (années 60-70 - veto)
-    if '70' in style_type or '60' in style_type or 'seventies' in style_type:
-        return {
-            'score': tier_config['veto']['score'],
-            'tier': 'tier3',
-            'justification': f"Style années 60-70: {style_type}"
-        }
-    
-    # tier2: Moderne, Récent, Contemporain (styles acceptables)
-    if 'moderne' in style_type or 'contemporain' in style_type or 'récent' in style_type:
+    # Tier2: Atypique (détecté depuis texte: loft, atypique, unique, original) = 10 pts
+    if is_atypique or 'loft' in style_type or 'atypique' in style_type:
         return {
             'score': tier_config['tier2']['score'],
             'tier': 'tier2',
-            'justification': f"Style: {style_type}"
+            'justification': f"Style atypique détecté (loft/atypique/unique/original)"
         }
     
-    # Par défaut tier2 (autres styles acceptables)
+    # Tout le reste = Neuf (0 pts): moderne, contemporain, récent, 70s, 60s, années 20-40, etc.
     return {
-        'score': tier_config['tier2']['score'],
-        'tier': 'tier2',
-        'justification': f"Style: {style_type}"
+        'score': tier_config['tier3']['score'],
+        'tier': 'tier3',
+        'justification': f"Style neuf: {style_type}"
     }
 
 
@@ -192,6 +270,20 @@ def score_ensoleillement(apartment, config):
                 'tier': 'tier1',
                 'justification': f"Excellente luminosité, exposition {exposition_dir}"
             }
+        # Si luminosité excellente mais exposition différente → tier2 quand même
+        elif exposition_dir:
+            return {
+                'score': tier_config['tier2']['score'],
+                'tier': 'tier2',
+                'justification': f"Excellente luminosité, exposition {exposition_dir}"
+            }
+        # Luminosité excellente mais pas d'exposition → tier2
+        else:
+            return {
+                'score': tier_config['tier2']['score'],
+                'tier': 'tier2',
+                'justification': f"Excellente luminosité"
+            }
     
     # Vérifier tier2 (bonne OU moyenne luminosité)
     if 'bonne' in luminosite_type or 'moyenne' in luminosite_type or 'moyen' in luminosite_type:
@@ -209,11 +301,36 @@ def score_ensoleillement(apartment, config):
             'justification': f"Luminosité {luminosite_type}"
         }
     
-    # tier3 par défaut (faible luminosité)
+    # Si luminosité manquante mais exposition disponible, utiliser l'exposition
+    if not luminosite_type or luminosite_type == 'inconnue' or luminosite_type == 'inconnu':
+        if exposition_dir:
+            # Tier1: Sud, Sud-Ouest
+            if exposition_dir in ['sud', 'sud-ouest', 'sud-ouest']:
+                return {
+                    'score': tier_config['tier1']['score'],
+                    'tier': 'tier1',
+                    'justification': f"Exposition {exposition_dir} détectée"
+                }
+            # Tier2: Ouest, Est
+            elif exposition_dir in ['ouest', 'est']:
+                return {
+                    'score': tier_config['tier2']['score'],
+                    'tier': 'tier2',
+                    'justification': f"Exposition {exposition_dir} détectée"
+                }
+            # Tier3: Nord, Nord-Est
+            elif exposition_dir in ['nord', 'nord-est']:
+                return {
+                    'score': tier_config['tier3']['score'],
+                    'tier': 'tier3',
+                    'justification': f"Exposition {exposition_dir} détectée"
+                }
+    
+    # tier3 par défaut (faible luminosité ou aucune info)
     return {
         'score': tier_config['tier3']['score'],
         'tier': 'tier3',
-        'justification': f"Luminosité: {luminosite_type}"
+        'justification': f"Luminosité: {luminosite_type if luminosite_type else 'non disponible'}"
     }
 
 
@@ -401,12 +518,16 @@ def score_apartment(apartment, config):
     scores_detaille['cuisine'] = score_cuisine(apartment, config)
     scores_detaille['baignoire'] = score_baignoire(apartment, config)
     
-    # Calculer score total
-    score_total = sum(s.get('score', 0) for s in scores_detaille.values())
+    # Calculer score total : SEULEMENT les 6 critères de scoring (exclure etage, surface qui sont des indices)
+    scored_criteria = ['localisation', 'prix', 'style', 'ensoleillement', 'cuisine', 'baignoire']
+    score_total = sum(scores_detaille.get(key, {}).get('score', 0) for key in scored_criteria)
     
-    # Ajouter bonus/malus
-    bonus, malus = calculate_bonus_malus(apartment, config)
-    score_total += bonus - malus
+    # Pas de bonus/malus (supprimés - jamais validés)
+    bonus = 0
+    malus = 0
+    
+    # Arrondir au multiple de 5 le plus proche
+    score_total = round_to_nearest_5(score_total)
     
     # Déterminer tier global
     if score_total >= 80:
@@ -421,8 +542,8 @@ def score_apartment(apartment, config):
         'score_total': score_total,
         'tier': tier,
         'scores_detaille': scores_detaille,
-        'bonus': bonus,
-        'malus': malus,
+        'bonus': 0,  # Bonus/malus supprimés - jamais validés
+        'malus': 0,  # Bonus/malus supprimés - jamais validés
         'date_scoring': apartment.get('scraped_at', ''),
         'model_used': 'rules_based'  # Pas d'IA
     }

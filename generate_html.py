@@ -148,14 +148,15 @@ def format_apartment_info(apartment):
     style_data = style_analysis.get('style', {})
     style_type = style_data.get('type', '').lower()
     
-    if '70' in style_type or 'seventies' in style_type:
-        style_str = "70's"
-    elif 'haussmann' in style_type:
-        style_str = "Haussmannien"
-    elif 'moderne' in style_type:
-        style_str = "Moderne"
+    # Ancien / Atypique / Neuf
+    style_type_lower = style_type.lower() if style_type else ''
+    if 'haussmann' in style_type_lower:
+        style_str = "Ancien"
+    elif 'loft' in style_type_lower or 'atypique' in style_type_lower or 'unique' in style_type_lower or 'original' in style_type_lower:
+        style_str = "Atypique"
     elif style_type and style_type not in ['autre', 'inconnu']:
-        style_str = style_type.capitalize()
+        # Tout le reste = Neuf
+        style_str = "Neuf"
     
     subtitle_parts = []
     if surface_str:

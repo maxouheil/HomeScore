@@ -8,6 +8,7 @@ import os
 import re
 from datetime import datetime
 from extract_baignoire import BaignoireExtractor
+from criteria.localisation import get_metro_name as get_metro_name_from_criteria
 
 def load_scored_apartments():
     """Charge les appartements scorés et fusionne avec les données scrapées"""
@@ -171,68 +172,8 @@ def format_prix_k(prix_str):
         return None
 
 def get_metro_name(apartment):
-    """Extrait le nom du métro depuis différentes sources"""
-    # Priorité 1: scores_detaille.localisation.justification (extrait par l'IA de scoring)
-    scores_detaille = apartment.get('scores_detaille', {})
-    localisation_score = scores_detaille.get('localisation', {})
-    justification = localisation_score.get('justification', '')
-    
-    # Chercher "métro XXX" dans la justification
-    # Patterns: "métro Ménilmontant", "métro Rue des Boulets", etc.
-    metro_match = re.search(r'métro\s+([A-Za-z\s\-éàèùîêôûçâë]+?)(?:[,\.]|\s+(?:zone|ligne|arrondissement)|\s*$)', justification, re.IGNORECASE)
-    if metro_match:
-        metro = metro_match.group(1).strip()
-        # Vérifier que ce n'est pas un faux positif
-        if metro and len(metro) > 2 and len(metro) < 50 and metro not in ['non trouvé', 'proximité', 'immédiate']:
-            return metro
-    
-    # Chercher des noms de métros connus sans "métro" dans la justification
-    # Stations de métro parisiennes communes
-    known_metros = [
-        'Philippe Auguste', 'Charonne', 'Pyrénées', 'Jourdain', 'Pelleport', 'Gambetta',
-        'Ménilmontant', 'Alexandre Dumas', 'Rue des Boulets', 'Belleville', 'Couronnes',
-        'Botzaris', 'Buttes-Chaumont', 'Place des Fêtes', 'Rébeval', 'Pyrénées',
-        'Goncourt', 'République', 'Nation', 'Bastille', 'Gare de Lyon'
-    ]
-    for station in known_metros:
-        if station in justification:
-            return station
-    
-    # Priorité 2: map_info.metros (première station)
-    map_info = apartment.get('map_info', {})
-    metros = map_info.get('metros', [])
-    if metros and len(metros) > 0:
-        metro = metros[0].strip()
-        # Nettoyer (enlever "métro " si présent)
-        metro = re.sub(r'^métro\s+', '', metro, flags=re.IGNORECASE).strip()
-        # Si trop long, extraire juste le nom de la station (avant le premier "-" ou ",")
-        if len(metro) > 50:  # Si description longue
-            metro = metro.split('-')[0].split(',')[0].strip()
-        if metro and len(metro) > 2 and metro != "m" and len(metro) < 50:
-            return metro
-    
-    # Priorité 3: transports (première station valide)
-    transports = apartment.get('transports', [])
-    for transport in transports:
-        # Chercher une station de métro valide (nom + numéro de ligne potentiel)
-        if re.search(r'^[A-Za-z\s\-éàèùîêôûçâë]+$', transport.strip()) and len(transport.strip()) > 2:
-            # Vérifier que ce n'est pas un faux positif
-            excluded = ['Paris', 'Entre', '€', 'm²', 'pièces', 'chambres']
-            if not any(excl in transport for excl in excluded):
-                return transport.strip()
-    
-    # Priorité 4: chercher dans la description (supporte "métro" et "métros")
-    description = apartment.get('description', '')
-    metro_match = re.search(r'métro\w*\s+([A-Za-z\s\-éàèùîêôûçâë]+?)(?:,|\s+\(ligne|\s+[Ll]|\.|\s+et|\-)', description, re.IGNORECASE)
-    if metro_match:
-        metro = metro_match.group(1).strip()
-        # Si trop long, extraire juste le nom de la station
-        if len(metro) > 50:
-            metro = metro.split('-')[0].split(',')[0].strip()
-        if metro and len(metro) > 2 and len(metro) < 50:
-            return metro
-    
-    return None
+    """Extrait le nom du métro - utilise la fonction centralisée de criteria/localisation.py"""
+    return get_metro_name_from_criteria(apartment)
 
 def get_style_name(apartment):
     """Extrait le nom du style depuis différentes sources"""
@@ -244,29 +185,30 @@ def get_style_name(apartment):
         if style_type and style_type != 'autre':
             # Capitaliser la première lettre et formater
             style_name = style_type.capitalize()
-            # Gérer les cas spéciaux comme "70s" ou "Haussmannien"
-            if '70' in style_type or 'seventies' in style_type.lower():
-                style_name = "70s"
-            elif 'haussmann' in style_type.lower():
-                style_name = "Haussmannien"
-            return f"Style {style_name}"
+            # Ancien / Atypique / Neuf
+            style_type_lower = style_type.lower()
+            if 'haussmann' in style_type_lower:
+                style_name = "Ancien"
+            elif 'loft' in style_type_lower or 'atypique' in style_type_lower or 'unique' in style_type_lower or 'original' in style_type_lower:
+                style_name = "Atypique"
+            else:
+                # Tout le reste = Neuf
+                style_name = "Neuf"
+            return style_name
     
     # Priorité 2: scores_detaille.style.justification (chercher des indices de style)
     scores_detaille = apartment.get('scores_detaille', {})
     style_score = scores_detaille.get('style', {})
     justification = style_score.get('justification', '').lower()
     
+    # Ancien / Atypique / Neuf
     if 'haussmann' in justification or 'moulures' in justification or 'parquet' in justification:
-        return "Style Haussmannien"
-    elif '70' in justification or 'seventies' in justification:
-        return "Style 70s"
-    elif 'moderne' in justification or 'contemporain' in justification:
-        return "Style Moderne"
-    
-    # Fallback: utiliser style_haussmannien si disponible
-    style_haussmannien = apartment.get('style_haussmannien', {})
-    if style_haussmannien.get('score', 0) > 20:
-        return "Style Haussmannien"
+        return "Ancien"
+    elif 'loft' in justification or 'atypique' in justification or 'unique' in justification or 'original' in justification:
+        return "Atypique"
+    else:
+        # Tout le reste = Neuf
+        return "Neuf"
     
     return None
 
@@ -377,7 +319,7 @@ def format_apartment_info(apartment):
     # Extraire le style
     style_name = get_style_name(apartment)
     
-    # Construire le subtitle: "76 m² · 4e étage · Style 70s"
+    # Construire le subtitle: "76 m² · 4e étage · Ancien" (ou Neuf / Atypique)
     subtitle_parts = []
     if surface_clean:
         subtitle_parts.append(surface_clean)
@@ -438,9 +380,22 @@ def get_criterion_confidence(apartment, criterion_key):
     return None
 
 def format_localisation_criterion(apartment):
-    """Formate le critère Localisation: "Metro · Quartier" """
+    """Formate le critère Localisation: "Metro · Quartier · Good/Moyen/Bad" """
     metro = get_metro_name(apartment)
     quartier = get_quartier_name(apartment)
+    
+    # Récupérer le tier depuis scores_detaille
+    scores_detaille = apartment.get('scores_detaille', {})
+    localisation_score = scores_detaille.get('localisation', {})
+    tier = localisation_score.get('tier', 'tier3')
+    
+    # Mapping tiers avec couleurs (comme pour prix)
+    tier_mapping = {
+        'tier1': ('Good', 'good'),
+        'tier2': ('Moyen', 'moyen'),
+        'tier3': ('Bad', 'bad')
+    }
+    tier_label, tier_class = tier_mapping.get(tier, ('Bad', 'bad'))
     
     parts = []
     if metro:
@@ -449,14 +404,19 @@ def format_localisation_criterion(apartment):
         parts.append(quartier)
     
     if parts:
+        location_text = " · ".join(parts)
+        # Ajouter le tier avec le même format que prix
+        main_value = f"{location_text} · <span class=\"tier-label {tier_class}\">{tier_label}</span>"
         return {
-            'main_value': " · ".join(parts),
+            'main_value': main_value,
             'confidence': None,  # Données factuelles, pas de confiance
             'indices': None
         }
     else:
+        # Même si non spécifié, ajouter le tier
+        main_value = f"Non spécifié · <span class=\"tier-label {tier_class}\">{tier_label}</span>"
         return {
-            'main_value': "Non spécifié",
+            'main_value': main_value,
             'confidence': None,
             'indices': None
         }
@@ -535,22 +495,21 @@ def format_style_criterion(apartment):
         
         if 'haussmann' in justification or 'moulures' in justification:
             style_type = 'haussmannien'
-        elif '70' in justification or 'seventies' in justification:
-            style_type = '70s'
-        elif 'moderne' in justification or 'contemporain' in justification:
+        elif '70' in justification or 'seventies' in justification or '60' in justification or 'moderne' in justification or 'contemporain' in justification:
+            # Fusionner 70s et moderne
             style_type = 'moderne'
         else:
             style_type = 'Non spécifié'
     
-    # Capitaliser et formater
-    if '70' in style_type.lower() or 'seventies' in style_type.lower():
-        style_name = "70's"
-    elif 'haussmann' in style_type.lower():
-        style_name = "Haussmannien"
-    elif 'moderne' in style_type.lower():
-        style_name = "Moderne"
+    # Ancien / Atypique / Neuf
+    style_type_lower = style_type.lower()
+    if 'haussmann' in style_type_lower:
+        style_name = "Ancien"
+    elif 'loft' in style_type_lower or 'atypique' in style_type_lower or 'unique' in style_type_lower or 'original' in style_type_lower:
+        style_name = "Atypique"
     else:
-        style_name = style_type.capitalize()
+        # Tout le reste = Neuf
+        style_name = "Neuf"
     
     # Convertir confiance en pourcentage
     confidence_pct = None
@@ -560,29 +519,65 @@ def format_style_criterion(apartment):
         elif isinstance(confidence, (int, float)) and 0 <= confidence <= 100:
             confidence_pct = int(confidence)
     
-    # Extraire les indices
+    # Extraire les indices - SYSTÉMATIQUEMENT
     indices = []
     details = style_data.get('details', '')
+    
+    # 1. Chercher dans details de style_analysis
     if details:
-        # Chercher des mots-clés dans les détails
-        keywords = ['moulures', 'cheminée', 'parquet', 'hauteur sous plafond', 'moldings', 'fireplace']
+        keywords = ['moulures', 'cheminée', 'parquet', 'hauteur sous plafond', 'moldings', 'fireplace', 'plafond', 'carreaux', 'carrelage', 'balcon', 'terrasse']
         found_keywords = [kw for kw in keywords if kw.lower() in details.lower()]
         if found_keywords:
-            indices = found_keywords[:3]  # Limiter à 3 indices
+            indices.extend(found_keywords[:3])
     
-    # Si pas d'indices dans details, chercher dans style_haussmannien
-    if not indices:
-        style_haussmannien = apartment.get('style_haussmannien', {})
-        if isinstance(style_haussmannien, dict):
-            elements = style_haussmannien.get('elements', {})
-            if isinstance(elements, dict):
-                architectural = elements.get('architectural', [])
-                if isinstance(architectural, list) and architectural:
-                    indices = architectural[:3]
+    # 2. Chercher dans style_haussmannien
+    style_haussmannien = apartment.get('style_haussmannien', {})
+    if isinstance(style_haussmannien, dict):
+        elements = style_haussmannien.get('elements', {})
+        if isinstance(elements, dict):
+            architectural = elements.get('architectural', [])
+            if isinstance(architectural, list) and architectural:
+                indices.extend(architectural[:3])
     
-    indices_str = None
+    # 3. Chercher dans scores_detaille.style.justification
+    scores_detaille = apartment.get('scores_detaille', {})
+    style_score = scores_detaille.get('style', {})
+    justification = style_score.get('justification', '').lower()
+    if justification:
+        justification_keywords = ['moulures', 'parquet', 'cheminée', 'haussmannien', 'ancien', 'moderne', 'contemporain', 'loft', 'atypique']
+        found_justification = [kw for kw in justification_keywords if kw in justification]
+        if found_justification:
+            indices.extend(found_justification[:2])
+    
+    # 4. Chercher dans description et caractéristiques
+    description = apartment.get('description', '').lower()
+    caracteristiques = apartment.get('caracteristiques', '').lower()
+    text_to_search = f"{description} {caracteristiques}"
+    text_keywords = ['parquet', 'cheminée', 'moulures', 'plafond', 'haussmannien', 'ancien']
+    found_text = [kw for kw in text_keywords if kw in text_to_search]
+    if found_text:
+        indices.extend(found_text[:2])
+    
+    # 5. Chercher dans individual_analyses de style_analysis
+    individual_analyses = style_analysis.get('individual_analyses', [])
+    if individual_analyses:
+        for analysis in individual_analyses[:2]:  # Limiter à 2 analyses
+            elements_visuels = analysis.get('elements_visuels', [])
+            if isinstance(elements_visuels, list):
+                indices.extend(elements_visuels[:2])
+    
+    # Dédupliquer et limiter
+    indices = list(dict.fromkeys(indices))[:5]  # Garder max 5 indices uniques
+    
+    # Toujours retourner des indices (même si vides ou minimaux)
     if indices:
         indices_str = "Indices: " + " · ".join(indices)
+    else:
+        # Fallback: utiliser details si disponible
+        if details and len(details) < 100:
+            indices_str = f"Indices: {details}"
+        else:
+            indices_str = "Indices: Analyse basée sur les photos disponibles"
     
     return {
         'main_value': style_name,
@@ -614,11 +609,13 @@ def format_exposition_criterion(apartment):
         elif isinstance(confidence, (int, float)) and 0 <= confidence <= 100:
             confidence_pct = int(confidence)
     
-    # Extraire les indices depuis exposition
+    # Extraire les indices depuis exposition - SYSTÉMATIQUEMENT
     indices_parts = []
     exposition = apartment.get('exposition', {})
+    description = apartment.get('description', '').lower()
+    caracteristiques = apartment.get('caracteristiques', '').lower()
     
-    # Étage
+    # 1. Étage
     etage = apartment.get('etage', '')
     if etage:
         etage_match = re.search(r'(\d+(?:er?|e|ème?))\s*étage|RDC|rez-de-chaussée|rez de chaussée', str(etage), re.IGNORECASE)
@@ -635,20 +632,73 @@ def format_exposition_criterion(apartment):
                     else:
                         indices_parts.append(f"{num}e étage")
     
-    # Vis-à-vis depuis description ou exposition
-    description = apartment.get('description', '').lower()
+    # 2. Exposition directionnelle depuis exposition.exposition
+    exposition_dir = exposition.get('exposition', '')
+    if exposition_dir and exposition_dir.lower() not in ['inconnue', 'inconnu', 'non spécifiée']:
+        indices_parts.append(f"Exposition {exposition_dir}")
+    
+    # 3. Indices architecturaux depuis exposition.details.photo_details
+    exposition_details = exposition.get('details', {})
+    photo_details = exposition_details.get('photo_details', {})
+    
+    # Quartier et orientation typique
+    quartier_data = photo_details.get('quartier', {})
+    if isinstance(quartier_data, dict) and quartier_data.get('found'):
+        quartier_name = quartier_data.get('quartier', '')
+        orientation = quartier_data.get('orientation_typique', '')
+        if orientation:
+            indices_parts.append(f"Quartier {quartier_name} ({orientation})")
+    
+    # Indices architecturaux (balcon, terrasse, jardin, duplex)
+    architectural = photo_details.get('architectural', {})
+    if isinstance(architectural, dict):
+        clues_found = architectural.get('clues_found', [])
+        if isinstance(clues_found, list) and clues_found:
+            architectural_names = [clue.get('clue', '') for clue in clues_found[:3] if clue.get('clue')]
+            if architectural_names:
+                indices_parts.extend(architectural_names)
+    
+    # 4. Vis-à-vis depuis description
     if 'vis-à-vis' in description or 'vis à vis' in description or 'pas de vis' in description:
-        if 'pas de vis' in description:
+        if 'pas de vis' in description or 'sans vis' in description:
             indices_parts.append("pas de vis à vis")
         else:
             indices_parts.append("vis à vis")
     
-    # Exposition directionnelle
-    exposition_dir = exposition.get('exposition', '')
-    if exposition_dir and exposition_dir.lower() not in ['inconnue', 'inconnu', 'non spécifiée']:
-        indices_parts.append(f"Exposition {exposition_dir} détectée")
+    # 5. Luminosité depuis description/caractéristiques
+    text_to_search = f"{description} {caracteristiques}"
+    luminosite_keywords = ['lumineux', 'lumineuse', 'claire', 'clair', 'luminosité', 'fenêtres', 'grandes fenêtres']
+    found_luminosite = [kw for kw in luminosite_keywords if kw in text_to_search]
+    if found_luminosite:
+        indices_parts.append("Mention luminosité")
     
-    indices_str = " · ".join(indices_parts) if indices_parts else None
+    # 6. Vue depuis exposition.details
+    vue_info = exposition_details.get('vue', {})
+    if isinstance(vue_info, dict) and vue_info.get('vue'):
+        vue_level = vue_info.get('vue', '')
+        if vue_level and vue_level.lower() not in ['inconnue', 'inconnu']:
+            indices_parts.append(f"Vue {vue_level}")
+    
+    # 7. Étage depuis exposition.details.photo_details.etage
+    etage_data = photo_details.get('etage', {})
+    if isinstance(etage_data, dict) and etage_data.get('found'):
+        etage_desc = etage_data.get('description', '')
+        if etage_desc:
+            indices_parts.append(etage_desc)
+    
+    # Dédupliquer et limiter
+    indices_parts = list(dict.fromkeys(indices_parts))[:6]  # Garder max 6 indices
+    
+    # Toujours retourner des indices (même si vides ou minimaux)
+    if indices_parts:
+        indices_str = " · ".join(indices_parts)
+    else:
+        # Fallback: utiliser justification si disponible
+        justification = exposition.get('justification', '')
+        if justification and len(justification) < 150:
+            indices_str = justification
+        else:
+            indices_str = "Indices: Analyse basée sur la description et les caractéristiques"
     
     return {
         'main_value': main_value,
@@ -679,22 +729,64 @@ def format_cuisine_criterion(apartment):
         elif isinstance(confidence, (int, float)) and 0 <= confidence <= 100:
             confidence_pct = int(confidence)
     
-    # Extraire les indices
-    indices = None
+    # Extraire les indices - SYSTÉMATIQUEMENT
+    indices_parts = []
+    description = apartment.get('description', '').lower()
+    caracteristiques = apartment.get('caracteristiques', '').lower()
+    text_to_search = f"{description} {caracteristiques}"
+    
+    # 1. Chercher dans details de style_analysis
     if details:
-        # Chercher des mots-clés dans les détails pour les indices
         if 'analyse photo' in details.lower() or 'photo' in details.lower():
-            indices = f"Analyse photo : Cuisine {main_value.lower()} détectée"
+            indices_parts.append(f"Analyse photo : Cuisine {main_value.lower()} détectée")
         else:
             # Extraire des indices pertinents depuis details
-            keywords_found = []
             if 'bar' in details.lower() or 'comptoir' in details.lower():
-                keywords_found.append('bar détecté')
+                indices_parts.append('bar détecté')
             if 'ouverte' in details.lower() and main_value == "Ouverte":
-                keywords_found.append('cuisine intégrée')
-            
-            if keywords_found:
-                indices = " · ".join(keywords_found[:3])
+                indices_parts.append('cuisine intégrée')
+            if 'fermée' in details.lower() and main_value == "Fermée":
+                indices_parts.append('cuisine séparée')
+    
+    # 2. Chercher dans description et caractéristiques
+    cuisine_keywords = {
+        'ouverte': ['cuisine ouverte', 'cuisine américaine', 'cuisine intégrée', 'séjour cuisine', 'pièce à vivre'],
+        'fermée': ['cuisine fermée', 'cuisine séparée', 'cuisine équipée', 'cuisine indépendante']
+    }
+    
+    keywords_to_check = cuisine_keywords.get(main_value.lower(), [])
+    found_keywords = [kw for kw in keywords_to_check if kw in text_to_search]
+    if found_keywords:
+        indices_parts.extend(found_keywords[:2])
+    
+    # 3. Chercher dans individual_analyses de style_analysis
+    individual_analyses = style_analysis.get('individual_analyses', [])
+    if individual_analyses:
+        cuisine_detections = []
+        for analysis in individual_analyses[:3]:  # Limiter à 3 analyses
+            cuisine_ouverte_analysis = analysis.get('cuisine_ouverte')
+            cuisine_details_analysis = analysis.get('cuisine_details', '')
+            if cuisine_details_analysis and len(cuisine_details_analysis) < 80:
+                cuisine_detections.append(cuisine_details_analysis)
+        if cuisine_detections:
+            indices_parts.extend(cuisine_detections[:2])
+    
+    # 4. Chercher "bar" ou "comptoir" dans description
+    if 'bar' in text_to_search or 'comptoir' in text_to_search:
+        indices_parts.append('bar/comptoir mentionné')
+    
+    # Dédupliquer et limiter
+    indices_parts = list(dict.fromkeys(indices_parts))[:4]  # Garder max 4 indices
+    
+    # Toujours retourner des indices (même si vides ou minimaux)
+    if indices_parts:
+        indices = " · ".join(indices_parts)
+    else:
+        # Fallback: utiliser details si disponible
+        if details and len(details) < 100:
+            indices = details
+        else:
+            indices = f"Indices: Cuisine {main_value.lower()} détectée via analyse"
     
     return {
         'main_value': main_value,
@@ -730,24 +822,68 @@ def format_baignoire_criterion(apartment):
             elif isinstance(confidence, (int, float)) and 0 <= confidence <= 100:
                 confidence_pct = int(confidence)
         
-        # Extraire les indices depuis justification
-        indices = None
+        # Extraire les indices depuis justification - SYSTÉMATIQUEMENT
+        indices_parts = []
+        description = apartment.get('description', '').lower()
+        caracteristiques = apartment.get('caracteristiques', '').lower()
+        text_to_search = f"{description} {caracteristiques}"
+        
+        # 1. Chercher dans justification
         if justification:
             if 'photo' in justification.lower() or 'détectée' in justification.lower() or 'analysée' in justification.lower():
                 if has_baignoire:
-                    indices = "Analyse photo : Baignoire détectée"
+                    indices_parts.append("Analyse photo : Baignoire détectée")
                 elif has_douche:
-                    indices = "Analyse photo : Douche détectée"
+                    indices_parts.append("Analyse photo : Douche détectée")
             elif 'description' in justification.lower() or 'caractéristiques' in justification.lower():
                 # Détecté depuis texte
                 if has_baignoire:
-                    indices = "Baignoire mentionnée dans le texte"
+                    indices_parts.append("Baignoire mentionnée dans le texte")
                 elif has_douche:
-                    indices = "Douche mentionnée dans le texte"
+                    indices_parts.append("Douche mentionnée dans le texte")
             else:
                 # Utiliser la justification comme indices si elle est courte
                 if len(justification) < 100:
-                    indices = justification
+                    indices_parts.append(justification)
+        
+        # 2. Chercher directement dans description et caractéristiques
+        if 'baignoire' in text_to_search:
+            indices_parts.append("Baignoire mentionnée")
+        if 'douche' in text_to_search:
+            indices_parts.append("Douche mentionnée")
+        if 'salle de bain' in text_to_search or 'salle de bains' in text_to_search:
+            indices_parts.append("Salle de bain mentionnée")
+        
+        # 3. Chercher dans caractéristiques (souvent format court)
+        if caracteristiques:
+            caracteristiques_upper = caracteristiques.upper()
+            if 'BAIGNOIRE' in caracteristiques_upper:
+                indices_parts.append("Baignoire dans caractéristiques")
+            if 'DOUCHE' in caracteristiques_upper:
+                indices_parts.append("Douche dans caractéristiques")
+        
+        # 4. Chercher dans scores_detaille.baignoire si disponible
+        scores_detaille = apartment.get('scores_detaille', {})
+        baignoire_score = scores_detaille.get('baignoire', {})
+        if isinstance(baignoire_score, dict):
+            baignoire_justification = baignoire_score.get('justification', '')
+            if baignoire_justification and len(baignoire_justification) < 100:
+                indices_parts.append(baignoire_justification)
+        
+        # Dédupliquer et limiter
+        indices_parts = list(dict.fromkeys(indices_parts))[:4]  # Garder max 4 indices
+        
+        # Toujours retourner des indices (même si vides ou minimaux)
+        if indices_parts:
+            indices = " · ".join(indices_parts)
+        else:
+            # Fallback: message par défaut
+            if has_baignoire:
+                indices = "Indices: Baignoire détectée"
+            elif has_douche:
+                indices = "Indices: Douche détectée"
+            else:
+                indices = "Indices: Aucune baignoire détectée"
         
         return {
             'main_value': main_value,
@@ -755,11 +891,27 @@ def format_baignoire_criterion(apartment):
             'indices': indices
         }
     except Exception as e:
-        # Fallback si erreur
+        # Fallback si erreur - toujours retourner des indices
+        description = apartment.get('description', '').lower()
+        caracteristiques = apartment.get('caracteristiques', '').lower()
+        text_to_search = f"{description} {caracteristiques}"
+        
+        # Chercher dans le texte même en cas d'erreur
+        indices_parts = []
+        if 'baignoire' in text_to_search:
+            indices_parts.append("Baignoire mentionnée")
+        if 'douche' in text_to_search:
+            indices_parts.append("Douche mentionnée")
+        
+        if indices_parts:
+            indices = " · ".join(indices_parts)
+        else:
+            indices = "Indices: Analyse basée sur la description"
+        
         return {
             'main_value': "Non",
             'confidence': None,
-            'indices': None
+            'indices': indices
         }
 
 def get_all_apartment_photos(apartment):
@@ -1208,6 +1360,10 @@ def generate_scorecard_html(apartments):
         }}
         
         .criterion {{
+            display: grid;
+            grid-template-columns: 1fr auto;
+            align-items: center;
+            gap: 16px;
             margin-bottom: 16px;
             padding-bottom: 16px;
             border-bottom: 1px solid rgba(0, 0, 0, 0.06);
@@ -1219,12 +1375,21 @@ def generate_scorecard_html(apartments):
             margin-bottom: 0;
         }}
         
+        .criterion-content {{
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }}
+        
         .criterion-details {{
             font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
             font-size: 13px;
             font-weight: 400;
             color: #212529;
             margin-top: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }}
         
         .criterion-details .tier-label {{
@@ -1243,22 +1408,16 @@ def generate_scorecard_html(apartments):
             color: #F85457 !important;
         }}
         
-        .criterion-header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 0;
-            gap: 12px;
-        }}
-        
         .criterion-name {{
             font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
             font-size: 16px;
             font-weight: 500;
             color: #212529;
             text-transform: none !important;
-            flex: 1;
-            min-width: 0;
+            margin-bottom: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }}
         
         .criterion-score-badge {{
@@ -1271,9 +1430,10 @@ def generate_scorecard_html(apartments):
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            flex-shrink: 0;
+            white-space: nowrap;
             height: fit-content;
             line-height: 1.2;
+            align-self: center;
         }}
         
         .criterion-score-badge.green {{
@@ -1316,6 +1476,9 @@ def generate_scorecard_html(apartments):
             font-size: 12px;
             color: #999;
             margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }}
         
         .confidence-badge {{
@@ -1431,15 +1594,16 @@ def generate_scorecard_html(apartments):
                 except:
                     pass
         
-        # Ajouter les bonus/malus si disponibles dans l'appartement
-        bonus = apartment.get('bonus', 0)
-        malus = apartment.get('malus', 0)
-        mega_score += bonus - malus
+        # Pas de bonus/malus (supprimés - jamais validés)
+        # bonus = apartment.get('bonus', 0)
+        # malus = apartment.get('malus', 0)
+        # mega_score += bonus - malus
         
-        # Arrondir le mega score à 1 décimale si nécessaire
-        mega_score = round(mega_score, 1)
-        # Formater pour l'affichage (enlever .0 si entier)
-        mega_score_display = int(mega_score) if mega_score == int(mega_score) else mega_score
+        # Arrondir au multiple de 5 le plus proche
+        mega_score = round(mega_score / 5) * 5
+        
+        # Formater pour l'affichage (toujours un entier car multiple de 5)
+        mega_score_display = int(mega_score)
         
         # Récupérer toutes les photos de l'appartement
         all_photos = get_all_apartment_photos(apartment)
@@ -1541,17 +1705,21 @@ def generate_scorecard_html(apartments):
                 
                 # Construire le HTML selon le design
                 details_html = f'{main_value}{confidence_html}'
-                if indices:
+                # Afficher systématiquement les indices pour Style / Exposition / Cuisine / Baignoire
+                if indices or key in ['style', 'ensoleillement', 'cuisine', 'baignoire']:
                     # Les indices sont déjà formatés par les fonctions (peuvent contenir "Indices:" ou "Analyse photo:")
+                    # Si indices est None mais qu'on est sur un critère qui doit toujours avoir des indices, utiliser un fallback
+                    if not indices and key in ['style', 'ensoleillement', 'cuisine', 'baignoire']:
+                        indices = "Indices: Analyse en cours"
                     details_html += f'<div class="criterion-sub-details">{indices}</div>'
                 
                 html += f"""
                         <div class="criterion">
-                            <div class="criterion-header">
-                                <span class="criterion-name">{info['name']}</span>
-                                <span class="criterion-score-badge {badge_class}">{score} pts</span>
+                            <div class="criterion-content">
+                                <div class="criterion-name">{info['name']}</div>
+                                <div class="criterion-details">{details_html}</div>
                             </div>
-                            <div class="criterion-details">{details_html}</div>
+                            <span class="criterion-score-badge {badge_class}">{score} pts</span>
                         </div>
 """
         

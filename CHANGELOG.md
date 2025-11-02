@@ -2,6 +2,83 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [2.3.0] - 2025-02-01
+
+### 🎯 Version 2.3 - Améliorations de Détection et Scoring Affiné
+
+#### ✅ Améliorations Majeures
+
+**📍 Extraction Multi-Stations de Métro**
+- ✅ **`get_all_metro_stations()`**: Nouvelle fonction qui récupère TOUTES les stations de métro mentionnées dans l'annonce (au lieu d'une seule)
+- ✅ **Détection améliorée**: Extraction depuis justification IA, map_info, transports, et description
+- ✅ **Nettoyage intelligent**: Suppression des doublons, nettoyage des parenthèses et formats variables
+- ✅ **`get_metro_tier()`**: Nouvelle fonction qui détermine le tier d'une station selon `scoring_config.json`
+- ✅ **Mapping explicite**: Liste précise des stations Tier 1 et Tier 2 pour meilleure précision
+
+**🎨 Amélioration de la Détection de Style**
+- ✅ **Catégorisation simplifiée**: Style maintenant classé en 3 catégories (Ancien / Atypique / Neuf)
+- ✅ **Détection améliorée**: Utilise à la fois `style_analysis` (IA images) et `scores_detaille` (IA texte)
+- ✅ **Indices contextuels**: Extraction intelligente des indices selon le style détecté
+- ✅ **Fallback robuste**: Si style non détecté par IA images, recherche dans justification texte
+
+**📊 Scoring de Localisation Affiné**
+- ✅ **Utilisation de toutes les stations**: Le scoring vérifie maintenant TOUTES les stations pour déterminer le meilleur tier
+- ✅ **Matching flexible**: Vérification dans localisation, quartier, description, et toutes les stations de métro
+- ✅ **Meilleure précision**: Détection plus fiable des zones Tier 1 (Place de la Réunion, ligne 2 Belleville-Avron)
+
+**🚫 Suppression des Bonus/Malus**
+- ✅ **Bonus/Malus supprimés**: Tous les bonus et malus ont été retirés car jamais validés
+- ✅ **Score simplifié**: Le mega score se base maintenant uniquement sur 6 critères (localisation, prix, style, ensoleillement, cuisine, baignoire)
+- ✅ **Documentation**: `RECAP_BONUS_MALUS.md` documente la suppression et les raisons
+- ✅ **Impact**: Score max réduit à 90 pts (au lieu de 100+ avec bonus)
+
+**🎨 Améliorations Design System**
+- ✅ **DESIGN_SCORECARD.md mis à jour**: Documentation complète de la structure en deux colonnes pour les critères
+- ✅ **Grille responsive**: Amélioration de l'affichage avec grid layout pour séparer texte et badges
+- ✅ **Typographie Cera Pro**: Tous les textes utilisent maintenant Cera Pro avec `!important`
+
+#### 🔧 Changements Techniques
+
+**Fichiers Modifiés**:
+- `criteria/localisation.py`: 
+  - Ajout de `get_all_metro_stations()` pour récupérer toutes les stations
+  - Ajout de `get_metro_tier()` pour déterminer le tier d'une station
+  - Amélioration de `get_metro_name()` pour utiliser toutes les stations et déterminer la meilleure
+- `criteria/style.py`: 
+  - Refactorisation de `format_style()` pour catégoriser en Ancien/Atypique/Neuf
+  - Amélioration de la détection avec fallback vers `scores_detaille`
+  - Extraction intelligente des indices selon le style
+- `scoring.py`: 
+  - `score_localisation()` utilise maintenant toutes les stations pour scoring
+  - Matching flexible sur toutes les sources de données
+- `generate_scorecard_html.py`: 
+  - Améliorations de l'affichage avec structure grid pour critères
+  - Meilleure intégration des métros multiples
+- `scoring_prompt.txt`: Mise à jour des critères de style (Ancien/Atypique/Neuf)
+
+**Nouveaux Fichiers**:
+- `RECAP_BONUS_MALUS.md`: Documentation complète de la suppression des bonus/malus
+- `analyze_bonus_malus.py`: Script d'analyse pour évaluer la pertinence des bonus/malus
+
+#### 📊 Résultats
+
+**Extraction Métro**:
+- **Avant**: 1 seule station extraite (parfois incorrecte)
+- **Après**: Toutes les stations extraites avec détermination du meilleur tier
+- **Précision**: Amélioration significative de la détection des zones Tier 1
+
+**Détection Style**:
+- **Catégorisation**: 3 catégories claires (Ancien/Atypique/Neuf) au lieu de nombreux types
+- **Fiabilité**: Utilisation combinée IA images + IA texte pour meilleure précision
+- **Indices**: Extraction contextuelle des indices pertinents selon le style
+
+**Scoring**:
+- **Simplification**: Score basé uniquement sur 6 critères (plus de bonus/malus)
+- **Clarté**: Calcul plus transparent et prévisible
+- **Score max**: 90 pts au lieu de 100+ avec bonus
+
+---
+
 ## [2.2.0] - 2025-01-31
 
 ### 🎯 Version 2.2 - Architecture Simplifiée et Système de Watch

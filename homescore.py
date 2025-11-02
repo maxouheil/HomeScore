@@ -21,11 +21,18 @@ def load_scraped_apartments():
 
 
 def save_scores(scored_apartments):
-    """Sauvegarde les scores dans data/scores.json"""
-    os.makedirs('data', exist_ok=True)
+    """Sauvegarde les scores dans data/scores.json ET all_apartments_scores.json"""
+    os.makedirs('data/scores', exist_ok=True)
+    
+    # Sauvegarder dans scores.json (nouveau format)
     with open('data/scores.json', 'w', encoding='utf-8') as f:
         json.dump(scored_apartments, f, indent=2, ensure_ascii=False)
     print(f"✅ Scores sauvegardés: data/scores.json ({len(scored_apartments)} appartements)")
+    
+    # AUSSI sauvegarder dans all_apartments_scores.json (format utilisé par generate_scorecard_html.py)
+    with open('data/scores/all_apartments_scores.json', 'w', encoding='utf-8') as f:
+        json.dump(scored_apartments, f, indent=2, ensure_ascii=False)
+    print(f"✅ Scores sauvegardés: data/scores/all_apartments_scores.json ({len(scored_apartments)} appartements)")
 
 
 def main():

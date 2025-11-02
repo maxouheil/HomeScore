@@ -32,22 +32,27 @@ def format_style(apartment):
         
         if 'haussmann' in justification or 'moulures' in justification:
             style_type = 'haussmannien'
-        elif '70' in justification or 'seventies' in justification:
-            style_type = '70s'
-        elif 'moderne' in justification or 'contemporain' in justification:
+        elif '70' in justification or 'seventies' in justification or 'moderne' in justification or 'contemporain' in justification:
+            # Fusionner 70s et moderne en "moderne"
             style_type = 'moderne'
         else:
             style_type = 'Non spécifié'
     
-    # Capitaliser et formater
-    if '70' in style_type.lower() or 'seventies' in style_type.lower():
-        style_name = "70's"
-    elif 'haussmann' in style_type.lower():
-        style_name = "Haussmannien"
-    elif 'moderne' in style_type.lower():
-        style_name = "Moderne"
+    # Ancien / Atypique / Neuf
+    style_type_lower = style_type.lower()
+    
+    # Vérifier aussi dans les scores_detaille pour détecter "Atypique" depuis texte
+    scores_detaille = apartment.get('scores_detaille', {})
+    style_score = scores_detaille.get('style', {})
+    justification = style_score.get('justification', '').lower()
+    
+    if 'haussmann' in style_type_lower:
+        style_name = "Ancien"
+    elif 'loft' in style_type_lower or 'atypique' in style_type_lower or 'unique' in style_type_lower or 'original' in style_type_lower or 'atypique' in justification:
+        style_name = "Atypique"
     else:
-        style_name = style_type.capitalize()
+        # Tout le reste = Neuf
+        style_name = "Neuf"
     
     # Convertir confiance en pourcentage
     confidence_pct = None
@@ -57,18 +62,26 @@ def format_style(apartment):
         elif isinstance(confidence, (int, float)) and 0 <= confidence <= 100:
             confidence_pct = int(confidence)
     
-    # Extraire les indices
+    # Extraire les indices selon le style détecté (Ancien / Atypique / Neuf)
     indices = []
     details = style_data.get('details', '')
     if details:
-        # Chercher des mots-clés dans les détails
-        keywords = ['moulures', 'cheminée', 'parquet', 'hauteur sous plafond', 'moldings', 'fireplace']
+        # Indices pour Ancien
+        if 'haussmann' in style_type_lower:
+            keywords = ['moulures', 'cheminée', 'parquet', 'hauteur sous plafond', 'moldings', 'fireplace', 'balcon fer forgé']
+        # Indices pour Atypique
+        elif 'loft' in style_type_lower or 'atypique' in style_type_lower or 'unique' in style_type_lower or 'original' in style_type_lower or 'atypique' in justification:
+            keywords = ['loft', 'atypique', 'unique', 'original', 'espace ouvert', 'volume généreux', 'caractère unique']
+        # Indices pour Neuf (tout le reste)
+        else:
+            keywords = ['terrasse métal', 'terrasse metal', 'vue', 'sol moderne', 'carrelage', 'fenêtre moderne', 'fenetre moderne', 'hauteur plafond réduite', 'plafond bas', 'lignes épurées', 'design minimaliste']
+        
         found_keywords = [kw for kw in keywords if kw.lower() in details.lower()]
         if found_keywords:
             indices = found_keywords[:3]  # Limiter à 3 indices
     
-    # Si pas d'indices dans details, chercher dans style_haussmannien
-    if not indices:
+    # Si pas d'indices dans details, chercher dans style_haussmannien pour les styles anciens
+    if not indices and 'haussmann' in style_type_lower:
         style_haussmannien = apartment.get('style_haussmannien', {})
         if isinstance(style_haussmannien, dict):
             elements = style_haussmannien.get('elements', {})

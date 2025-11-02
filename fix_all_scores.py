@@ -5,7 +5,7 @@ Script pour recalculer tous les scores avec scoring.py et corriger les incohére
 
 import json
 import os
-from scoring import load_scoring_config, score_apartment
+from scoring import load_scoring_config, score_apartment, round_to_nearest_5
 
 def fix_all_scores():
     """Recalcule tous les scores avec scoring.py"""
@@ -70,14 +70,14 @@ def fix_all_scores():
             # Mettre à jour les scores détaillés
             apt_scored['scores_detaille'] = new_score['scores_detaille']
             
-            # Recalculer le score total (seulement les 6 critères)
+            # Recalculer le score total (seulement les 6 critères, pas de bonus/malus)
             mega_score = sum(
                 new_score['scores_detaille'].get(key, {}).get('score', 0)
                 for key in scored_criteria
             )
-            bonus = new_score.get('bonus', 0)
-            malus = new_score.get('malus', 0)
-            apt_scored['score_total'] = round(mega_score + bonus - malus, 1)
+            # Pas de bonus/malus (supprimés - jamais validés)
+            # Arrondir au multiple de 5 le plus proche
+            apt_scored['score_total'] = round_to_nearest_5(mega_score)
             
             # Déterminer tier global
             if apt_scored['score_total'] >= 80:
@@ -87,9 +87,9 @@ def fix_all_scores():
             else:
                 apt_scored['tier'] = 'tier3'
             
-            # Mettre à jour bonus/malus
-            apt_scored['bonus'] = bonus
-            apt_scored['malus'] = malus
+            # Bonus/malus supprimés (jamais validés)
+            apt_scored['bonus'] = 0
+            apt_scored['malus'] = 0
             
             # Mettre à jour model_used
             apt_scored['model_used'] = 'rules_based'

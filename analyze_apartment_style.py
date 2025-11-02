@@ -125,10 +125,10 @@ class ApartmentStyleAnalyzer:
                                 'type': 'text',
                                 'text': """Analyse cette photo d'appartement et estime:
 
-1. STYLE ARCHITECTURAL:
-   - Haussmannien: moulures, parquet, hauteur sous plafond, cheminée, balcon en fer forgé
-   - Moderne/Contemporain: lignes épurées, matériaux modernes, design minimaliste
-   - Années 70: couleurs vives, formes arrondies, matériaux de l'époque
+1. STYLE ARCHITECTURAL (Ancien / Atypique / Neuf):
+   - Ancien (20 pts): Haussmannien - moulures, parquet, hauteur sous plafond, cheminée, balcon en fer forgé
+   - Atypique (10 pts): Loft, atypique, unique, original - espaces ouverts, volumes généreux, caractère unique
+   - Neuf (0 pts): Tout le reste (moderne, contemporain, récent, années 20-70) - terrasse métal, vue, sol moderne, fenêtre moderne, hauteur plafond réduite, lignes épurées, matériaux modernes, design minimaliste
    - Autre: décris le style observé
 
 2. CUISINE OUVERTE:
@@ -143,7 +143,8 @@ class ApartmentStyleAnalyzer:
 
 Réponds au format JSON:
 {
-    "style": "haussmannien|moderne|70s|autre",
+    "style": "haussmannien|moderne|autre",
+    "note": "Pour le scoring: 'haussmannien' = ancien (20pts), tout le reste = neuf (0pts)",
     "style_confidence": 0.0-1.0,
     "style_details": "description détaillée des éléments observés",
     "cuisine_ouverte": true|false,
@@ -219,7 +220,12 @@ Réponds au format JSON:
             import re
             
             style_match = re.search(r'"style":\s*"([^"]+)"', content)
-            style = style_match.group(1) if style_match else 'inconnu'
+            style_raw = style_match.group(1) if style_match else 'inconnu'
+            # Fusionner 70s et moderne en "moderne"
+            if '70' in style_raw.lower() or 'seventies' in style_raw.lower() or '60' in style_raw.lower():
+                style = 'moderne'
+            else:
+                style = style_raw
             
             cuisine_match = re.search(r'"cuisine_ouverte":\s*(true|false)', content)
             cuisine_ouverte = cuisine_match.group(1) == 'true' if cuisine_match else False
@@ -252,11 +258,17 @@ Réponds au format JSON:
         print(f"\n📊 AGRÉGATION DES {len(analyses)} ANALYSES")
         print("-" * 40)
         
-        # Compter les styles
+        # Compter les styles (fusionner 70s avec moderne)
         styles = [a.get('style', 'inconnu') for a in analyses if a.get('style')]
         style_counts = {}
         for style in styles:
-            style_counts[style] = style_counts.get(style, 0) + 1
+            # Fusionner 70s et 60s avec moderne
+            style_normalized = style.lower()
+            if '70' in style_normalized or 'seventies' in style_normalized or '60' in style_normalized:
+                style_normalized = 'moderne'
+            elif style_normalized not in ['moderne', 'contemporain']:
+                style_normalized = style.lower()
+            style_counts[style_normalized] = style_counts.get(style_normalized, 0) + 1
         
         # Compter les cuisines ouvertes
         cuisines_ouvertes = [a.get('cuisine_ouverte', False) for a in analyses if 'cuisine_ouverte' in a]
@@ -309,16 +321,19 @@ Réponds au format JSON:
         return result
     
     def calculate_style_score(self, style):
-        """Calcule le score de style"""
-        scores = {
-            'haussmannien': 20,
-            'moderne': 15,
-            'contemporain': 15,
-            '70s': 5,
-            'autre': 10,
-            'inconnu': 0
-        }
-        return scores.get(style.lower(), 0)
+        """Calcule le score de style - Ancien (20pts) / Atypique (10pts) / Neuf (0pts)"""
+        style_normalized = style.lower()
+        
+        # Ancien = 20 pts
+        if 'haussmann' in style_normalized:
+            return 20
+        
+        # Atypique = 10 pts (loft, atypique, unique, original)
+        if 'loft' in style_normalized or 'atypique' in style_normalized or 'unique' in style_normalized or 'original' in style_normalized:
+            return 10
+        
+        # Tout le reste = Neuf = 0 pts
+        return 0
     
     def calculate_cuisine_score(self, cuisine_ouverte):
         """Calcule le score de cuisine"""
