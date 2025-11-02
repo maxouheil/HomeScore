@@ -60,7 +60,7 @@ class PhotoAnalyzer:
         """Analyse une photo individuelle"""
         try:
             # Télécharger l'image
-            response = requests.get(photo_url, timeout=10)
+            response = requests.get(photo_url, timeout=5)
             if response.status_code != 200:
                 print(f"   ❌ Erreur téléchargement: {response.status_code}")
                 return None
@@ -117,7 +117,7 @@ Réponds au format JSON:
                 f"{self.openai_base_url}/chat/completions",
                 headers=headers,
                 json=payload,
-                timeout=30
+                timeout=15
             )
             
             if response.status_code != 200:
@@ -136,6 +136,12 @@ Réponds au format JSON:
                 print(f"   ❌ Erreur parsing JSON: {content[:100]}...")
                 return None
                 
+        except requests.exceptions.Timeout:
+            print(f"   ⏱️ Timeout lors de l'analyse de la photo (limite 15s)")
+            return None
+        except requests.exceptions.RequestException as e:
+            print(f"   ❌ Erreur réseau: {e}")
+            return None
         except Exception as e:
             print(f"   ❌ Erreur analyse photo: {e}")
             return None

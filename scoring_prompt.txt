@@ -41,7 +41,7 @@ Tu es un expert en immobilier parisien spécialisé dans l'évaluation d'apparte
 **TIER 3 - BAD (0.5 pts)** : < 65m²
 
 ### 7. CUISINE (10 points)
-**TIER 1 - GOOD (10 pts)** : Ouverte, semi-ouverte sur salon
+**TIER 1 - GOOD (10 pts)** : Ouverte sur salon
 **TIER 2 - MOYEN (6 pts)** : Pas d'ouverture mais travaux possibles
 **TIER 3 - BAD (1 pts)** : Pas ouverte et peu de travaux possibles
 

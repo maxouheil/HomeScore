@@ -116,7 +116,7 @@ def main():
     print("📁 FICHIERS GÉNÉRÉS")
     print("-" * 20)
     print(f"   🎨 Rapport Fitscore: output/scorecard_fitscore_style.html")
-    print(f"   🏠 Rapport original: output/scorecard_rapport.html")
+    print(f"   🏠 Rapport original: output/homepage.html")
     print(f"   📸 Photos: data/photos/ ({stats['total_photos']} photos)")
     print(f"   📊 Métadonnées: data/photos_metadata/")
     print()
@@ -143,7 +143,7 @@ def main():
     print()
     print("🌐 OUVREZ LES RAPPORTS DANS VOTRE NAVIGATEUR !")
     print("   🎨 Fitscore style: output/scorecard_fitscore_style.html")
-    print("   🏠 Original style: output/scorecard_rapport.html")
+    print("   🏠 Original style: output/homepage.html")
 
 if __name__ == "__main__":
     main()

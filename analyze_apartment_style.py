@@ -42,7 +42,7 @@ class ApartmentStyleAnalyzer:
                 
                 if url:
                     # Télécharger l'image
-                    response = requests.get(url, timeout=10)
+                    response = requests.get(url, timeout=5)
                     if response.status_code == 200:
                         temp_file = f"temp_photo_{i}.jpg"
                         with open(temp_file, 'wb') as f:
@@ -133,7 +133,6 @@ class ApartmentStyleAnalyzer:
 
 2. CUISINE OUVERTE:
    - Oui: cuisine visible depuis le salon, pas de séparation murale
-   - Semi-ouverte: cuisine partiellement ouverte, bar ou comptoir
    - Non: cuisine fermée, séparée du salon
 
 3. LUMINOSITÉ:
@@ -172,7 +171,7 @@ Réponds au format JSON:
                 f"{self.openai_base_url}/chat/completions",
                 headers=headers,
                 json=payload,
-                timeout=60
+                timeout=15
             )
             
             if response.status_code != 200:
@@ -203,6 +202,12 @@ Réponds au format JSON:
                 # Essayer de récupérer les infos manuellement
                 return self.extract_info_manually(content)
                 
+        except requests.exceptions.Timeout:
+            print(f"   ⏱️ Timeout lors de l'analyse de la photo (limite 15s)")
+            return None
+        except requests.exceptions.RequestException as e:
+            print(f"   ❌ Erreur réseau: {e}")
+            return None
         except Exception as e:
             print(f"   ❌ Erreur analyse photo: {e}")
             return None

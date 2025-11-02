@@ -180,3 +180,4 @@ if __name__ == "__main__":
     apartment_id = sys.argv[1]
     asyncio.run(debug_photo_extraction(apartment_id))
 
+

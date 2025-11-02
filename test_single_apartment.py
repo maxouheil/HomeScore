@@ -152,3 +152,4 @@ if __name__ == "__main__":
     apartment_id = sys.argv[1]
     asyncio.run(test_single_apartment(apartment_id))
 
+

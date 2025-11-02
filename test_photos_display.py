@@ -14,7 +14,7 @@ def test_photos_display():
     
     # Vérifier les rapports générés
     fitscore_report = "output/scorecard_fitscore_style.html"
-    original_report = "output/scorecard_rapport.html"
+    original_report = "output/homepage.html"
     
     if not os.path.exists(fitscore_report):
         print(f"❌ Rapport Fitscore non trouvé: {fitscore_report}")

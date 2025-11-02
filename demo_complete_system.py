@@ -131,13 +131,13 @@ async def main():
     # 5. Informations sur les fichiers générés
     print("📁 FICHIERS GÉNÉRÉS")
     print("-" * 20)
-    print(f"   📄 Rapport HTML: output/scorecard_rapport.html")
+    print(f"   📄 Rapport HTML: output/homepage.html")
     print(f"   📸 Photos: data/photos/")
     print(f"   📊 Métadonnées: data/photos_metadata/")
     print()
     
     print("🎉 DÉMONSTRATION TERMINÉE !")
-    print("🌐 Ouvrez output/scorecard_rapport.html dans votre navigateur")
+    print("🌐 Ouvrez output/homepage.html dans votre navigateur")
 
 if __name__ == "__main__":
     asyncio.run(main())

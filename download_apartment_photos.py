@@ -305,7 +305,7 @@ class ApartmentPhotoDownloader:
                     seen_urls.add(photo['url'])
             
             print(f"   ✅ {len(unique_photos)} photos d'appartement trouvées")
-            return unique_photos[:4]  # Max 4 photos
+            return unique_photos  # Retourner toutes les photos disponibles
             
         except Exception as e:
             print(f"   ❌ Erreur extraction photos: {e}")
@@ -327,9 +327,8 @@ class ApartmentPhotoDownloader:
                     # Télécharger l'image
                     response = requests.get(photo['url'], timeout=30)
                     if response.status_code == 200:
-                        # Nom du fichier
-                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                        filename = f"data/photos/{apartment_id}/photo_{i+1}_{timestamp}.jpg"
+                        # Nom du fichier avec numérotation simple (photo_1.jpg, photo_2.jpg, etc.)
+                        filename = f"data/photos/{apartment_id}/photo_{i+1}.jpg"
                         
                         # Sauvegarder
                         with open(filename, 'wb') as f:
