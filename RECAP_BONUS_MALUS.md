@@ -60,13 +60,13 @@ Tous les bonus et malus ont été **supprimés** car ils n'ont jamais été vali
 
 Le scoring se base uniquement sur **6 critères** :
 
-1. **Localisation** (20 pts max)
+1. **Localisation** (20-25 pts max, 25 si Place de la Réunion)
 2. **Prix** (20 pts max)
 3. **Style** (20 pts max)
-4. **Ensoleillement** (10 pts max)
+4. **Ensoleillement** (20 pts max - Très ensoleillé = GOOD = 20 pts)
 5. **Cuisine ouverte** (10 pts max)
 6. **Baignoire** (10 pts max)
 
-**Score total max:** 95 pts (90 pts base + 5 pts bonus Place de la Réunion intégré dans localisation, arrondi au multiple de 5 le plus proche)
+**Score total max:** 105 pts (100 pts base + 5 pts bonus Place de la Réunion intégré dans localisation, arrondi au multiple de 5 le plus proche)
 
 **Note:** Le bonus Place de la Réunion (+5) est toujours appliqué mais intégré directement dans le score de localisation (20 → 25 pts max pour cette zone spécifique).

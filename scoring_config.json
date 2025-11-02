@@ -1,0 +1,192 @@
+{
+  "axes": {
+    "localisation": {
+      "poids": 20,
+      "description": "Qualité de la localisation selon les zones prioritaires",
+      "tiers": {
+        "tier1": {
+          "score": 20,
+          "zones": ["Place de la Réunion", "Tronçon ligne 2 Belleville-Avron", "Alexandre Dumas", "Philippe Auguste", "Belleville", "Ménilmontant", "Avron"],
+          "description": "Zones premium très recherchées",
+          "bonus": {
+            "place_reunion": 5,
+            "description": "Bonus +5 pour Place de la Réunion"
+          }
+        },
+        "tier2": {
+          "score": 10,
+          "zones": ["Goncourt", "11e arrondissement", "20e arrondissement", "19e proche des Buttes-Chaumont", "Pyrénées", "Jourdain", "Rue des Boulets", "Nation"],
+          "description": "Bonnes zones avec potentiel"
+        },
+        "tier3": {
+          "score": 0,
+          "zones": ["Reste du 10e", "Reste du 20e", "Reste du 19e"],
+          "description": "Zones correctes"
+        },
+        "elimine": {
+          "score": 0,
+          "description": "Zones éliminées"
+        }
+      }
+    },
+    "prix": {
+      "poids": 20,
+      "description": "Prix au m² selon les seuils définis",
+      "tiers": {
+        "tier1": {
+          "score": 20,
+          "prix_m2_max": 9499,
+          "description": "Moins de 9.5k€/m² - Excellent rapport qualité/prix"
+        },
+        "tier2": {
+          "score": 10,
+          "prix_m2_min": 9500,
+          "prix_m2_max": 11000,
+          "description": "9.5-11k€/m² - Bon rapport qualité/prix"
+        },
+        "tier3": {
+          "score": 0,
+          "prix_m2_min": 11001,
+          "description": "Plus de 11k€/m² - Prix élevé"
+        }
+      }
+    },
+    "style": {
+      "poids": 20,
+      "description": "Style architectural - Ancien (20pts) / Atypique (10pts) / Neuf (0pts)",
+      "tiers": {
+        "tier1": {
+          "score": 20,
+          "styles": ["Haussmannien"],
+          "description": "Style ancien - 20 points"
+        },
+        "tier2": {
+          "score": 10,
+          "styles": ["Loft", "Atypique", "Unique", "Original"],
+          "description": "Style atypique - 10 points (détecté depuis texte: loft, atypique, unique, original)"
+        },
+        "tier3": {
+          "score": 0,
+          "styles": ["Moderne", "Contemporain", "Récent", "Années 20", "Années 30", "Années 40", "Années 60", "Années 70"],
+          "description": "Style neuf - 0 points (tout le reste)"
+        }
+      }
+    },
+    "ensoleillement": {
+      "poids": 20,
+      "description": "Orientation et qualité de la vue",
+      "tiers": {
+        "tier1": {
+          "score": 20,
+          "orientations": ["Sud", "Sud-Ouest"],
+          "conditions": ["Vue dégagée", "Croisement de rue", "Pas de vis-à-vis"],
+          "description": "Très ensoleillé - Excellente luminosité et vue"
+        },
+        "tier2": {
+          "score": 12,
+          "orientations": ["Ouest", "Est"],
+          "conditions": ["Vue semi-dégagée"],
+          "description": "Bonne luminosité"
+        },
+        "tier3": {
+          "score": 2,
+          "orientations": ["Nord", "Nord-Est"],
+          "conditions": ["Vis-à-vis", "Pas dégagé"],
+          "description": "Luminosité limitée"
+        }
+      }
+    },
+    "etage": {
+      "poids": 10,
+      "description": "Étage et présence d'ascenseur",
+      "tiers": {
+        "tier1": {
+          "score": 10,
+          "etages": ["3e", "4e"],
+          "conditions": ["Avec ascenseur", "Plus si ascenseur"],
+          "description": "Étages optimaux"
+        },
+        "tier2": {
+          "score": 5,
+          "etages": ["5e", "6e", "2e"],
+          "conditions": ["Sans ascenseur pour 5e-6e"],
+          "description": "Étages corrects"
+        },
+        "tier3": {
+          "score": 0,
+          "etages": ["RDC", "1er"],
+          "description": "Étages moins recherchés"
+        }
+      }
+    },
+    "surface": {
+      "poids": 5,
+      "description": "Surface habitable",
+      "tiers": {
+        "tier1": {
+          "score": 5,
+          "surface_min": 80,
+          "description": "Plus de 80m² - Grande surface"
+        },
+        "tier2": {
+          "score": 2.5,
+          "surface_min": 65,
+          "surface_max": 80,
+          "description": "65-80m² - Surface correcte"
+        },
+        "tier3": {
+          "score": 0,
+          "surface_max": 65,
+          "description": "Moins de 65m² - Surface limitée"
+        }
+      }
+    },
+    "cuisine": {
+      "poids": 10,
+      "description": "Type de cuisine et possibilités d'ouverture",
+      "tiers": {
+        "tier1": {
+          "score": 10,
+          "types": ["Ouverte", "Semi-ouverte sur salon"],
+          "description": "Cuisine ouverte ou semi-ouverte"
+        },
+        "tier2": {
+          "score": 5,
+          "conditions": ["Pas d'ouverture mais travaux possibles"],
+          "description": "Cuisine fermée mais modifiable"
+        },
+        "tier3": {
+          "score": 0,
+          "conditions": ["Pas ouverte et peu de travaux possibles"],
+          "description": "Cuisine fermée sans possibilité d'ouverture"
+        }
+      }
+    },
+    "vue": {
+      "poids": 5,
+      "description": "Qualité de la vue et dégagement",
+      "niveaux": {
+        "excellent": "Vue dégagée, balcon/terrasse",
+        "bon": "Vue correcte",
+        "moyen": "Vue limitée"
+      }
+    }
+  },
+  "bonus": {
+    "balcon": 2,
+    "terrasse": 3,
+    "ascenseur": 2,
+    "parking": 2,
+    "cave": 1,
+    "croisement_rue": 2,
+    "vue_degagee": 2,
+    "place_reunion": 5
+  },
+  "malus": {
+    "vis_a_vis": -3,
+    "nord": -2,
+    "rdc": -2,
+    "sans_ascenseur_etage_eleve": -3,
+    "annees_60_70": -5
+  }
+}

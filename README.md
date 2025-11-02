@@ -16,11 +16,11 @@
 - **Bathtub Detection**: Visual + textual analysis
 
 ### 📊 Rule-Based Scoring
-- **6 Evaluation Criteria**: Location (20-25 pts), Price (20 pts), Style (20 pts), Exposure (10 pts), Open Kitchen (10 pts), Bathtub (10 pts)
-- **95-Point Scoring System** with tier-based classification (Good/Moyen/Bad)
+- **6 Evaluation Criteria**: Location (20-25 pts), Price (20 pts), Style (20 pts), Exposure (20 pts), Open Kitchen (10 pts), Bathtub (10 pts)
+- **105-Point Scoring System** with tier-based classification (Good/Moyen/Bad)
 - **Simple Rules**: Scoring based on structured data (no AI for final scoring)
 - **Transparent Logic**: All scoring rules defined in `scoring_config.json`
-- **No General Bonus/Malus**: Simplified scoring without general bonus/malus (score max: 95 pts with Place de la Réunion bonus)
+- **No General Bonus/Malus**: Simplified scoring without general bonus/malus (score max: 105 pts with Place de la Réunion bonus)
 
 ### 🏠 Data Extraction
 - **Automated Jinka Scraping** with Playwright browser automation

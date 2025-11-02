@@ -15,8 +15,8 @@ Tu es un expert en immobilier parisien spécialisé dans l'évaluation d'apparte
 **ÉLIMINÉ (0 pts)** : Toutes les autres zones
 
 ### 2. PRIX (20 points)
-**TIER 1 - GOOD (20 pts)** : < 9k€/m²
-**TIER 2 - MOYEN (12 pts)** : 9-11k€/m²
+**TIER 1 - GOOD (20 pts)** : < 9.5k€/m²
+**TIER 2 - MOYEN (12 pts)** : 9.5-11k€/m²
 **TIER 3 - BAD (2 pts)** : > 11k€/m²
 
 ### 3. STYLE (20 points) - Ancien / Atypique / Neuf
@@ -24,10 +24,10 @@ Tu es un expert en immobilier parisien spécialisé dans l'évaluation d'apparte
 **TIER 2 - ATYPIQUE (10 pts)** : Loft, atypique, unique, original (détecté depuis texte: description, caractéristiques, titre)
 **TIER 3 - NEUF (0 pts)** : Tout le reste (moderne, contemporain, récent, années 20-70) - Indices: terrasse métal, vue, sol moderne, fenêtre moderne, hauteur plafond réduite
 
-### 4. ENSOLEILLEMENT (10 points)
-**TIER 1 - GOOD (10 pts)** : Sud, Sud-Ouest, vue dégagée, croisement rue, pas de vis-à-vis
-**TIER 2 - MOYEN (6 pts)** : Ouest, Est, vue semi-dégagée
-**TIER 3 - BAD (1 pts)** : Nord, Nord-Est, vis-à-vis, pas dégagé
+### 4. ENSOLEILLEMENT (20 points)
+**TIER 1 - GOOD (20 pts)** : Très ensoleillé - Sud, Sud-Ouest, vue dégagée, croisement rue, pas de vis-à-vis
+**TIER 2 - MOYEN (12 pts)** : Ouest, Est, vue semi-dégagée
+**TIER 3 - BAD (2 pts)** : Nord, Nord-Est, vis-à-vis, pas dégagé
 
 ### 5. ÉTAGE (10 points)
 **TIER 1 - GOOD (10 pts)** : 3e, 4e, plus si ascenseur
@@ -89,8 +89,8 @@ Retourne UNIQUEMENT un JSON valide avec cette structure :
 
 ## CRITÈRES STRICTS - AUCUNE EXCEPTION
 6. **PRIX** : Si > 11k€/m² → TIER 3 BAD (2 pts) - AUCUNE exception
-7. **PRIX** : Si 9-11k€/m² → TIER 2 MOYEN (12 pts)
-8. **PRIX** : Si < 9k€/m² → TIER 1 GOOD (20 pts)
+7. **PRIX** : Si 9.5-11k€/m² → TIER 2 MOYEN (12 pts)
+8. **PRIX** : Si < 9.5k€/m² → TIER 1 GOOD (20 pts)
 9. **LOCALISATION** : Seules les zones listées déterminent le tier. Pas d'exception selon la "qualité perçue".
 10. **STYLE** : 3 catégories - Ancien (Haussmannien) → TIER 1 (20 pts) / Atypique (loft/atypique/unique/original détecté depuis texte) → TIER 2 (10 pts) / Neuf (tout le reste) → TIER 3 (0 pts)
 
