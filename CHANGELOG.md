@@ -2,6 +2,100 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [3.3.0] - 2025-11-05
+
+### 🎯 Version 3.3 - Exploration API Jinka et Préparation Migration
+
+#### ✅ Explorations et Analyses Majeures
+
+**🔍 Reverse Engineering API Jinka Complète**
+- ✅ **explore_jinka_api_advanced.py**: Script d'exploration avancée avec interception réseau complète
+- ✅ **analyze_api_exploration.py**: Analyse automatique des endpoints et structures JSON découvertes
+- ✅ **test_jinka_api_endpoints.py**: Tests directs des endpoints API avec authentification Bearer token
+- ✅ **GUIDE_REVERSE_ENGINEER_API.md**: Guide complet pour reverse engineer l'API Jinka
+- ✅ **PLAN_REVERSE_ENGINEER_API_JINKA.md**: Plan détaillé en 6 phases pour l'exploration
+- ✅ **docs/api/JINKA_API_REFERENCE.md**: Documentation complète de l'API avec tous les endpoints découverts
+
+**📊 Documentation Comparative Scraping vs API**
+- ✅ **RECAP_SCRAPING_VS_API.md**: Récapitulatif complet comparant scraping HTML vs API (20+ champs analysés)
+- ✅ **RECAP_PHOTOS_SCRAPING_VS_API.md**: Analyse détaillée de l'extraction des photos (scraping 500 lignes vs API 1 ligne)
+- ✅ **Données identifiées**: 30+ champs disponibles via API vs 20 champs scraping
+- ✅ **Avantages API**: 10x+ plus rapide, données structurées, ordre garanti, plus stable
+- ✅ **Données perdues**: Alt text photos, dimensions (peuvent être générées/récupérées)
+
+**📋 Plan de Migration**
+- ✅ **Plan de migration complet**: 7 phases pour migrer scraping HTML → API Jinka
+- ✅ **Architecture hybride**: Fallback scraping HTML en cas d'échec API
+- ✅ **Compatibilité**: Adaptation format API → format scraping pour scoring existant
+- ✅ **10 todos définis**: Plan d'action détaillé avec dépendances
+
+#### 🔧 Découvertes Techniques
+
+**Endpoints API Identifiés**:
+- ✅ `/apiv2/alert/{token}/dashboard`: Liste des appartements
+- ✅ `/apiv2/alert/{token}/ad/{id}`: Détails complets d'un appartement
+- ✅ `/apiv2/ad/{id}/contact_info`: Informations de contact
+- ✅ `/apiv2/config`: Configuration utilisateur
+
+**Authentification**:
+- ✅ JWT Token (`LA_API_TOKEN`) dans cookie + header Authorization Bearer
+- ✅ Login via code email (réutilisable depuis scraping existant)
+- ✅ Token valide ~30 jours
+
+**Données Structurées Disponibles**:
+- ✅ Prix, surface, pièces, chambres en nombres (pas de parsing nécessaire)
+- ✅ Coordonnées GPS précises (`lat`/`lng`)
+- ✅ Stations métro structurées (`stops[]` avec lignes)
+- ✅ Quartier officiel (`quartier_name`)
+- ✅ Caractéristiques structurées (`features{}`: lift, bath, parking, etc.)
+- ✅ Photos en CSV (ordre garanti)
+- ✅ Informations agence complètes (logo, SIRET, partenaire)
+- ✅ Dates ISO standard (`created_at`, `expired_at`)
+- ✅ DPE, favoris, honoraires, contact info
+
+#### 📁 Nouveaux Fichiers
+
+**Scripts d'Exploration**:
+- `explore_jinka_api_advanced.py`: Exploration réseau complète avec Playwright
+- `analyze_api_exploration.py`: Analyse automatique des données capturées
+- `test_jinka_api_endpoints.py`: Tests directs des endpoints API
+
+**Documentation**:
+- `GUIDE_REVERSE_ENGINEER_API.md`: Guide pas-à-pas pour explorer l'API
+- `PLAN_REVERSE_ENGINEER_API_JINKA.md`: Plan complet en 6 phases
+- `RECAP_SCRAPING_VS_API.md`: Comparaison détaillée scraping vs API
+- `RECAP_PHOTOS_SCRAPING_VS_API.md`: Analyse spécifique des photos
+- `docs/api/JINKA_API_REFERENCE.md`: Référence complète de l'API
+
+**Données Capturées**:
+- `data/api_exploration/cookies_*.json`: Cookies et tokens capturés
+- `data/api_exploration/requests_*.json`: Requêtes réseau capturées
+- `data/api_exploration/api_responses_detailed.json`: Réponses JSON complètes
+- `data/api_exploration/api_structures_report.md`: Rapport des structures JSON
+
+#### 🎯 Prochaines Étapes
+
+**Migration vers API** (Plan créé, en attente d'exécution):
+1. Créer client API (`jinka_api_client.py`)
+2. Créer adaptateur format (`api_data_adapter.py`)
+3. Adapter analyses IA (style, exposition)
+4. Migrer scraping vers API
+5. Tests et validation
+6. Rollout progressif avec fallback
+
+#### 📊 Résultats de l'Exploration
+
+**Performance Attendue**:
+- **Vitesse**: 10x+ plus rapide (pas de rendu HTML)
+- **Fiabilité**: Données structurées vs parsing fragile
+- **Stabilité**: Pas de dépendance aux sélecteurs CSS
+- **Complétude**: 30+ champs vs 20 champs scraping
+
+**Compatibilité**:
+- ✅ Format API peut être adapté pour scoring existant
+- ✅ Analyses IA peuvent être réutilisées sur données API
+- ✅ Fallback scraping disponible en cas d'échec API
+
 ## [3.2.0] - 2025-02-01 (Dernières 3h)
 
 ### 🎯 Version 3.2 - Documentation, Optimisation et Outils de Maintenance
