@@ -6,7 +6,8 @@ Met à jour scores_detaille avec la nouvelle structure (notamment baignoire avec
 
 import json
 import os
-from scoring import score_apartment, load_scoring_config
+from scoring_optimized import score_apartment_optimized
+from scoring import load_scoring_config
 
 def load_apartment(apartment_id):
     """Charge un appartement depuis data/appartements/"""
@@ -78,8 +79,8 @@ def rescore_all_apartments():
             continue
         
         try:
-            # Re-scorer l'appartement (va recalculer tous les scores avec la nouvelle structure)
-            score_result = score_apartment(apartment, config)
+            # Re-scorer l'appartement avec la logique optimisée (nouvelle structure cuisine/baignoire)
+            score_result = score_apartment_optimized(apartment, config)
             
             if not score_result:
                 print(f"   ❌ Échec du scoring")
@@ -130,4 +131,6 @@ def rescore_all_apartments():
 
 if __name__ == "__main__":
     rescore_all_apartments()
+
+
 

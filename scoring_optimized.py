@@ -47,68 +47,85 @@ def analyze_photos_once(apartment):
     description = apartment.get('description', '')
     caracteristiques = apartment.get('caracteristiques', '')
     
-    # ANALYSE UNIFIÉE : Tout en une seule fois
+    # ANALYSE UNIFIÉE : Tout en une seule requête GPT-4o-mini Vision
     try:
-        from analyze_photos_unified import UnifiedPhotoAnalyzer
-        unified_analyzer = UnifiedPhotoAnalyzer()
+        from analyze_apartment_unified import UnifiedApartmentAnalyzer
+        unified_analyzer = UnifiedApartmentAnalyzer()
         
-        # Analyser toutes les photos UNE SEULE FOIS pour tout extraire
-        unified_result = unified_analyzer.analyze_all_photos_unified(photos_urls, apartment_id)
+        # Analyser l'appartement UNE SEULE FOIS pour tout extraire (style, cuisine, baignoire, luminosité)
+        unified_result = unified_analyzer.analyze_apartment_unified(apartment, max_photos=5)
         
         if unified_result:
             # 1. Style
             style_type = unified_result.get('style', {}).get('type', 'autre')
             style_confidence = unified_result.get('style', {}).get('confidence', 0)
+            style_justification = unified_result.get('style', {}).get('justification', '')
             
             result['style_analysis'] = {
                 'style': {
                     'type': style_type,
                     'confidence': style_confidence,
-                    'justification': f"Style {style_type} détecté avec confiance {style_confidence:.0%}"
+                    'score': unified_result.get('style', {}).get('score', 0),
+                    'justification': style_justification or f"Style {style_type} détecté avec confiance {style_confidence:.0%}",
+                    'details': unified_result.get('style', {}).get('details', {})
                 },
                 'photos_analyzed': unified_result.get('photos_analyzed', 0),
-                'method': 'unified_photo_analysis'
+                'method': unified_result.get('method', 'unified_analysis'),
+                'model': unified_result.get('model', 'gpt-4o-mini')
             }
             
             # 2. Cuisine
             cuisine_ouverte = unified_result.get('cuisine', {}).get('ouverte', False)
             cuisine_confidence = unified_result.get('cuisine', {}).get('confidence', 0)
-            detected_photos = unified_result.get('cuisine', {}).get('detected_photos', [])
+            cuisine_justification = unified_result.get('cuisine', {}).get('justification', '')
             
             result['cuisine_result'] = {
                 'ouverte': cuisine_ouverte,
                 'confidence': cuisine_confidence,
-                'justification': f"Cuisine {'ouverte' if cuisine_ouverte else 'fermée'} détectée (confiance: {cuisine_confidence:.0%})",
+                'cuisine_detected': True,  # Toujours détecté si analyse réussie
+                'justification': cuisine_justification or f"Cuisine {'ouverte' if cuisine_ouverte else 'fermée'} détectée (confiance: {cuisine_confidence:.0%})",
                 'photo_validation': {
                     'photo_result': {
-                        'ouverte': cuisine_ouverte,
-                        'detected_photos': detected_photos
+                        'ouverte': cuisine_ouverte
                     }
                 },
-                'validation_status': 'photo_only'
+                'validation_status': 'unified_analysis'
             }
             
             # 3. Luminosité
-            luminosite_type = unified_result.get('luminosite', {}).get('type', 'faible')
+            luminosite_type = unified_result.get('luminosite', {}).get('type', 'moyen')
             luminosite_score = unified_result.get('luminosite', {}).get('score', 0)
             
             result['luminosite'] = {
                 'type': luminosite_type,
                 'score': luminosite_score,
-                'confidence': unified_result.get('luminosite', {}).get('confidence', 0)
+                'confidence': unified_result.get('luminosite', {}).get('confidence', 0),
+                'justification': unified_result.get('luminosite', {}).get('justification', '')
             }
             
             # 4. Baignoire
             baignoire_presente = unified_result.get('baignoire', {}).get('presente', False)
             baignoire_confidence = unified_result.get('baignoire', {}).get('confidence', 0)
-            baignoire_photos = unified_result.get('baignoire', {}).get('detected_photos', [])
+            baignoire_justification = unified_result.get('baignoire', {}).get('justification', '')
+            
+            # Vérifier si douche est mentionnée dans la réponse (on peut l'extraire du JSON si présent)
+            # Pour l'instant, on assume que si pas de baignoire, c'est une douche
+            has_douche = not baignoire_presente
             
             result['baignoire_result'] = {
                 'has_baignoire': baignoire_presente,
                 'confidence': baignoire_confidence,
-                'justification': f"Baignoire {'présente' if baignoire_presente else 'absente'} (confiance: {baignoire_confidence:.0%})",
+                'baignoire_detected': True,  # Toujours détecté si analyse réussie
+                'justification': baignoire_justification or f"Baignoire {'présente' if baignoire_presente else 'absente'} (confiance: {baignoire_confidence:.0%})",
                 'details': {
-                    'detected_photos': baignoire_photos
+                    'photo_validation': {
+                        'photo_result': {
+                            'has_baignoire': baignoire_presente,
+                            'has_douche': has_douche
+                        }
+                    },
+                    'validation_status': 'unified_analysis',
+                    'confidence': baignoire_confidence
                 }
             }
             
@@ -116,7 +133,7 @@ def analyze_photos_once(apartment):
             print(f"      ✅ Cuisine: {'Ouverte' if cuisine_ouverte else 'Fermée'} ({cuisine_confidence:.0%})")
             print(f"      ✅ Luminosité: {luminosite_type}")
             print(f"      ✅ Baignoire: {'Oui' if baignoire_presente else 'Non'} ({baignoire_confidence:.0%})")
-            print(f"      📊 {unified_result.get('photos_analyzed', 0)} photos analysées en UNE SEULE passe")
+            print(f"      📊 {unified_result.get('photos_analyzed', 0)} photos analysées en UNE SEULE requête GPT-4o-mini")
             
     except Exception as e:
         print(f"      ⚠️ Erreur analyse unifiée: {e}")
@@ -189,6 +206,8 @@ def score_style_optimized(apartment, config, photo_analysis_cache):
                 }
             
             # Tier3: Neuf = 0 pts
+            # Inclure "moderne", "contemporain", "récent", "70s", "60s", "autre" comme Neuf
+            # Si le style n'est ni haussmannien ni atypique, c'est forcément Neuf
             return {
                 'score': tier_config['tier3']['score'],
                 'tier': 'tier3',
@@ -237,6 +256,21 @@ def score_cuisine_optimized(apartment, config, photo_analysis_cache):
     
     if cuisine_result:
         cuisine_ouverte = cuisine_result.get('ouverte', False)
+        cuisine_detected = cuisine_result.get('cuisine_detected', True)  # Par défaut True pour compatibilité
+        
+        # Si aucune image de cuisine n'a été trouvée → tier2 (5 pts)
+        # Score neutre car on ne peut pas savoir si elle est ouverte ou fermée
+        if not cuisine_detected:
+            return {
+                'score': tier_config['tier2']['score'],
+                'tier': 'tier2',
+                'justification': "Cuisine non trouvée dans les photos",
+                'details': {
+                    'confidence': 0,
+                    'photo_validation': cuisine_result.get('photo_validation'),
+                    'validation_status': cuisine_result.get('validation_status')
+                }
+            }
         
         # tier1: ouverte uniquement (10pts)
         if cuisine_ouverte:
@@ -263,10 +297,10 @@ def score_cuisine_optimized(apartment, config, photo_analysis_cache):
             }
         }
     
-    # Fallback sur méthode ancienne
+    # Fallback sur méthode ancienne - Si pas de résultat photo, considérer comme non trouvée
     style_analysis = apartment.get('style_analysis', {})
-    cuisine_data = style_analysis.get('cuisine', {})
-    cuisine_ouverte = cuisine_data.get('ouverte', False)
+    cuisine_data = style_analysis.get('cuisine') if style_analysis else None
+    cuisine_ouverte = cuisine_data.get('ouverte', False) if cuisine_data else False
     
     if cuisine_ouverte:
         return {
@@ -275,10 +309,12 @@ def score_cuisine_optimized(apartment, config, photo_analysis_cache):
             'justification': "Cuisine ouverte"
         }
     
+    # Si aucune image trouvée → tier2 (5 pts)
+    # Score neutre car on ne peut pas savoir si elle est ouverte ou fermée
     return {
-        'score': tier_config['tier3']['score'],
-        'tier': 'tier3',
-        'justification': "Cuisine fermée"
+        'score': tier_config['tier2']['score'],
+        'tier': 'tier2',
+        'justification': "Cuisine non trouvée dans les photos"
     }
 
 
@@ -292,20 +328,34 @@ def score_baignoire_optimized(apartment, config, photo_analysis_cache):
     if baignoire_result:
         # extract_baignoire_complete retourne 'has_baignoire'
         has_baignoire = baignoire_result.get('has_baignoire', False)
+        baignoire_detected = baignoire_result.get('baignoire_detected', True)  # Par défaut True pour compatibilité
+        
+        # Récupérer les détails qui doivent contenir photo_validation
+        details = baignoire_result.get('details', {})
+        
+        # Si aucune image de SDB n'a été trouvée → tier2 (5 pts) selon config
+        # La config indique que tier2 = "Cuisine/SDB non trouvée" (score neutre)
+        if not baignoire_detected:
+            return {
+                'score': tier_config['tier2']['score'],
+                'tier': 'tier2',
+                'justification': "Salle de bain non trouvée dans les photos",
+                'details': details
+            }
         
         if has_baignoire:
             return {
                 'score': tier_config['tier1']['score'],
                 'tier': 'tier1',
                 'justification': baignoire_result.get('justification', "Baignoire présente"),
-                'details': baignoire_result.get('details', {})
+                'details': details
             }
         else:
             return {
                 'score': tier_config['tier3']['score'],
                 'tier': 'tier3',
                 'justification': baignoire_result.get('justification', "Pas de baignoire"),
-                'details': baignoire_result.get('details', {})
+                'details': details
             }
     
     # Fallback: méthode texte seule
@@ -320,10 +370,12 @@ def score_baignoire_optimized(apartment, config, photo_analysis_cache):
             'justification': "Baignoire mentionnée"
         }
     
+    # Si aucune image trouvée → tier2 (5 pts) selon config
+    # La config indique que tier2 = "Cuisine/SDB non trouvée" (score neutre)
     return {
-        'score': tier_config['tier3']['score'],
-        'tier': 'tier3',
-        'justification': "Pas de baignoire détectée"
+        'score': tier_config['tier2']['score'],
+        'tier': 'tier2',
+        'justification': "Salle de bain non trouvée dans les photos"
     }
 
 

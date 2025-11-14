@@ -175,3 +175,8 @@ Ajoute dans ton crontab pour lancer automatiquement tous les jours :
 | Complet | ✅ Toutes les URLs | ⚠️ Limité par pagination |
 | Automatisation | ✅ Facile | ⚠️ Compliqué |
 
+
+
+
+
+

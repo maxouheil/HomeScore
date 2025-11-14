@@ -782,6 +782,7 @@ function Criterion({ name, score, tier, value, confidence, indices, tierLabel, t
                 {displayIndices
                   .replace(/^Style Indice: /, '')
                   .replace(/^Expo Indice: /, '')
+                  .replace(/^Exposition Indice: /, '')
                   .replace(/^Cuisine Indice: /, '')
                   .replace(/^Baignoire Indice: /, '')
                   .replace(/^Baignoire: /, '')}

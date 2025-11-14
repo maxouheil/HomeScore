@@ -641,16 +641,22 @@ class ExpositionExtractor:
         return None
     
     def _classify_etage(self, etage_num: Optional[int]) -> Optional[str]:
-        """Classe l'étage: Lumineux, Moyen, ou Sombre"""
+        """Classe l'étage: Lumineux, Moyen, ou Sombre
+        
+        Barème:
+        - Si >4 étages (>=5): Lumineux (sauf si autres signaux contraires)
+        - Si <3 étages (<=2): Sombre (sauf si autres signaux contraires)
+        - 3-4 étages: Moyen (par défaut)
+        """
         if etage_num is None:
             return None
         
-        if etage_num >= 5:
+        if etage_num > 4:  # >=5 étages
             return 'Lumineux'
-        elif 2 <= etage_num <= 4:
-            return 'Moyen'
-        else:  # <= 1 ou RDC (0)
+        elif etage_num < 3:  # <=2 étages (inclut RDC = 0)
             return 'Sombre'
+        else:  # 3-4 étages
+            return 'Moyen'
     
     def _classify_image_brightness(self, brightness_value: float) -> Optional[str]:
         """Classe l'exposition image: Lumineux, Moyen, ou Sombre"""

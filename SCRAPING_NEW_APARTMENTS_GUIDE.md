@@ -252,3 +252,8 @@ Les nouveaux appartements sont sauvegardés dans :
 
 2024-11-01 - Documentation des changements qui ont permis au scraping de fonctionner correctement
 
+
+
+
+
+

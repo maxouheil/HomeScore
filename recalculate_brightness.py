@@ -105,3 +105,8 @@ def recalculate_brightness_for_apartments(input_file="data/scraped_apartments.js
 if __name__ == "__main__":
     recalculate_brightness_for_apartments()
 
+
+
+
+
+

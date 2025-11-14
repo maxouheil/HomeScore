@@ -80,6 +80,7 @@ Détermine le style de l'appartement:
 Détermine si la cuisine est ouverte ou fermée:
 - "ouverte" : cuisine visible depuis le salon, bar, séparation partielle ou ouverte
 - "fermée" : cuisine séparée par un mur, porte, espace clos
+- Si aucune cuisine n'est visible dans la photo, retourne null pour "ouverte" et confidence: 0
 
 ### 3. LUMINOSITÉ
 Évalue la luminosité globale:
@@ -92,6 +93,7 @@ Détermine si la cuisine est ouverte ou fermée:
 Détecte la présence d'une baignoire:
 - "presente" : baignoire visible dans la photo
 - "absente" : pas de baignoire (seulement douche ou pas de salle de bain visible)
+- Si aucune salle de bain n'est visible dans la photo, retourne null pour "presente" et confidence: 0
 
 ## FORMAT DE RÉPONSE (JSON uniquement):
 {
@@ -101,7 +103,7 @@ Détecte la présence d'une baignoire:
         "indices": ["moulures", "parquet", ...]
     },
     "cuisine": {
-        "ouverte": true|false,
+        "ouverte": true|false|null,
         "confidence": 0.0-1.0,
         "indices": "description de ce qui est visible"
     },
@@ -111,7 +113,7 @@ Détecte la présence d'une baignoire:
         "confidence": 0.0-1.0
     },
     "baignoire": {
-        "presente": true|false,
+        "presente": true|false|null,
         "confidence": 0.0-1.0,
         "is_bathroom": true|false
     }
@@ -184,9 +186,9 @@ Réponds UNIQUEMENT au format JSON, sans texte avant ou après."""
         if not photos_urls:
             return {
                 'style': {'type': 'autre', 'confidence': 0},
-                'cuisine': {'ouverte': False, 'confidence': 0},
+                'cuisine': {'ouverte': False, 'confidence': 0, 'cuisine_detected': False},
                 'luminosite': {'type': 'faible', 'score': 0, 'confidence': 0},
-                'baignoire': {'presente': False, 'confidence': 0},
+                'baignoire': {'presente': False, 'confidence': 0, 'baignoire_detected': False},
                 'photos_analyzed': 0
             }
         
@@ -204,9 +206,9 @@ Réponds UNIQUEMENT au format JSON, sans texte avant ou après."""
         if not all_analyses:
             return {
                 'style': {'type': 'autre', 'confidence': 0},
-                'cuisine': {'ouverte': False, 'confidence': 0},
+                'cuisine': {'ouverte': False, 'confidence': 0, 'cuisine_detected': False},
                 'luminosite': {'type': 'faible', 'score': 0, 'confidence': 0},
-                'baignoire': {'presente': False, 'confidence': 0},
+                'baignoire': {'presente': False, 'confidence': 0, 'baignoire_detected': False},
                 'photos_analyzed': 0
             }
         
@@ -234,11 +236,16 @@ Réponds UNIQUEMENT au format JSON, sans texte avant ou après."""
         # Cuisine: si au moins une photo montre cuisine ouverte → ouverte
         cuisines_ouvertes = []
         cuisine_confidences = []
+        cuisine_detected = False
         for analysis in analyses:
             cuisine_data = analysis.get('cuisine', {})
-            if cuisine_data.get('ouverte') is not None:
-                cuisines_ouvertes.append(cuisine_data.get('ouverte', False))
-                cuisine_confidences.append(cuisine_data.get('confidence', 0))
+            ouverte_value = cuisine_data.get('ouverte')
+            confidence = cuisine_data.get('confidence', 0)
+            # Une cuisine est détectée si ouverte n'est pas null ET confidence > 0
+            if ouverte_value is not None and confidence > 0:
+                cuisines_ouvertes.append(ouverte_value)
+                cuisine_confidences.append(confidence)
+                cuisine_detected = True  # Au moins une photo a détecté une cuisine
         
         cuisine_ouverte = any(cuisines_ouvertes) if cuisines_ouvertes else False
         cuisine_confidence = max(cuisine_confidences) if cuisine_confidences else 0
@@ -260,11 +267,17 @@ Réponds UNIQUEMENT au format JSON, sans texte avant ou après."""
         # Baignoire: si au moins une photo montre baignoire → présente
         baignoires_presentes = []
         baignoire_confidences = []
+        baignoire_detected = False
         for analysis in analyses:
             baignoire_data = analysis.get('baignoire', {})
-            if baignoire_data.get('presente') is not None and baignoire_data.get('is_bathroom', True):
-                baignoires_presentes.append(baignoire_data.get('presente', False))
-                baignoire_confidences.append(baignoire_data.get('confidence', 0))
+            presente_value = baignoire_data.get('presente')
+            confidence = baignoire_data.get('confidence', 0)
+            is_bathroom = baignoire_data.get('is_bathroom', True)
+            # Une SDB est détectée si presente n'est pas null ET confidence > 0 ET is_bathroom est True
+            if presente_value is not None and confidence > 0 and is_bathroom:
+                baignoires_presentes.append(presente_value)
+                baignoire_confidences.append(confidence)
+                baignoire_detected = True  # Au moins une photo a détecté une salle de bain
         
         baignoire_presente = any(baignoires_presentes) if baignoires_presentes else False
         baignoire_confidence = max(baignoire_confidences) if baignoire_confidences else 0
@@ -278,7 +291,8 @@ Réponds UNIQUEMENT au format JSON, sans texte avant ou après."""
             'cuisine': {
                 'ouverte': cuisine_ouverte,
                 'confidence': cuisine_confidence,
-                'detected_photos': [i for i, c in enumerate(cuisines_ouvertes) if c]
+                'detected_photos': [i for i, c in enumerate(cuisines_ouvertes) if c],
+                'cuisine_detected': cuisine_detected
             },
             'luminosite': {
                 'type': most_common_luminosite,
@@ -288,8 +302,10 @@ Réponds UNIQUEMENT au format JSON, sans texte avant ou après."""
             'baignoire': {
                 'presente': baignoire_presente,
                 'confidence': baignoire_confidence,
-                'detected_photos': [i for i, b in enumerate(baignoires_presentes) if b]
+                'detected_photos': [i for i, b in enumerate(baignoires_presentes) if b],
+                'baignoire_detected': baignoire_detected
             },
             'photos_analyzed': len(analyses)
         }
+
 

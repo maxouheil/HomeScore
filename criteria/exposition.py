@@ -48,21 +48,27 @@ def classify_orientation(expo_dir):
 
 
 def classify_etage(etage_num):
-    """Classe l'étage: Lumineux / Moyen / Sombre"""
+    """Classe l'étage: Lumineux / Moyen / Sombre
+    
+    Barème simplifié:
+    - Si <3e étage (<3): Sombre (luminosité faible)
+    - Si 3-4: Moyen (luminosité moyenne)
+    - Si >4 (>=5): Lumineux (luminosité forte)
+    """
     if etage_num is None:
         return None
     
-    # Lumineux si étage >= 5
-    if etage_num >= 5:
-        return 'Lumineux'
+    # Sombre si étage < 3 (<3, inclut RDC = 0, 1er, 2e)
+    if etage_num < 3:
+        return 'Sombre'
     
-    # Moyen si 2 <= étage <= 4
-    if 2 <= etage_num <= 4:
+    # Moyen si 3 <= étage <= 4
+    if 3 <= etage_num <= 4:
         return 'Moyen'
     
-    # Sombre si étage <= 1 ou RDC (0)
-    if etage_num <= 1:
-        return 'Sombre'
+    # Lumineux si étage > 4 (>=5)
+    if etage_num > 4:
+        return 'Lumineux'
     
     return None
 
@@ -184,7 +190,16 @@ def calculate_confidence(signals, final_class, image_intensity, signal_types):
 
 def format_exposition(apartment):
     """
-    Formate le critère Exposition selon les règles de vote par signal
+    Formate le critère Exposition selon les règles simplifiées
+    
+    Logique:
+    - Base: classification par étage uniquement
+      * < 3e étage: Sombre (luminosité faible)
+      * 3-4 étages: Moyen (luminosité moyenne)
+      * > 4 étages: Lumineux (luminosité forte)
+    - Upgrade: si Sud ou Ouest mentionné
+      * Sombre → Moyen
+      * Moyen → Lumineux
     
     Args:
         apartment: Dict contenant les données de l'appartement
@@ -192,8 +207,8 @@ def format_exposition(apartment):
     Returns:
         Dict avec:
             - main_value: "Lumineux" / "Luminosité moyenne" / "Sombre"
-            - confidence: 50-95 (pourcentage)
-            - indices: "4e étage · Exposé Est · Luminosité 0.6"
+            - confidence: 50-70 (pourcentage)
+            - indices: "1er étage · Est mentionné"
     """
     exposition = apartment.get('exposition', {})
     expo_details = exposition.get('details', {})
@@ -205,104 +220,86 @@ def format_exposition(apartment):
     
     # 1. Extraire l'étage
     etage_num = None
+    
+    # Priorité 1: depuis exposition.details.etage_num
     if 'etage_num' in expo_details:
         etage_num = expo_details.get('etage_num')
-    else:
+    
+    # Priorité 2: depuis apartment.etage (champ string)
+    if etage_num is None:
         etage_field = apartment.get('etage', '')
         if etage_field:
-            etage_match = re.search(r'(\d+)[èe]?me?\s*étage|RDC|rez[\s-]de[\s-]chaussée|rez[\s-]de[\s-]chaussee', etage_field, re.IGNORECASE)
-            if etage_match:
-                etage_text = etage_match.group(0)
-                if 'rdc' in etage_text.lower() or 'rez' in etage_text.lower():
-                    etage_num = 0
-                else:
-                    num_match = re.search(r'(\d+)', etage_text)
-                    if num_match:
-                        etage_num = int(num_match.group(1))
-        
-        if etage_num is None:
-            text_to_search = f"{caracteristiques} {description}".lower()
-            etage_patterns = [
-                r'étage\s*(\d+)[èe]?me?\s*étage',
-                r'étage\s*(\d+)',
-                r'(\d+)[èe]?me?\s*étage',
-                r'RDC|rez[\s-]de[\s-]chaussée|rez[\s-]de[\s-]chaussee',
-            ]
-            for pattern in etage_patterns:
-                etage_match = re.search(pattern, text_to_search, re.IGNORECASE)
+            # Nettoyer et normaliser le champ étage
+            etage_field_lower = etage_field.lower().strip()
+            
+            # Cas RDC
+            if 'rdc' in etage_field_lower or 'rez' in etage_field_lower:
+                etage_num = 0
+            else:
+                # Chercher un nombre dans le champ
+                etage_match = re.search(r'(\d+)[èe]?r?me?\s*étage|(\d+)', etage_field, re.IGNORECASE)
                 if etage_match:
-                    etage_text = etage_match.group(0)
-                    if 'rdc' in etage_text.lower() or 'rez' in etage_text.lower():
-                        etage_num = 0
+                    # Prendre le premier groupe qui correspond
+                    num_str = etage_match.group(1) or etage_match.group(2)
+                    if num_str:
+                        try:
+                            etage_num = int(num_str)
+                        except ValueError:
+                            pass
+    
+    # Priorité 3: depuis le texte (description + caractéristiques)
+    if etage_num is None:
+        text_to_search = f"{caracteristiques} {description}".lower()
+        etage_patterns = [
+            r'(\d+)[èe]?r?me?\s*étage',  # "2e étage", "2ème étage", "2er étage"
+            r'étage\s*(\d+)',  # "étage 2"
+            r'RDC|rez[\s-]de[\s-]chaussée|rez[\s-]de[\s-]chaussee',
+        ]
+        for pattern in etage_patterns:
+            etage_match = re.search(pattern, text_to_search, re.IGNORECASE)
+            if etage_match:
+                if 'rdc' in etage_match.group(0).lower() or 'rez' in etage_match.group(0).lower():
+                    etage_num = 0
+                    break
+                elif etage_match.lastindex and etage_match.group(1):
+                    try:
+                        etage_num = int(etage_match.group(1))
                         break
-                    else:
-                        num_match = re.search(r'(\d+)', etage_text)
-                        if num_match:
-                            etage_num = int(num_match.group(1))
-                            break
+                    except ValueError:
+                        pass
     
-    # 2. Classifier chaque signal
-    signals = []
-    signal_types = []
+    # Priorité 4: depuis _api_data.floor si disponible (données API)
+    if etage_num is None:
+        api_data = apartment.get('_api_data', {})
+        floor = api_data.get('floor')
+        if floor is not None:
+            etage_num = int(floor)
     
-    # Signal orientation
-    orientation_class = classify_orientation(exposition_dir)
-    if orientation_class:
-        signals.append(orientation_class)
-        signal_types.append('orientation')
-    
-    # Signal étage
+    # 2. Classification basée uniquement sur l'étage
     etage_class = classify_etage(etage_num)
+    
     if etage_class:
-        signals.append(etage_class)
-        signal_types.append('etage')
-    
-    # Signal image
-    image_class = classify_image_brightness(brightness_value)
-    image_intensity = get_image_intensity(brightness_value)
-    if image_class:
-        signals.append(image_class)
-        signal_types.append('image')
-    
-    # 3. Décision finale par vote majoritaire
-    if not signals:
-        # Si aucun signal: classe Moyen, 50%
+        main_value = etage_class
+        confidence = 70  # Confiance moyenne quand étage disponible
+    else:
+        # Pas d'étage disponible: défaut à Moyen
         main_value = "Moyen"
         confidence = 50
-    elif len(signals) == 1 and signal_types[0] == 'image':
-        # Si seulement le signal luminosité est disponible, rester sur luminosité moyenne
-        main_value = "Moyen"
-        confidence = 60  # Base 60% pour un seul signal
-    else:
-        # Vote majoritaire
-        vote_result = vote_majority(signals)
-        
-        if isinstance(vote_result, list):
-            # Égalité parfaite: tranche avec l'image
-            if image_class:
-                # Si l'image est "faible", prendre Moyen
-                if image_intensity == 'Faible':
-                    main_value = "Moyen"
-                else:
-                    main_value = image_class
-            else:
-                # Pas d'image, prendre le premier (ou Moyen par défaut)
-                main_value = vote_result[0] if vote_result else "Moyen"
-        else:
-            main_value = vote_result
-        
-        # Vérifier les règles strictes : Lumineux et Sombre nécessitent au moins 2 signaux
-        if main_value == 'Lumineux':
-            lumineux_count = sum(1 for s in signals if s == 'Lumineux')
-            if lumineux_count < 2:
-                main_value = "Moyen"
-        elif main_value == 'Sombre':
-            sombre_count = sum(1 for s in signals if s == 'Sombre')
-            if sombre_count < 2:
-                main_value = "Moyen"
-        
-        # Calculer la confiance
-        confidence = calculate_confidence(signals, main_value, image_intensity, signal_types)
+    
+    # 3. Upgrade si Sud ou Ouest mentionné: faible → moyen, moyen → fort
+    if exposition_dir:
+        expo_normalized = normalize_exposition(exposition_dir)
+        if expo_normalized:
+            # Vérifier si Sud ou Ouest est présent dans l'exposition
+            has_sud = 'sud' in expo_normalized
+            has_ouest = 'ouest' in expo_normalized
+            
+            if has_sud or has_ouest:
+                # Appliquer l'upgrade
+                if main_value == 'Sombre':
+                    main_value = 'Moyen'  # Faible → Moyen
+                elif main_value == 'Moyen':
+                    main_value = 'Lumineux'  # Moyen → Fort
     
     # Normaliser main_value pour correspondre au format attendu
     if main_value == 'Lumineux':
@@ -329,14 +326,22 @@ def format_exposition(apartment):
     # Exposition - UNIQUEMENT si explicitement mentionnée dans le texte
     exposition_explicite = exposition.get('exposition_explicite', False)
     if exposition_explicite and exposition_dir and exposition_dir.lower() not in ['inconnue', 'inconnu', 'non spécifiée', 'none', 'null']:
-        expo_display = exposition_dir.replace('_', '-').title()
-        indices_parts.append(f"Exposé {expo_display}")
+        # Formater l'exposition : "sud" -> "Sud mentionné", "sud_ouest" -> "Sud-Ouest mentionné"
+        expo_display = exposition_dir.replace('_', '-').split('-')
+        expo_display = '-'.join([word.capitalize() for word in expo_display])
+        indices_parts.append(f"{expo_display} mentionné")
     
     # Luminosité image
     if brightness_value is not None:
         indices_parts.append(f"Luminosité {brightness_value:.1f}")
     
-    indices_str = " · ".join(indices_parts) if indices_parts else None
+    # Formater avec le préfixe "Exposition Indice:" (même format que cuisine et baignoire)
+    indices_str = None
+    if indices_parts:
+        indices_str = "Exposition Indice: " + " · ".join(indices_parts)
+    else:
+        # Fallback si aucun indice trouvé
+        indices_str = "Exposition Indice: Non spécifié"
     
     return {
         'main_value': main_value_display,

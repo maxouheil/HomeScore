@@ -39,3 +39,8 @@ if response.status_code == 200:
 else:
     print(f"❌ Erreur API: {response.status_code}")
 
+
+
+
+
+

@@ -36,32 +36,97 @@ function App() {
 
     loadApartments()
 
-    // WebSocket pour mises à jour en temps réel
-    const ws = new WebSocket('ws://localhost:8000/ws')
+    // WebSocket pour mises à jour en temps réel (optionnel - fonctionne même si backend non démarré)
+    let ws = null
+    let reconnectTimeout = null
+    let isConnecting = false
     
-    ws.onopen = () => {
-      console.log('✅ WebSocket connecté')
-    }
+    const connectWebSocket = () => {
+      // Éviter les connexions multiples simultanées
+      if (isConnecting || (ws && ws.readyState === WebSocket.CONNECTING)) {
+        return
+      }
+      
+      // Fermer la connexion précédente si elle existe
+      if (ws) {
+        try {
+          ws.close()
+        } catch (e) {
+          // Ignorer les erreurs de fermeture
+        }
+      }
+      
+      isConnecting = true
+      
+      try {
+        ws = new WebSocket('ws://localhost:8000/ws')
+        
+        ws.onopen = () => {
+          isConnecting = false
+          // Réinitialiser le délai de reconnexion en cas de succès
+          if (reconnectTimeout) {
+            clearTimeout(reconnectTimeout)
+            reconnectTimeout = null
+          }
+        }
 
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data)
-      if (data.type === 'apartments_updated') {
-        console.log('📢 Mise à jour des appartements détectée')
-        // Recharger les données
-        loadApartments()
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data)
+            if (data.type === 'apartments_updated') {
+              // Recharger les données
+              loadApartments()
+            }
+          } catch (err) {
+            // Ignorer les erreurs de parsing
+          }
+        }
+
+        ws.onerror = () => {
+          isConnecting = false
+          // Ne rien faire - l'erreur sera gérée par onclose
+        }
+
+        ws.onclose = () => {
+          isConnecting = false
+          // Tenter de reconnecter après 5 secondes (uniquement si pas déjà en reconnexion)
+          if (!reconnectTimeout) {
+            reconnectTimeout = setTimeout(() => {
+              reconnectTimeout = null
+              connectWebSocket()
+            }, 5000)
+          }
+        }
+      } catch (err) {
+        isConnecting = false
+        // Erreur lors de la création du WebSocket - réessayer plus tard
+        if (!reconnectTimeout) {
+          reconnectTimeout = setTimeout(() => {
+            reconnectTimeout = null
+            connectWebSocket()
+          }, 5000)
+        }
       }
     }
-
-    ws.onerror = (err) => {
-      console.error('Erreur WebSocket:', err)
-    }
-
-    ws.onclose = () => {
-      console.log('WebSocket fermé')
-    }
+    
+    // Attendre un peu avant de tenter la première connexion WebSocket
+    // pour éviter les erreurs immédiates si le backend n'est pas démarré
+    const wsTimeout = setTimeout(() => {
+      connectWebSocket()
+    }, 1000)
 
     return () => {
-      ws.close()
+      clearTimeout(wsTimeout)
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout)
+      }
+      if (ws) {
+        try {
+          ws.close()
+        } catch (e) {
+          // Ignorer les erreurs de fermeture
+        }
+      }
     }
   }, [])
 

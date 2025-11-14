@@ -198,3 +198,8 @@ print("   → Suggestion: Bonus uniquement si vraiment présents")
 print("   → Ou réduire valeurs si détection systématique")
 
 
+
+
+
+
+

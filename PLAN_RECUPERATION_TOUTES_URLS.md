@@ -252,3 +252,8 @@ Un fichier `data/all_apartment_urls.json` contenant toutes les URLs:
 - **Déduplication** : Toujours dédupliquer les URLs avant de sauvegarder
 - **Erreurs** : Gérer les cas où le chargement échoue ou prend trop de temps
 
+
+
+
+
+

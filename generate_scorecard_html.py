@@ -16,7 +16,7 @@ def load_scored_apartments():
         with open('data/scores/all_apartments_scores.json', 'r', encoding='utf-8') as f:
             scored_apartments = json.load(f)
         
-        # Charger les données scrapées pour fusionner style_analysis
+        # Charger les données scrapées pour fusionner style_analysis, baignoire, etc.
         scraped_data = {}
         try:
             with open('data/scraped_apartments.json', 'r', encoding='utf-8') as f:
@@ -29,7 +29,25 @@ def load_scored_apartments():
         except FileNotFoundError:
             print("⚠️  Fichier scraped_apartments.json non trouvé, certaines données peuvent manquer")
         
-        # Fusionner les données scrapées (style_analysis, etc.) avec les scores
+        # Charger aussi depuis les fichiers individuels si disponibles (pour les données les plus récentes)
+        from pathlib import Path
+        appartements_dir = Path('data/appartements')
+        if appartements_dir.exists():
+            for apt_file in appartements_dir.glob('*.json'):
+                if apt_file.stem in ['test_001', 'test_no_photo', 'unknown']:
+                    continue
+                try:
+                    with open(apt_file, 'r', encoding='utf-8') as f:
+                        apt_data = json.load(f)
+                        apt_id = apt_data.get('id')
+                        if apt_id:
+                            # Les fichiers individuels ont priorité sur scraped_apartments.json
+                            scraped_data[apt_id] = apt_data
+                except Exception as e:
+                    # Ignorer les erreurs de lecture de fichiers individuels
+                    pass
+        
+        # Fusionner les données scrapées (style_analysis, baignoire, etc.) avec les scores
         for apartment in scored_apartments:
             apt_id = apartment.get('id')
             if apt_id and apt_id in scraped_data:
@@ -53,9 +71,59 @@ def load_scored_apartments():
                         # Mettre à jour l'exposition principale si elle existe dans scraped
                         if scraped_expo.get('exposition'):
                             apartment['exposition']['exposition'] = scraped_expo['exposition']
+                        # Mettre à jour exposition_explicite si présent
+                        if 'exposition_explicite' in scraped_expo:
+                            apartment['exposition']['exposition_explicite'] = scraped_expo['exposition_explicite']
                     else:
                         # Sinon, utiliser directement l'exposition scrapée
                         apartment['exposition'] = scraped_expo
+                
+                # Si pas d'exposition ou pas d'exposition_explicite, essayer d'extraire depuis la description
+                if 'exposition' not in apartment or not apartment.get('exposition', {}).get('exposition_explicite'):
+                    description = scraped_apt.get('description', '') or apartment.get('description', '')
+                    caracteristiques = scraped_apt.get('caracteristiques', '') or apartment.get('caracteristiques', '')
+                    if description:
+                        import re
+                        text_lower = description.lower()
+                        # Patterns pour exposition explicite (même logique que api_data_adapter.py)
+                        expo_patterns = [
+                            (r'exposition\s+(sud|nord|est|ouest|sud-ouest|nord-est|sud-est|nord-ouest)', 'exposition'),
+                            (r'orienté\s+(sud|nord|est|ouest|sud-ouest|nord-est|sud-est|nord-ouest)', 'orienté'),
+                            (r'plein\s+(sud|nord|est|ouest)', 'plein'),
+                            (r'(sud|nord|est|ouest|sud-ouest|nord-est|sud-est|nord-ouest)\s+exposé', 'exposé'),
+                            (r'\b(sud-ouest|nord-est|sud-est|nord-ouest)\b', 'simple'),
+                            (r'\b(nord|sud|est|ouest)\b', 'simple'),
+                        ]
+                        
+                        for pattern, context in expo_patterns:
+                            match = re.search(pattern, text_lower)
+                            if match:
+                                expo_found = match.group(1) if match.lastindex else match.group(0)
+                                expo_found = expo_found.replace('-', '_').replace(' ', '_')
+                                
+                                # Créer ou mettre à jour l'objet exposition
+                                if 'exposition' not in apartment:
+                                    apartment['exposition'] = {}
+                                apartment['exposition']['exposition'] = expo_found
+                                apartment['exposition']['exposition_explicite'] = True
+                                
+                                # Ajouter etage_num si disponible
+                                if 'details' not in apartment['exposition']:
+                                    apartment['exposition']['details'] = {}
+                                etage_field = scraped_apt.get('etage', '') or apartment.get('etage', '')
+                                if etage_field:
+                                    etage_match = re.search(r'(\d+)[èe]?r?me?\s*étage|RDC|rez[\s-]de[\s-]chaussée', etage_field, re.IGNORECASE)
+                                    if etage_match:
+                                        if 'rdc' in etage_match.group(0).lower() or 'rez' in etage_match.group(0).lower():
+                                            apartment['exposition']['details']['etage_num'] = 0
+                                        else:
+                                            num_match = re.search(r'(\d+)', etage_match.group(0))
+                                            if num_match:
+                                                apartment['exposition']['details']['etage_num'] = int(num_match.group(1))
+                                break
+                # Fusionner la baignoire depuis scraped_apt (PRIORITÉ sur scores_detaille)
+                if 'baignoire' in scraped_apt:
+                    apartment['baignoire'] = scraped_apt['baignoire']
         
         return scored_apartments
     except FileNotFoundError:
@@ -225,7 +293,19 @@ def get_metro_name(apartment):
 
 def get_style_name(apartment):
     """Extrait le nom du style depuis différentes sources"""
-    # Priorité 1: style_analysis.style.type
+    # PRIORITÉ 1: Utiliser scores_detaille.style.tier pour déterminer Ancien/Neuf
+    scores_detaille = apartment.get('scores_detaille', {})
+    style_score = scores_detaille.get('style', {})
+    style_tier = style_score.get('tier', '')
+    
+    if style_tier == 'tier1':
+        return "Style Haussmannien"  # Ancien
+    elif style_tier == 'tier2':
+        return "Style Atypique"  # Atypique
+    elif style_tier == 'tier3':
+        return "Style Moderne"  # Neuf
+    
+    # PRIORITÉ 2: style_analysis.style.type (si tier non disponible)
     style_analysis = apartment.get('style_analysis', {})
     if style_analysis:
         style_data = style_analysis.get('style', {})
@@ -238,24 +318,21 @@ def get_style_name(apartment):
                 style_name = "70s"
             elif 'haussmann' in style_type.lower():
                 style_name = "Haussmannien"
+            elif 'moderne' in style_type.lower() or 'contemporain' in style_type.lower():
+                style_name = "Moderne"
             return f"Style {style_name}"
     
-    # Priorité 2: scores_detaille.style.justification (chercher des indices de style)
-    scores_detaille = apartment.get('scores_detaille', {})
-    style_score = scores_detaille.get('style', {})
+    # PRIORITÉ 3: scores_detaille.style.justification (mais seulement si tier non disponible)
     justification = style_score.get('justification', '').lower()
     
-    if 'haussmann' in justification or 'moulures' in justification or 'parquet' in justification:
+    # Vérifier d'abord les mots-clés "neuf" ou "moderne" avant "ancien"
+    if 'moderne' in justification or 'contemporain' in justification or 'neuf' in justification or 'design épuré' in justification:
+        return "Style Moderne"
+    elif 'haussmann' in justification:
         return "Style Haussmannien"
     elif '70' in justification or 'seventies' in justification:
         return "Style 70s"
-    elif 'moderne' in justification or 'contemporain' in justification:
-        return "Style Moderne"
-    
-    # Fallback: utiliser style_haussmannien si disponible
-    style_haussmannien = apartment.get('style_haussmannien', {})
-    if style_haussmannien.get('score', 0) > 20:
-        return "Style Haussmannien"
+    # Ne pas utiliser "moulures" ou "parquet" seuls car ils peuvent être dans du moderne
     
     return None
 
@@ -485,38 +562,38 @@ def format_prix_criterion(apartment):
     }
 
 def format_style_criterion(apartment):
-    """Formate le critère Style: "70's/Haussmanien/Moderne (X% confiance) + indices" """
+    """Formate le critère Style: "Ancien/Neuf/Atypique (X% confiance) + indices" """
+    # PRIORITÉ 1: Utiliser scores_detaille.style.tier pour déterminer Ancien/Neuf/Atypique
+    scores_detaille = apartment.get('scores_detaille', {})
+    style_score = scores_detaille.get('style', {})
+    style_tier = style_score.get('tier', '')
+    
+    # Déterminer le nom du style selon le tier
+    if style_tier == 'tier1':
+        style_name = "Ancien"  # Haussmannien
+    elif style_tier == 'tier2':
+        style_name = "Atypique"  # Loft, atypique
+    elif style_tier == 'tier3':
+        style_name = "Neuf"  # Moderne, contemporain
+    else:
+        # Fallback: utiliser style_analysis
+        style_analysis = apartment.get('style_analysis', {})
+        style_data = style_analysis.get('style', {})
+        style_type = style_data.get('type', '')
+        
+        if 'haussmann' in style_type.lower():
+            style_name = "Ancien"
+        elif 'atypique' in style_type.lower() or 'loft' in style_type.lower():
+            style_name = "Atypique"
+        elif 'moderne' in style_type.lower() or 'contemporain' in style_type.lower():
+            style_name = "Neuf"
+        else:
+            style_name = "Non spécifié"
+    
+    # Récupérer la confiance depuis style_analysis
     style_analysis = apartment.get('style_analysis', {})
     style_data = style_analysis.get('style', {})
-    
-    style_type = style_data.get('type', '')
     confidence = style_data.get('confidence')
-    
-    # Formater le nom du style
-    if not style_type or style_type == 'autre' or style_type == 'inconnu':
-        # Fallback: chercher dans scores_detaille
-        scores_detaille = apartment.get('scores_detaille', {})
-        style_score = scores_detaille.get('style', {})
-        justification = style_score.get('justification', '').lower()
-        
-        if 'haussmann' in justification or 'moulures' in justification:
-            style_type = 'haussmannien'
-        elif '70' in justification or 'seventies' in justification:
-            style_type = '70s'
-        elif 'moderne' in justification or 'contemporain' in justification:
-            style_type = 'moderne'
-        else:
-            style_type = 'Non spécifié'
-    
-    # Capitaliser et formater
-    if '70' in style_type.lower() or 'seventies' in style_type.lower():
-        style_name = "70's"
-    elif 'haussmann' in style_type.lower():
-        style_name = "Haussmannien"
-    elif 'moderne' in style_type.lower():
-        style_name = "Moderne"
-    else:
-        style_name = style_type.capitalize()
     
     # Convertir confiance en pourcentage
     confidence_pct = None
@@ -526,37 +603,59 @@ def format_style_criterion(apartment):
         elif isinstance(confidence, (int, float)) and 0 <= confidence <= 100:
             confidence_pct = int(confidence)
     
-    # Extraire les indices
-    indices = []
-    details = style_data.get('details', '')
-    if details:
-        # Chercher des mots-clés dans les détails
-        keywords = ['moulures', 'cheminée', 'parquet', 'hauteur sous plafond', 'moldings', 'fireplace']
-        found_keywords = [kw for kw in keywords if kw.lower() in details.lower()]
-        if found_keywords:
-            indices = found_keywords[:3]  # Limiter à 3 indices
+    # PRIORITÉ: Extraire la justification depuis scores_detaille.style.justification (comme cuisine/baignoire)
+    scores_detaille = apartment.get('scores_detaille', {})
+    style_score = scores_detaille.get('style', {})
+    justification = style_score.get('justification', '')
     
-    # Si pas d'indices dans details, chercher dans style_haussmannien
-    if not indices:
-        style_haussmannien = apartment.get('style_haussmannien', {})
-        elements = style_haussmannien.get('elements', {})
-        # Vérifier que elements est un dict avant d'appeler .get()
-        if isinstance(elements, dict):
-            architectural = elements.get('architectural', [])
-            if architectural:
-                indices = architectural[:3]
-        elif isinstance(elements, list):
-            # Si elements est directement une liste, l'utiliser
-            if elements:
-                indices = elements[:3]
-    
+    # Extraire les indices depuis justification - systématiquement ajoutés
     indices_str = None
-    if indices:
-        indices_str = "Style Indice: " + " · ".join(indices)
-    
-    # Ajouter systématiquement une phrase indice si pas déjà présente
-    if not indices_str:
-        indices_str = "Style Indice: Style expo cuisine et baignoire"
+    if justification:
+        # Utiliser la justification comme indices si elle est disponible
+        # La justification contient déjà une phrase qui justifie le côté ancien ou neuf
+        indices_str = f"Style Indice: {justification}"
+    else:
+        # Fallback: chercher dans style_data.justification
+        style_justification = style_data.get('justification', '')
+        if style_justification:
+            indices_str = f"Style Indice: {style_justification}"
+        else:
+            # Fallback 2: extraire depuis details ou style_haussmannien
+            indices = []
+            details = style_data.get('details', '')
+            if details:
+                # Vérifier que details est une string avant d'appeler .lower()
+                if isinstance(details, str):
+                    # Chercher des mots-clés dans les détails
+                    keywords = ['moulures', 'cheminée', 'parquet', 'hauteur sous plafond', 'moldings', 'fireplace']
+                    found_keywords = [kw for kw in keywords if kw.lower() in details.lower()]
+                    if found_keywords:
+                        indices = found_keywords[:3]  # Limiter à 3 indices
+            
+            # Si pas d'indices dans details, chercher dans style_haussmannien
+            if not indices:
+                style_haussmannien = apartment.get('style_haussmannien', {})
+                elements = style_haussmannien.get('elements', {})
+                # Vérifier que elements est un dict avant d'appeler .get()
+                if isinstance(elements, dict):
+                    architectural = elements.get('architectural', [])
+                    if architectural:
+                        indices = architectural[:3]
+                elif isinstance(elements, list):
+                    # Si elements est directement une liste, l'utiliser
+                    if elements:
+                        indices = elements[:3]
+            
+            if indices:
+                indices_str = "Style Indice: " + " · ".join(indices)
+            else:
+                # Dernier fallback: créer une phrase basée sur le style détecté
+                if 'haussmann' in style_type.lower():
+                    indices_str = "Style Indice: Style ancien détecté (moulures, parquet, hauteur sous plafond)"
+                elif 'moderne' in style_type.lower() or 'contemporain' in style_type.lower():
+                    indices_str = "Style Indice: Style neuf détecté (design épuré, matériaux modernes)"
+                else:
+                    indices_str = "Style Indice: Style non spécifié"
     
     return {
         'main_value': style_name,
@@ -687,17 +786,25 @@ def format_cuisine_criterion(apartment):
     
     # Fallback: utiliser style_analysis si pas trouvé
     style_analysis = apartment.get('style_analysis', {})
-    cuisine_data = style_analysis.get('cuisine', {})
-    details = cuisine_data.get('details', '')
+    cuisine_data = style_analysis.get('cuisine', {}) if style_analysis else {}
+    details = cuisine_data.get('details', '') if cuisine_data else ''
     
     if cuisine_ouverte is None:
-        cuisine_ouverte = cuisine_data.get('ouverte', False)
+        cuisine_ouverte = cuisine_data.get('ouverte', False) if cuisine_data else False
         if confidence is None:
-            confidence = cuisine_data.get('confidence')
+            confidence = cuisine_data.get('confidence') if cuisine_data else None
     
     # Si toujours None, vérifier le tier pour déduire
     if cuisine_ouverte is None:
         tier = cuisine_score.get('tier', 'tier3')
+        # tier2 = cuisine non trouvée (5pts) → afficher "Non spécifié"
+        if tier == 'tier2':
+            main_value = "Non spécifié"
+            return {
+                'main_value': main_value,
+                'confidence': None,
+                'indices': "Cuisine Indice: Non spécifié"
+            }
         # tier1 = ouverte (10pts), tier3 = fermée (0pts)
         cuisine_ouverte = (tier == 'tier1')
     
@@ -725,7 +832,7 @@ def format_cuisine_criterion(apartment):
     
     # Source 2: Si pas trouvé, chercher dans style_analysis directement (via photo_validation)
     if not detected_photos:
-        photo_validation_cuisine = cuisine_data.get('photo_validation', {})
+        photo_validation_cuisine = cuisine_data.get('photo_validation', {}) if cuisine_data else {}
         if isinstance(photo_validation_cuisine, dict):
             photo_result = photo_validation_cuisine.get('photo_result', {})
             detected_photos = photo_result.get('detected_photos', [])
@@ -795,7 +902,21 @@ def format_cuisine_criterion(apartment):
     }
 
 def format_baignoire_criterion(apartment, baignoire_extractor=None):
-    """Formate le critère Baignoire: "Oui / Non (confiance) + indices" """
+    """Formate le critère Baignoire: "Oui / Non / Non spécifié (confiance) + indices" """
+    # PRIORITÉ: Utiliser le résultat final depuis scores_detaille
+    scores_detaille = apartment.get('scores_detaille', {})
+    baignoire_score = scores_detaille.get('baignoire', {})
+    baignoire_details = baignoire_score.get('details', {})
+    tier = baignoire_score.get('tier', 'tier3')
+    
+    # tier2 = salle de bain non trouvée (5pts) → afficher "Non spécifié"
+    if tier == 'tier2':
+        return {
+            'main_value': "Non spécifié",
+            'confidence': None,
+            'indices': "Baignoire Indice: Non spécifié"
+        }
+    
     try:
         if baignoire_extractor is None:
             baignoire_extractor = BaignoireExtractor()
@@ -1051,7 +1172,6 @@ def generate_scorecard_html(apartments):
         
         .container {{
             width: 100%;
-            max-width: 1600px;
             margin: 0 auto;
             padding: 30px;
         }}

@@ -81,3 +81,8 @@ Une fois les URLs extraites :
 2. Lance `python merge_all_urls.py` pour fusionner avec d'autres sources
 3. Lance `python scrape_from_urls.py` pour scraper les appartements
 
+
+
+
+
+

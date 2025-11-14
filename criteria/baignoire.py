@@ -58,9 +58,10 @@ def format_baignoire(apartment):
             # Douche détectée = pas de baignoire
             has_baignoire = False
     
-    # Fallback: utiliser baignoire_data si pas trouvé
+    # Fallback: utiliser baignoire (nouveau format) ou baignoire_data (ancien format) si pas trouvé
     if has_baignoire is None:
-        baignoire_data = apartment.get('baignoire_data', {})
+        # PRIORITÉ: Utiliser apartment.baignoire (nouveau format)
+        baignoire_data = apartment.get('baignoire', {}) or apartment.get('baignoire_data', {})
         has_baignoire = baignoire_data.get('has_baignoire', False)
         if confidence is None:
             confidence = baignoire_data.get('confidence')

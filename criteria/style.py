@@ -61,12 +61,19 @@ def format_style(apartment):
         elif isinstance(confidence, (int, float)) and 0 <= confidence <= 100:
             confidence_pct = int(confidence)
     
-    # PRIORITÉ 1: Utiliser la justification du style depuis l'analyse des photos
-    justification = style_data.get('justification', '')
+    # PRIORITÉ 1: Utiliser la justification depuis scores_detaille.style.justification (comme cuisine/baignoire)
+    scores_detaille = apartment.get('scores_detaille', {})
+    style_score = scores_detaille.get('style', {})
+    justification = style_score.get('justification', '')
+    
+    # PRIORITÉ 2: Fallback sur style_data.justification si pas trouvé dans scores_detaille
+    if not justification:
+        justification = style_data.get('justification', '')
     
     # Formater la chaîne d'indices avec la justification
     indices_str = None
     if justification:
+        # La justification contient déjà une phrase qui justifie le côté ancien ou neuf
         indices_str = f"Style Indice: {justification}"
     
     return {

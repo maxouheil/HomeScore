@@ -94,3 +94,8 @@ Tu peux lancer ce script :
 - Pour Gmail, utilise `imap.gmail.com` (défaut)
 - Pour autres providers, modifie `imap_server` dans le code
 
+
+
+
+
+

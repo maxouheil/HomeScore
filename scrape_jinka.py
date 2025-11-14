@@ -10,7 +10,10 @@ import os
 import re
 import aiohttp
 import sys
-from datetime import datetime
+import imaplib
+import email
+from email.header import decode_header
+from datetime import datetime, timedelta
 from playwright.async_api import async_playwright
 from dotenv import load_dotenv
 from extract_exposition import ExpositionExtractor
@@ -39,43 +42,491 @@ class JinkaScraper:
         )
         self.page = await self.context.new_page()
         
-    async def login(self):
-        """Se connecte à Jinka via Google"""
-        print("🔐 Connexion à Jinka...")
+        # Gestionnaire pour détecter les erreurs 429
+        self.rate_limit_count = 0
+        
+        async def handle_response(response):
+            if response.status == 429:
+                self.rate_limit_count += 1
+                print(f"\n⚠️  Erreur 429 détectée (#{self.rate_limit_count}) sur: {response.url[:80]}")
+                wait_time = min(30 + (self.rate_limit_count * 10), 120)  # 30s, puis 40s, 50s... max 120s
+                print(f"   Rate limiting activé - attente de {wait_time} secondes...")
+                await asyncio.sleep(wait_time)  # asyncio.sleep attend des secondes
+        
+        self.page.on('response', handle_response)
+        
+    def get_activation_code_from_gmail(self, max_wait_seconds=120):
+        """Récupère le code d'activation depuis Gmail"""
+        print("📧 Récupération du code d'activation depuis Gmail...")
+        
+        gmail_email = os.getenv('GMAIL_EMAIL') or os.getenv('JINKA_EMAIL')
+        gmail_password = os.getenv('GMAIL_PASSWORD') or os.getenv('JINKA_PASSWORD')
+        
+        if not gmail_email or not gmail_password:
+            print("❌ Identifiants Gmail non trouvés dans .env")
+            print("   Variables cherchées:")
+            print(f"      GMAIL_EMAIL: {'✅' if os.getenv('GMAIL_EMAIL') else '❌'}")
+            print(f"      GMAIL_PASSWORD: {'✅' if os.getenv('GMAIL_PASSWORD') else '❌'}")
+            print(f"      JINKA_EMAIL: {'✅' if os.getenv('JINKA_EMAIL') else '❌'}")
+            print(f"      JINKA_PASSWORD: {'✅' if os.getenv('JINKA_PASSWORD') else '❌'}")
+            print("\n   💡 Ajoutez dans votre .env:")
+            print("      GMAIL_EMAIL=votre@gmail.com")
+            print("      GMAIL_PASSWORD=votre_mot_de_passe_application")
+            print("   (ou utilisez JINKA_EMAIL/JINKA_PASSWORD si c'est le même compte)")
+            return None
+        
+        print(f"   ✅ Utilisation de l'email: {gmail_email}")
         
         try:
-            await self.page.goto('https://www.jinka.fr/sign/in')
-            await self.page.wait_for_load_state('networkidle')
+            # Connexion IMAP à Gmail
+            mail = imaplib.IMAP4_SSL("imap.gmail.com")
+            mail.login(gmail_email, gmail_password)
+            mail.select("inbox")
             
-            # Cliquer sur "Continuer avec Google"
-            google_button = self.page.locator('button:has-text("Continuer avec Google")')
-            if await google_button.count() > 0:
-                await google_button.click()
-                await self.page.wait_for_load_state('networkidle')
-                await self.page.wait_for_timeout(2000)
+            # Chercher les emails récents de Jinka (dernières 10 minutes)
+            # Format IMAP: chercher depuis une date
+            search_date = (datetime.now() - timedelta(minutes=10)).strftime("%d-%b-%Y")
+            # Chercher les emails de Jinka avec "code" dans le sujet ou le corps
+            status, messages = mail.search(None, f'(SINCE {search_date} FROM "noreply@jinka.fr")')
+            
+            # Si pas de résultats avec FROM, chercher juste les emails récents avec "code"
+            if not messages[0]:
+                status, messages = mail.search(None, f'(SINCE {search_date} SUBJECT "code")')
+            
+            # Si toujours rien, chercher tous les emails récents
+            if not messages[0]:
+                status, messages = mail.search(None, f'(SINCE {search_date})')
+            
+            if status != "OK" or not messages[0]:
+                print("⚠️  Aucun email trouvé dans la recherche initiale")
+                # Essayer une recherche plus large : tous les emails récents
+                search_date = (datetime.now() - timedelta(minutes=10)).strftime("%d-%b-%Y")
+                status, messages = mail.search(None, f'(SINCE {search_date})')
+            
+            if status != "OK" or not messages[0]:
+                print("⚠️  Aucun email récent trouvé")
+                mail.close()
+                mail.logout()
+                return None
+            
+            email_ids = messages[0].split()
+            if not email_ids:
+                print("⚠️  Aucun email trouvé")
+                mail.close()
+                mail.logout()
+                return None
+            
+            # Parcourir les emails les plus récents en premier
+            for email_id in reversed(email_ids[-5:]):  # Derniers 5 emails max
+                status, msg_data = mail.fetch(email_id, "(RFC822)")
                 
-                # Saisir l'email
-                email_input = self.page.locator('input[type="email"]')
-                if await email_input.count() > 0:
-                    await email_input.fill(os.getenv('JINKA_EMAIL'))
-                    await self.page.keyboard.press('Enter')
-                    await self.page.wait_for_timeout(2000)
+                if status != "OK":
+                    continue
                 
-                # Saisir le mot de passe
-                password_input = self.page.locator('input[type="password"]')
-                if await password_input.count() > 0:
-                    await password_input.fill(os.getenv('JINKA_PASSWORD'))
-                    await self.page.keyboard.press('Enter')
-                    await self.page.wait_for_load_state('networkidle')
+                email_body = msg_data[0][1]
+                email_message = email.message_from_bytes(email_body)
+                
+                # Vérifier le sujet
+                subject = decode_header(email_message["Subject"])[0][0]
+                if isinstance(subject, bytes):
+                    subject = subject.decode()
+                
+                # Vérifier que c'est bien un email de Jinka
+                from_addr = email_message.get("From", "")
+                if "jinka.fr" not in from_addr.lower():
+                    continue
+                
+                # Chercher le code dans le corps de l'email
+                body = ""
+                if email_message.is_multipart():
+                    for part in email_message.walk():
+                        content_type = part.get_content_type()
+                        if content_type == "text/plain" or content_type == "text/html":
+                            try:
+                                body_part = part.get_payload(decode=True)
+                                if body_part:
+                                    body += body_part.decode('utf-8', errors='ignore')
+                            except:
+                                pass
+                else:
+                    try:
+                        body = email_message.get_payload(decode=True).decode('utf-8', errors='ignore')
+                    except:
+                        body = str(email_message.get_payload())
+                
+                # Chercher un code (format Jinka: "Jinka - XXXX est votre code de connexion")
+                # D'abord chercher dans le sujet avec le format exact de Jinka
+                subject_patterns = [
+                    r'Jinka\s*-\s*(\d{4})\s+est votre code de connexion',  # "Jinka - 3709 est votre code de connexion"
+                    r'(\d{4})\s+est votre code de connexion',  # "3709 est votre code de connexion"
+                    r'(\d{4})\s+est votre code',  # "3709 est votre code"
+                    r'code de connexion[:\s]+(\d{4})',  # "code de connexion: 3709"
+                    r'votre code[:\s]+(\d{4})',  # "votre code: 3709"
+                ]
+                
+                for pattern in subject_patterns:
+                    matches = re.findall(pattern, subject, re.IGNORECASE)
+                    if matches:
+                        code = matches[0]
+                        if len(code) == 4 and code.isdigit():
+                            print(f"✅ Code d'activation trouvé dans le sujet: {code}")
+                            mail.close()
+                            mail.logout()
+                            return code
+                
+                # Chercher aussi dans le corps avec patterns généraux
+                body_patterns = [
+                    r'code[:\s]+(\d{4,6})',  # "code: 1234" ou "code: 123456"
+                    r'code d\'activation[:\s]+(\d{4,6})',
+                    r'votre code[:\s]+(\d{4,6})',
+                    r'code de connexion[:\s]+(\d{4,6})',
+                    r'\b(\d{4})\b',  # Code à 4 chiffres isolé
+                    r'\b(\d{6})\b',  # Code à 6 chiffres isolé
+                ]
+                
+                for pattern in body_patterns:
+                    matches = re.findall(pattern, body, re.IGNORECASE)
+                    if matches:
+                        code = matches[0]
+                        # Vérifier que c'est bien un code (4 ou 6 chiffres)
+                        if len(code) in [4, 6] and code.isdigit():
+                            # Vérifier que ce n'est pas une année (2000-2099)
+                            if not (len(code) == 4 and 2000 <= int(code) <= 2099):
+                                print(f"✅ Code d'activation trouvé dans le corps: {code}")
+                                mail.close()
+                                mail.logout()
+                                return code
+            
+            mail.close()
+            mail.logout()
+            print("⚠️  Aucun code d'activation trouvé dans les emails récents")
+            return None
+            
+        except Exception as e:
+            print(f"❌ Erreur lors de la récupération du code depuis Gmail: {e}")
+            return None
+    
+    async def login(self):
+        """Se connecte à Jinka via email avec code d'activation"""
+        print("🔐 Connexion à Jinka par email...")
+        print(f"📍 ÉTAPE 1: Début de la fonction login()")
+        
+        try:
+            # Aller directement sur la page email au lieu de cliquer sur le bouton
+            print(f"📍 ÉTAPE 3: Navigation directe vers la page email...")
+            try:
+                await self.page.goto('https://www.jinka.fr/sign/in/email', wait_until='domcontentloaded', timeout=30000)
+                print(f"✅ ÉTAPE 3: Navigation réussie vers /sign/in/email")
+            except Exception as e:
+                print(f"❌ ÉTAPE 3: Erreur lors de la navigation: {e}")
+                if '429' in str(e) or self.rate_limit_count > 0:
+                    print("⚠️  Rate limiting détecté lors de la navigation")
+                    wait_time = 30 + (self.rate_limit_count * 10)
+                    print(f"   Attente de {wait_time} secondes...")
+                    await asyncio.sleep(wait_time)
+                    # Réessayer une fois
+                    print(f"📍 ÉTAPE 3b: Nouvelle tentative de navigation...")
+                    await self.page.goto('https://www.jinka.fr/sign/in/email', wait_until='domcontentloaded', timeout=30000)
+                    print(f"✅ ÉTAPE 3b: Navigation réussie")
+                else:
+                    raise
+            
+            # Vérifier l'URL actuelle
+            current_url = self.page.url
+            print(f"📍 ÉTAPE 5: Vérification de l'URL actuelle: {current_url}")
+            
+            # Vérifier si on a reçu des erreurs 429
+            if self.rate_limit_count > 0:
+                print(f"⚠️  {self.rate_limit_count} erreur(s) 429 détectée(s) - attente supplémentaire...")
+                await asyncio.sleep(10)
+            
+            print(f"✅ ÉTAPE 5: Page chargée et prête")
+            
+            # Saisir l'email - Utiliser wait_for_selector pour être plus rapide
+            print(f"\n📍 ÉTAPE 8: Recherche du champ email...")
+            
+            email_input_selectors = [
+                # Sélecteurs les plus probables en premier
+                'input[type="email"]',
+                'input[type="text"]',
+                'div input[type="text"]',
+                'form input[type="text"]',
+                'input[name="email"]',
+                'input[autocomplete="email"]',
+                'input:visible',  # Dernier recours
+            ]
+            
+            email_input = None
+            
+            # Essayer d'attendre directement le sélecteur le plus probable
+            try:
+                await self.page.wait_for_selector('input[type="email"], input[type="text"]', timeout=5000, state='visible')
+                print("   ✅ Champ email détecté rapidement")
+            except:
+                print("   ⏳ Attente du champ email...")
+            
+            # Chercher le champ avec les sélecteurs optimisés
+            for selector in email_input_selectors:
+                try:
+                    input_elem = self.page.locator(selector)
+                    count = await input_elem.count()
+                    if count > 0:
+                        # Vérifier que le champ est visible
+                        is_visible = await input_elem.first.is_visible()
+                        if is_visible:
+                            print(f"   ✅ Trouvé {count} champ(s) email avec sélecteur: {selector}")
+                            email_input = input_elem.first
+                            break
+                except:
+                    continue
+                
+                if email_input:
+                    break
+            
+            if not email_input:
+                print(f"⚠️  ÉTAPE 8: Champ email non trouvé avec les sélecteurs standards")
+                print("   Recherche alternative : analyse de tous les inputs visibles...")
+                
+                # Recherche alternative : tous les inputs visibles
+                try:
+                    all_inputs = await self.page.locator('input:visible').all()
+                    print(f"   Trouvé {len(all_inputs)} input(s) visible(s) sur la page")
                     
-                print("✅ Connexion réussie")
+                    for i, inp in enumerate(all_inputs[:10]):  # Limiter aux 10 premiers
+                        try:
+                            input_type = await inp.get_attribute('type') or 'text'
+                            input_name = await inp.get_attribute('name') or ''
+                            input_id = await inp.get_attribute('id') or ''
+                            input_placeholder = await inp.get_attribute('placeholder') or ''
+                            input_class = await inp.get_attribute('class') or ''
+                            
+                            print(f"   Input {i+1}: type={input_type}, name={input_name}, id={input_id[:30]}")
+                            print(f"      placeholder={input_placeholder[:40]}, class={input_class[:40]}")
+                            
+                            # Si c'est un input de type text ou email, c'est probablement le champ email
+                            if input_type in ['text', 'email'] and 'password' not in input_type:
+                                # Vérifier qu'il n'est pas un champ de recherche ou autre
+                                if 'search' not in input_id.lower() and 'search' not in input_name.lower():
+                                    # Reconstruire un sélecteur pour cet input
+                                    if input_id:
+                                        email_input = self.page.locator(f'input#{input_id}')
+                                    elif input_name:
+                                        email_input = self.page.locator(f'input[name="{input_name}"]')
+                                    else:
+                                        # Utiliser l'index
+                                        email_input = self.page.locator(f'input:visible').nth(i)
+                                    
+                                    # Vérifier qu'on peut bien l'utiliser
+                                    if await email_input.count() > 0:
+                                        email_input = email_input.first
+                                        selector_info = f"input#{input_id}" if input_id else f"input[name='{input_name}']"
+                                        print(f"   ✅ Champ email probable trouvé: input {i+1}")
+                                        print(f"      Sélecteur utilisé: {selector_info}")
+                                        break
+                        except Exception as e:
+                            print(f"   Erreur analyse input {i+1}: {e}")
+                            continue
+                except Exception as e:
+                    print(f"   Erreur recherche alternative: {e}")
+                
+                if not email_input:
+                    print(f"❌ ÉTAPE 8: Champ email non trouvé après toutes les tentatives")
+                    print("   Vérification de l'URL actuelle...")
+                    current_url = self.page.url
+                    print(f"   URL: {current_url}")
+                    # Prendre un screenshot pour debug
+                    try:
+                        os.makedirs("data", exist_ok=True)
+                        await self.page.screenshot(path="data/debug_no_email_field.png")
+                        print("   📸 Screenshot sauvegardé: data/debug_no_email_field.png")
+                    except:
+                        pass
+                    return False
+            
+            print(f"✅ ÉTAPE 8: Champ email trouvé")
+            
+            print(f"\n📍 ÉTAPE 9: Récupération de l'email depuis .env...")
+            jinka_email = os.getenv('JINKA_EMAIL')
+            if not jinka_email:
+                print(f"❌ ÉTAPE 9: JINKA_EMAIL non trouvé dans .env")
+                return False
+            print(f"✅ ÉTAPE 9: Email trouvé: {jinka_email}")
+            
+            print(f"\n📍 ÉTAPE 10: Saisie de l'email...")
+            await email_input.fill(jinka_email)
+            print(f"✅ ÉTAPE 10: Email saisi")
+            await asyncio.sleep(2)  # Délai plus long avant de continuer
+            print(f"✅ ÉTAPE 10b: Attente terminée")
+            
+            # Chercher et cliquer sur le bouton "Continuer" ou "Suivant"
+            continue_button_selectors = [
+                'button:has-text("Continuer")',
+                'button:has-text("Suivant")',
+                'button[type="submit"]',
+                'button:has-text("Envoyer")',
+            ]
+            
+            for selector in continue_button_selectors:
+                button = self.page.locator(selector)
+                if await button.count() > 0:
+                    await button.click()
+                    break
+            else:
+                # Si pas de bouton, appuyer sur Enter
+                await self.page.keyboard.press('Enter')
+            
+            print("⏳ Attente du code d'activation...")
+            await asyncio.sleep(4)  # Délai plus long pour laisser le temps à l'email d'arriver
+            
+            # Attendre que le champ de code apparaisse et récupérer le code depuis Gmail
+            # Le code peut être dans plusieurs inputs avec maxlength="1" (un par chiffre)
+            print(f"\n📍 ÉTAPE 11: Recherche du champ de code...")
+            print("   Le code peut être dans plusieurs inputs (un par chiffre)...")
+            
+            code_inputs = None  # Peut être une liste d'inputs ou un seul input
+            max_attempts = 15  # 15 tentatives de 2 secondes = 30 secondes max
+            
+            for attempt in range(max_attempts):
+                # Chercher d'abord les inputs avec maxlength="1" (format code par chiffre)
+                inputs_maxlength_1 = await self.page.locator('input[type="text"][maxlength="1"]').all()
+                if len(inputs_maxlength_1) >= 4:  # Au moins 4 inputs = probablement un code
+                    print(f"   ✅ Trouvé {len(inputs_maxlength_1)} inputs avec maxlength='1' (format code par chiffre)")
+                    code_inputs = inputs_maxlength_1[:6]  # Prendre les 6 premiers (code à 6 chiffres)
+                    break
+                
+                # Chercher un input unique avec maxlength="6" ou "8"
+                code_input_selectors = [
+                    'input[maxlength="6"]',
+                    'input[maxlength="8"]',
+                    'input[name="code"]',
+                    'input[placeholder*="code"]',
+                    'input[placeholder*="Code"]',
+                ]
+                
+                for selector in code_input_selectors:
+                    input_elem = self.page.locator(selector)
+                    count = await input_elem.count()
+                    if count > 0:
+                        # Vérifier que c'est bien le champ de code
+                        placeholder = await input_elem.first.get_attribute('placeholder') or ''
+                        if 'code' in placeholder.lower() or selector.startswith('input[maxlength'):
+                            code_inputs = [input_elem.first]  # Un seul input
+                            print(f"   ✅ Champ de code trouvé avec sélecteur: {selector}")
+                            break
+                
+                if code_inputs:
+                    break
+                
+                if attempt % 3 == 0:  # Log tous les 3 essais
+                    print(f"   Tentative {attempt + 1}/{max_attempts}...")
+                await asyncio.sleep(2)
+            
+            if not code_inputs:
+                print("❌ ÉTAPE 11: Champ de code non trouvé")
+                return False
+            
+            print(f"✅ ÉTAPE 11: Champ(s) de code trouvé(s) - {len(code_inputs)} input(s)")
+            print("   Récupération du code depuis Gmail...")
+            
+            # Récupérer le code depuis Gmail
+            print(f"\n📍 ÉTAPE 12: Récupération du code depuis Gmail...")
+            activation_code = None
+            for attempt in range(15):  # 15 tentatives de 3 secondes = 45 secondes max
+                activation_code = self.get_activation_code_from_gmail()
+                if activation_code:
+                    break
+                if attempt < 14:  # Ne pas attendre après la dernière tentative
+                    await asyncio.sleep(3)
+                    print(f"   Tentative {attempt + 1}/15 de récupération du code...")
+            
+            if not activation_code:
+                print("❌ ÉTAPE 12: Code d'activation non trouvé dans Gmail")
+                print("💡 Vérifiez votre boîte mail et entrez le code manuellement")
+                print("⏳ Attente de 60 secondes pour saisie manuelle...")
+                # Attendre que l'utilisateur entre le code manuellement (timeout 60s)
+                await asyncio.sleep(60)
+            else:
+                print(f"✅ ÉTAPE 12: Code trouvé: {activation_code}")
+                print(f"📍 ÉTAPE 13: Saisie du code...")
+                
+                # Si plusieurs inputs (format un chiffre par input)
+                if len(code_inputs) > 1:
+                    print(f"   Format multi-inputs détecté: {len(code_inputs)} inputs")
+                    # Si le code fait 4 chiffres mais qu'on a 6 inputs, le compléter avec des zéros ou utiliser les 4 premiers
+                    code_to_use = activation_code[:len(code_inputs)]
+                    # Si code à 4 chiffres mais 6 inputs, répéter ou ajouter des zéros au début
+                    if len(code_to_use) == 4 and len(code_inputs) == 6:
+                        # Essayer de remplir les 4 premiers inputs avec le code
+                        code_to_use = activation_code
+                    
+                    for i, digit in enumerate(code_to_use[:len(code_inputs)]):
+                        try:
+                            await code_inputs[i].fill(digit)
+                            await asyncio.sleep(0.2)  # Petit délai entre chaque chiffre
+                            print(f"      Chiffre {i+1}: {digit}")
+                        except Exception as e:
+                            print(f"   Erreur saisie chiffre {i+1}: {e}")
+                else:
+                    # Un seul input (format complet)
+                    print(f"   Format input unique")
+                    await code_inputs[0].fill(activation_code)
+                
+                await asyncio.sleep(0.5)
+                print(f"✅ ÉTAPE 13: Code saisi")
+                
+                # Cliquer sur le bouton de validation
+                submit_button_selectors = [
+                    'button:has-text("Valider")',
+                    'button:has-text("Continuer")',
+                    'button:has-text("Confirmer")',
+                    'button[type="submit"]',
+                ]
+                
+                for selector in submit_button_selectors:
+                    button = self.page.locator(selector)
+                    if await button.count() > 0:
+                        await button.click()
+                        break
+                else:
+                    await self.page.keyboard.press('Enter')
+                
+                await asyncio.sleep(10)  # Attendre plus longtemps après la saisie du code
+            
+            # Vérifier que la connexion a réussi
+            print("🔍 Vérification de la connexion...")
+            await asyncio.sleep(10)  # Attendre plus longtemps avant de vérifier
+            current_url = self.page.url
+            print(f"📍 URL actuelle: {current_url}")
+            
+            if "sign/in" not in current_url and "jinka.fr" in current_url:
+                print("✅ Connexion réussie !")
                 return True
             else:
-                print("❌ Bouton Google non trouvé")
-                return False
+                print("⚠️  Vérification supplémentaire...")
+                await asyncio.sleep(10)  # Attendre plus longtemps avant la vérification supplémentaire
+                current_url = self.page.url
+                print(f"📍 URL après vérification: {current_url}")
+                if "sign/in" not in current_url:
+                    print("✅ Connexion réussie !")
+                    return True
+                else:
+                    print("❌ Connexion échouée - toujours sur la page de connexion")
+                    print("💡 Vérifiez que le code a été correctement saisi")
+                    return False
                 
+        except asyncio.TimeoutError as e:
+            print(f"\n❌ TIMEOUT: La connexion a pris trop de temps")
+            print(f"   Erreur: {e}")
+            print(f"   Vérifiez les logs ci-dessus pour voir à quelle étape ça a bloqué")
+            return False
         except Exception as e:
-            print(f"❌ Erreur de connexion: {e}")
+            print(f"\n❌ ERREUR GÉNÉRALE lors de la connexion")
+            print(f"   Type d'erreur: {type(e).__name__}")
+            print(f"   Message: {e}")
+            print(f"   Vérifiez les logs ci-dessus pour voir à quelle étape ça a échoué")
+            import traceback
+            print("\n📋 Traceback complet:")
+            traceback.print_exc()
             return False
     
     async def scrape_alert_page(self, alert_url):
@@ -341,6 +792,10 @@ class JinkaScraper:
                         pass
                 
                 if caracteristiques_text:
+                    # PRIORITÉ 1: Chercher RDC d'abord (car peut être mal interprété comme étage)
+                    if re.search(r'\bRDC\b|rez-de-chaussée|rez de chaussée|rez-de-jardin', caracteristiques_text, re.IGNORECASE):
+                        return "RDC"
+                    
                     # Patterns pour trouver l'étage dans les caractéristiques (plus complets)
                     etage_patterns = [
                         r'(\d+)(?:er?|e|ème?)\s*étage',
@@ -350,21 +805,24 @@ class JinkaScraper:
                         r'étage[:\s]+(\d+)',
                         r'(\d+)\s*étage',  # Format simple "2 étage"
                         r'étage\s*:\s*(\d+)',  # Format "étage: 2"
-                        r'(\d+)(?:er|e|ème)',  # Format "2e" ou "2ème" sans "étage"
                     ]
                     
                     for pattern in etage_patterns:
                         matches = re.findall(pattern, caracteristiques_text, re.IGNORECASE)
                         if matches:
                             etage_num = matches[0]
-                            if etage_num == '1':
-                                return "1er étage"
-                            else:
-                                return f"{etage_num}e étage"
-                    
-                    # Chercher RDC dans les caractéristiques
-                    if re.search(r'RDC|rez-de-chaussée|rez de chaussée', caracteristiques_text, re.IGNORECASE):
-                        return "RDC"
+                            # Vérifier le contexte pour éviter les faux positifs (arrondissements)
+                            match_obj = re.search(pattern, caracteristiques_text, re.IGNORECASE)
+                            if match_obj:
+                                start = max(0, match_obj.start() - 20)
+                                end = min(len(caracteristiques_text), match_obj.end() + 20)
+                                context = caracteristiques_text[start:end].lower()
+                                # Exclure si c'est un arrondissement
+                                if not any(word in context for word in ['arrondissement', 'arr.', 'arr ', 'paris']):
+                                    if etage_num == '1':
+                                        return "1er étage"
+                                    else:
+                                        return f"{etage_num}e étage"
             except Exception as e:
                 print(f"  ⚠️ Erreur extraction étage depuis caractéristiques: {e}")
                 pass  # Continuer si l'extraction depuis caractéristiques échoue
@@ -372,6 +830,10 @@ class JinkaScraper:
             # Chercher dans toute la page si pas trouvé dans caractéristiques
             page_content = await self.page.content()
             page_text = await self.page.text_content('body') or ""
+            
+            # PRIORITÉ 1: Chercher RDC d'abord (car peut être mal interprété comme étage)
+            if re.search(r'\bRDC\b|rez-de-chaussée|rez de chaussée|rez-de-jardin', page_text, re.IGNORECASE):
+                return "RDC"
             
             # Patterns pour trouver l'étage (plus robustes)
             # Priorité aux patterns avec "étage" explicite
@@ -389,11 +851,19 @@ class JinkaScraper:
                 matches = re.findall(pattern, page_content, re.IGNORECASE)
                 if matches:
                     etage_num = matches[0]
-                    # Formater comme "4e étage" ou "1er étage"
-                    if etage_num == '1':
-                        return "1er étage"
-                    else:
-                        return f"{etage_num}e étage"
+                    # Vérifier le contexte pour éviter les faux positifs (arrondissements)
+                    match_obj = re.search(pattern, page_text, re.IGNORECASE)
+                    if match_obj:
+                        start = max(0, match_obj.start() - 30)
+                        end = min(len(page_text), match_obj.end() + 30)
+                        context = page_text[start:end].lower()
+                        # Exclure si c'est un arrondissement ou une zone géographique
+                        if not any(word in context for word in ['arrondissement', 'arr.', 'arr ', 'paris', '750']):
+                            # Formater comme "4e étage" ou "1er étage"
+                            if etage_num == '1':
+                                return "1er étage"
+                            else:
+                                return f"{etage_num}e étage"
             
             # Chercher les formats courts comme "2e" dans la section Caractéristiques uniquement
             # (pour éviter les faux positifs comme "10e arrondissement")
@@ -424,17 +894,19 @@ class JinkaScraper:
                                     context = char_text[start:end].lower()
                                     # Si le contexte suggère un étage (pas un arrondissement ou autre)
                                     if any(word in context for word in ['étage', 'ét.', 'ét', 'ascenseur', 'rdc', 'rez']):
-                                        # Éviter les faux positifs comme "10e arrondissement"
-                                        if not any(word in context for word in ['arrondissement', 'arr.', 'arr ']):
-                                            if etage_num == '1':
-                                                return "1er étage"
-                                            else:
-                                                return f"{etage_num}e étage"
+                                        # Éviter les faux positifs comme "10e arrondissement", "Paris 20e", "75020"
+                                        if not any(word in context for word in ['arrondissement', 'arr.', 'arr ', 'paris', '750']):
+                                            # Exclure les grands nombres qui sont probablement des arrondissements
+                                            if int(etage_num) <= 10:  # Les étages normaux sont <= 10
+                                                if etage_num == '1':
+                                                    return "1er étage"
+                                                else:
+                                                    return f"{etage_num}e étage"
             except:
                 pass
             
-            # Chercher RDC
-            if re.search(r'RDC|rez-de-chaussée|rez de chaussée', page_content, re.IGNORECASE):
+            # Chercher RDC (dernier recours)
+            if re.search(r'\bRDC\b|rez-de-chaussée|rez de chaussée|rez-de-jardin', page_text, re.IGNORECASE):
                 return "RDC"
             
             return None
@@ -790,7 +1262,7 @@ class JinkaScraper:
             return {"streets": [], "metros": [], "quartier": "Non identifié", "error": str(e)}
     
     def identify_quartier(self, streets, metros):
-        """Identifie le quartier basé sur les rues et métros trouvés"""
+        """Identifie le quartier basé sur les rues et métros trouvés - TOUS les arrondissements"""
         # Quartiers du 19e avec leurs rues caractéristiques
         quartiers_19e = {
             "Buttes-Chaumont": ["Rue Botzaris", "Avenue Secrétan", "Rue Manin", "Rue de Crimée", "Botzaris", "Secrétan", "Manin", "Crimée"],
@@ -801,19 +1273,58 @@ class JinkaScraper:
             "Canal de l'Ourcq": ["Quai de la Loire", "Quai de la Seine", "Rue de l'Ourcq", "Loire", "Seine", "Ourcq"]
         }
         
-        # Métros caractéristiques
+        # Quartiers du 20e avec leurs rues caractéristiques
+        quartiers_20e = {
+            "Ménilmontant": ["Rue de Ménilmontant", "Rue Oberkampf", "Rue de la Folie-Méricourt", "Rue de la Roquette", "Ménilmontant", "Oberkampf", "Folie-Méricourt", "Roquette"],
+            "Père-Lachaise": ["Rue de la Roquette", "Rue de Ménilmontant", "Rue du Repos", "Rue des Pyrénées", "Rue Père-Lachaise", "Roquette", "Repos", "Père-Lachaise"],
+            "Belleville (20e)": ["Rue de Belleville", "Rue des Pyrénées", "Rue de Ménilmontant", "Belleville", "Pyrénées"],
+            "Charonne": ["Rue de Charonne", "Rue du Faubourg Saint-Antoine", "Charonne", "Faubourg Saint-Antoine"],
+            "Gambetta": ["Place Gambetta", "Rue des Pyrénées", "Avenue Gambetta", "Gambetta"]
+        }
+        
+        # Quartiers du 11e avec leurs rues caractéristiques
+        quartiers_11e = {
+            "Goncourt": ["Rue Oberkampf", "Rue de la Folie-Méricourt", "Rue Jean-Pierre Timbaud", "Oberkampf", "Folie-Méricourt", "Timbaud"],
+            "République": ["Place de la République", "Boulevard Voltaire", "Rue du Faubourg du Temple", "République", "Voltaire"],
+            "Nation": ["Place de la Nation", "Avenue du Trône", "Rue du Faubourg Saint-Antoine", "Nation", "Trône"],
+            "Bastille": ["Place de la Bastille", "Rue de la Roquette", "Boulevard Richard-Lenoir", "Bastille", "Roquette", "Richard-Lenoir"]
+        }
+        
+        # Quartiers du 10e avec leurs rues caractéristiques
+        quartiers_10e = {
+            "Rue des Boulets": ["Rue des Boulets", "Rue de Montreuil", "Boulets", "Montreuil"],
+            "Gare du Nord": ["Rue du Faubourg Saint-Denis", "Boulevard de Magenta", "Faubourg Saint-Denis", "Magenta"],
+            "Canal Saint-Martin": ["Quai de Valmy", "Quai de Jemmapes", "Rue du Faubourg du Temple", "Valmy", "Jemmapes"]
+        }
+        
+        # Combiner tous les quartiers
+        all_quartiers = {}
+        all_quartiers.update(quartiers_19e)
+        all_quartiers.update(quartiers_20e)
+        all_quartiers.update(quartiers_11e)
+        all_quartiers.update(quartiers_10e)
+        
+        # Métros caractéristiques par quartier
         metros_quartiers = {
             "Place des Fêtes": ["Place des Fêtes", "Place des Fetes"],
             "Jourdain": ["Jourdain"],
             "Pyrénées": ["Pyrénées", "Pyrenees"],
-            "Buttes-Chaumont": ["Botzaris", "Crimée", "Crimée"],
-            "Belleville": ["Belleville", "Couronnes"]
+            "Buttes-Chaumont": ["Botzaris", "Crimée"],
+            "Belleville": ["Belleville", "Couronnes"],
+            "Ménilmontant": ["Ménilmontant", "Père-Lachaise", "Gambetta", "Philippe-Auguste"],
+            "Père-Lachaise": ["Père-Lachaise", "Gambetta", "Philippe-Auguste", "Ménilmontant"],
+            "Goncourt": ["Goncourt", "Parmentier", "République"],
+            "République": ["République", "Goncourt", "Parmentier"],
+            "Nation": ["Nation", "Faidherbe-Chaligny"],
+            "Bastille": ["Bastille", "Ledru-Rollin", "Bréguet-Sabin"],
+            "Rue des Boulets": ["Rue des Boulets", "Nation", "Faidherbe-Chaligny"]
         }
         
         # Compter les correspondances
         quartier_scores = {}
         
-        for quartier, rues_quartier in quartiers_19e.items():
+        # Score basé sur les rues
+        for quartier, rues_quartier in all_quartiers.items():
             score = 0
             for rue in streets:
                 for rue_quartier in rues_quartier:
@@ -821,7 +1332,7 @@ class JinkaScraper:
                         score += 1
             quartier_scores[quartier] = score
         
-        # Ajouter les scores des métros
+        # Ajouter les scores des métros (score plus élevé car plus fiable)
         for quartier, metros_quartier in metros_quartiers.items():
             for metro in metros:
                 for metro_quartier in metros_quartier:
@@ -1089,16 +1600,86 @@ class JinkaScraper:
                                     };
                                 }).filter(img => {
                                     // Garder toutes les images avec une URL valide
-                                    // Y compris celles avec display="none" et alt="preloader" si elles ont une URL de photo valide
                                     if (!img.src) return false;
-                                    if (img.src.toLowerCase().includes('placeholder')) return false;
                                     
-                                    // Patterns de vraies photos d'appartements
-                                    const photoPatterns = ['loueragile', 'upload_pro_ad', 'media.apimo.pro', 'studio-net.fr', 'images.century21.fr', 'biens', 'apartement', 'transopera', 'staticlbi', 'uploadcaregdc', 'uploadcare', 's3.amazonaws.com', 'googleusercontent.com', 'cdn.safti.fr', 'safti.fr', 'paruvendu.fr', 'immo-facile.com', 'mms.seloger.com', 'seloger.com'];
-                                    const hasValidPhotoPattern = photoPatterns.some(pattern => img.src.toLowerCase().includes(pattern));
+                                    const srcLower = img.src.toLowerCase();
+                                    const altLower = img.alt.toLowerCase();
                                     
-                                    // Si c'est une vraie photo, on la garde même si cachée ou avec alt="preloader"
-                                    return hasValidPhotoPattern;
+                                    // Vérifier si l'image est visible (pas display:none et position non-0,0)
+                                    const isVisible = img.display !== 'none' && (img.top !== 0 || img.left !== 0);
+                                    const hasGoodDimensions = img.width > 200 && img.height > 200;
+                                    
+                                    // 1. Exclure les placeholders explicites (toujours)
+                                    if (srcLower.includes('placeholder')) return false;
+                                    
+                                    // 2. LOGIQUE AMÉLIORÉE : Accepter les images VISIBLES même si FNAIM
+                                    // Si l'image est visible ET a de bonnes dimensions, c'est probablement une vraie photo
+                                    if (isVisible && hasGoodDimensions) {
+                                        // Accepter les images visibles même si elles utilisent FNAIM
+                                        // Car elles sont affichées sur la page
+                                        return true;
+                                    }
+                                    
+                                    // 3. Pour les images cachées ou petites, filtrer les placeholders FNAIM
+                                    const placeholderUrlPatterns = [
+                                        'imagesv2.fnaim.fr/images1/img/',  // Placeholder FNAIM
+                                        'placeholder',
+                                        'placeholder.jpg',
+                                        'placeholder.png',
+                                        'no-image',
+                                        'default-image',
+                                        'missing-image',
+                                    ];
+                                    const isPlaceholderUrl = placeholderUrlPatterns.some(pattern => srcLower.includes(pattern));
+                                    if (isPlaceholderUrl && !isVisible) {
+                                        // Si c'est un placeholder ET que l'image n'est pas visible, exclure
+                                        return false;
+                                    }
+                                    
+                                    // 4. Exclure les images avec alt="preloader" SI cachées ET placeholder FNAIM
+                                    if ((altLower.includes('preloader') || altLower === 'preloader') && 
+                                        srcLower.includes('imagesv2.fnaim.fr/images1/img/') && 
+                                        !isVisible) {
+                                        return false;
+                                    }
+                                    
+                                    // 5. Détecter les vraies photos d'appartements (patterns étendus)
+                                    const photoPatterns = [
+                                        'loueragile', 
+                                        'upload_pro_ad', 
+                                        'media.apimo.pro', 
+                                        'studio-net.fr', 
+                                        'images.century21.fr', 
+                                        'biens', 
+                                        'apartement', 
+                                        'transopera', 
+                                        'staticlbi', 
+                                        'uploadcaregdc', 
+                                        'uploadcare', 
+                                        's3.amazonaws.com', 
+                                        'googleusercontent.com', 
+                                        'cdn.safti.fr', 
+                                        'safti.fr', 
+                                        'paruvendu.fr', 
+                                        'immo-facile.com', 
+                                        'mms.seloger.com', 
+                                        'seloger.com',
+                                        'api.jinka.fr/apiv2/media/imgsrv',  // Proxy Jinka pour vraies photos
+                                        'photos.ubif',  // Photos originales via proxy Jinka
+                                        'res.cloudinary.com',  // Cloudinary (souvent utilisé pour photos immo)
+                                        'cloudinary.com',
+                                        'photos.',  // Pattern générique pour photos (mais pas "placeholder")
+                                        'imagesv2.fnaim.fr',  // Accepter FNAIM si image visible avec bonnes dimensions
+                                    ];
+                                    const hasValidPhotoPattern = photoPatterns.some(pattern => srcLower.includes(pattern));
+                                    
+                                    // 6. Si c'est une vraie photo (pattern valide), on la garde
+                                    // OU si c'est une image visible avec bonnes dimensions (même FNAIM)
+                                    if (hasValidPhotoPattern || (isVisible && hasGoodDimensions)) {
+                                        return true;
+                                    }
+                                    
+                                    return false;
                                 });
                             }
                         ''')
@@ -1112,12 +1693,75 @@ class JinkaScraper:
                                     continue
                                 
                                 # Vérifier que c'est une vraie photo (pas un logo)
-                                if 'logo' in src_to_use.lower() or 'source_logos' in src_to_use.lower():
+                                src_lower = src_to_use.lower()
+                                alt_lower = img_data.get('alt', '').lower()
+                                
+                                if 'logo' in src_lower or 'source_logos' in src_lower:
                                     continue
                                 
+                                # Vérifier si l'image est visible (position non-0,0 et bonnes dimensions)
+                                position_top = img_data.get('position_top', 0)
+                                position_left = img_data.get('position_left', 0)
+                                width = img_data.get('width', 0)
+                                height = img_data.get('height', 0)
+                                is_visible = (position_top != 0 or position_left != 0)
+                                has_good_dimensions = width > 200 and height > 200
+                                
+                                # LOGIQUE AMÉLIORÉE : Accepter les images VISIBLES même si FNAIM
+                                # Si l'image est visible ET a de bonnes dimensions, c'est probablement une vraie photo
+                                if is_visible and has_good_dimensions:
+                                    # Accepter les images visibles même si elles utilisent FNAIM
+                                    # Car elles sont affichées sur la page
+                                    pass  # Continuer pour ajouter la photo
+                                else:
+                                    # Pour les images cachées ou petites, filtrer les placeholders FNAIM
+                                    placeholder_patterns = [
+                                        'imagesv2.fnaim.fr/images1/img/',  # Placeholder FNAIM
+                                        'placeholder',
+                                        'placeholder.jpg',
+                                        'no-image',
+                                        'default-image',
+                                    ]
+                                    if any(pattern in src_lower for pattern in placeholder_patterns):
+                                        continue
+                                    
+                                    # Si alt="preloader" ET placeholder FNAIM ET pas visible, exclure
+                                    if 'preloader' in alt_lower and 'imagesv2.fnaim.fr/images1/img/' in src_lower:
+                                        continue
+                                
                                 # Accepter les URLs de vraies photos d'appartements (patterns étendus)
-                                photo_patterns = ['loueragile', 'upload_pro_ad', 'media.apimo.pro', 'studio-net.fr', 'images.century21.fr', 'biens', 'apartement', 'transopera', 'staticlbi', 'uploadcaregdc', 'uploadcare', 's3.amazonaws.com', 'googleusercontent.com', 'cdn.safti.fr', 'safti.fr', 'paruvendu.fr', 'immo-facile.com', 'mms.seloger.com', 'seloger.com']
-                                if not any(pattern in src_to_use.lower() for pattern in photo_patterns):
+                                # OU accepter les images visibles avec bonnes dimensions (même FNAIM)
+                                photo_patterns = [
+                                    'loueragile', 
+                                    'upload_pro_ad', 
+                                    'media.apimo.pro', 
+                                    'studio-net.fr', 
+                                    'images.century21.fr', 
+                                    'biens', 
+                                    'apartement', 
+                                    'transopera', 
+                                    'staticlbi', 
+                                    'uploadcaregdc', 
+                                    'uploadcare', 
+                                    's3.amazonaws.com', 
+                                    'googleusercontent.com', 
+                                    'cdn.safti.fr', 
+                                    'safti.fr', 
+                                    'paruvendu.fr', 
+                                    'immo-facile.com', 
+                                    'mms.seloger.com', 
+                                    'seloger.com',
+                                    'api.jinka.fr/apiv2/media/imgsrv',  # Proxy Jinka
+                                    'photos.ubif',  # Photos via proxy Jinka
+                                    'res.cloudinary.com',
+                                    'cloudinary.com',
+                                    'photos.',
+                                    'imagesv2.fnaim.fr',  # Accepter FNAIM si image visible
+                                ]
+                                has_valid_pattern = any(pattern in src_lower for pattern in photo_patterns)
+                                
+                                # Accepter si pattern valide OU si image visible avec bonnes dimensions
+                                if not has_valid_pattern and not (is_visible and has_good_dimensions):
                                     continue
                                 
                                 # Vérifier les dimensions de l'image (exclure les très petites comme les logos)
@@ -1253,12 +1897,72 @@ class JinkaScraper:
                         data_src = await img.get_attribute('data-src')
                         src_to_use = src or data_src
                         
-                        # Accepter les URLs de vraies photos d'appartements (patterns étendus)
-                        photo_patterns = ['loueragile', 'upload_pro_ad', 'media.apimo.pro', 'studio-net.fr', 'images.century21.fr', 'biens', 'apartement', 'transopera', 'staticlbi', 'uploadcaregdc', 'uploadcare', 's3.amazonaws.com', 'googleusercontent.com', 'cdn.safti.fr', 'safti.fr', 'paruvendu.fr', 'immo-facile.com', 'mms.seloger.com', 'seloger.com']
-                        if src_to_use and any(pattern in src_to_use.lower() for pattern in photo_patterns):
-                            # Exclure les logos
-                            if 'logo' in src_to_use.lower() or 'source_logos' in src_to_use.lower() or 'preloader' in src_to_use.lower():
+                        # Vérifier si l'image est visible et a de bonnes dimensions
+                        src_lower = src_to_use.lower()
+                        alt_attr = await img.get_attribute('alt') or ''
+                        alt_lower = alt_attr.lower()
+                        
+                        # Vérifier la visibilité réelle de l'image
+                        is_visible_element = display != 'none'
+                        bounding_box = await img.bounding_box()
+                        is_in_viewport = bounding_box is not None and bounding_box['width'] > 0 and bounding_box['height'] > 0
+                        is_visible = is_visible_element and is_in_viewport
+                        
+                        # LOGIQUE AMÉLIORÉE : Accepter les images VISIBLES même si FNAIM
+                        # Si l'image est visible ET a de bonnes dimensions, c'est probablement une vraie photo
+                        if is_visible and width > 200 and height > 200:
+                            # Accepter les images visibles même si elles utilisent FNAIM
+                            # Car elles sont affichées sur la page
+                            pass  # Continuer pour ajouter la photo
+                        else:
+                            # Pour les images cachées ou petites, filtrer les placeholders FNAIM
+                            placeholder_patterns = [
+                                'imagesv2.fnaim.fr/images1/img/',  # Placeholder FNAIM
+                                'placeholder',
+                                'placeholder.jpg',
+                                'no-image',
+                                'default-image',
+                            ]
+                            if any(pattern in src_lower for pattern in placeholder_patterns):
                                 continue
+                            
+                            # Si alt="preloader" ET placeholder FNAIM ET pas visible, exclure
+                            if 'preloader' in alt_lower and 'imagesv2.fnaim.fr/images1/img/' in src_lower:
+                                continue
+                        
+                        # Accepter les URLs de vraies photos d'appartements (patterns étendus)
+                        photo_patterns = [
+                            'loueragile', 
+                            'upload_pro_ad', 
+                            'media.apimo.pro', 
+                            'studio-net.fr', 
+                            'images.century21.fr', 
+                            'biens', 
+                            'apartement', 
+                            'transopera', 
+                            'staticlbi', 
+                            'uploadcaregdc', 
+                            'uploadcare', 
+                            's3.amazonaws.com', 
+                            'googleusercontent.com', 
+                            'cdn.safti.fr', 
+                            'safti.fr', 
+                            'paruvendu.fr', 
+                            'immo-facile.com', 
+                            'mms.seloger.com', 
+                            'seloger.com',
+                            'api.jinka.fr/apiv2/media/imgsrv',  # Proxy Jinka
+                            'photos.ubif',  # Photos via proxy Jinka
+                            'res.cloudinary.com',
+                            'cloudinary.com',
+                            'photos.',
+                            'imagesv2.fnaim.fr',  # Accepter FNAIM si image visible
+                        ]
+                        if src_to_use and any(pattern in src_lower for pattern in photo_patterns):
+                            # Exclure les logos (mais pas si image visible avec bonnes dimensions)
+                            if 'logo' in src_lower or 'source_logos' in src_lower:
+                                if not (is_visible and width > 200 and height > 200):
+                                    continue
                             
                             # Formater la description complète avec toutes les infos
                             alt = self.format_photo_description(surface, prix_m2, etage, style)
@@ -1290,26 +1994,92 @@ class JinkaScraper:
                             if not src_to_use:
                                 continue
                             
-                            # Filtrer par URL (patterns étendus)
-                            photo_patterns = ['loueragile', 'upload_pro_ad', 'media.apimo.pro', 'studio-net.fr', 'images.century21.fr', 'biens', 'apartement', 'transopera', 'staticlbi', 'uploadcaregdc', 'uploadcare', 's3.amazonaws.com', 'googleusercontent.com', 'cdn.safti.fr', 'safti.fr', 'paruvendu.fr', 'immo-facile.com', 'mms.seloger.com', 'seloger.com']
-                            if not any(pattern in src_to_use.lower() for pattern in photo_patterns):
-                                continue
-                            
-                            # Exclure les logos et preloaders
-                            if 'logo' in src_to_use.lower() or 'source_logos' in src_to_use.lower() or 'preloader' in src_to_use.lower():
-                                continue
-                            
                             # Vérifier les dimensions si l'image est chargée
                             width = 0
                             height = 0
                             try:
                                 width = await img.evaluate('el => el.naturalWidth || el.width || 0')
                                 height = await img.evaluate('el => el.naturalHeight || el.height || 0')
-                                
-                                if width > 0 and height > 0 and (width < 200 or height < 200):
-                                    continue
                             except:
                                 pass  # Si l'image n'est pas encore chargée, on garde quand même
+                            
+                            # Vérifier si l'image est visible et a de bonnes dimensions
+                            src_lower = src_to_use.lower()
+                            alt_attr = await img.get_attribute('alt') or ''
+                            alt_lower = alt_attr.lower()
+                            
+                            # Vérifier la visibilité et les dimensions
+                            try:
+                                bounding_box = await img.bounding_box()
+                                is_visible = bounding_box is not None and bounding_box['width'] > 0 and bounding_box['height'] > 0
+                            except:
+                                is_visible = False
+                            
+                            # LOGIQUE AMÉLIORÉE : Accepter les images VISIBLES même si FNAIM
+                            if is_visible and width > 200 and height > 200:
+                                # Accepter les images visibles même si elles utilisent FNAIM
+                                pass  # Continuer pour ajouter la photo
+                            else:
+                                # Pour les images cachées ou petites, filtrer les placeholders FNAIM
+                                placeholder_patterns = [
+                                    'imagesv2.fnaim.fr/images1/img/',  # Placeholder FNAIM
+                                    'placeholder',
+                                    'placeholder.jpg',
+                                    'no-image',
+                                    'default-image',
+                                ]
+                                if any(pattern in src_lower for pattern in placeholder_patterns):
+                                    continue
+                                
+                                # Si alt="preloader" ET placeholder FNAIM ET pas visible, exclure
+                                if 'preloader' in alt_lower and 'imagesv2.fnaim.fr/images1/img/' in src_lower:
+                                    continue
+                            
+                            # Filtrer par URL (patterns étendus) OU accepter si visible avec bonnes dimensions
+                            photo_patterns = [
+                                'loueragile', 
+                                'upload_pro_ad', 
+                                'media.apimo.pro', 
+                                'studio-net.fr', 
+                                'images.century21.fr', 
+                                'biens', 
+                                'apartement', 
+                                'transopera', 
+                                'staticlbi', 
+                                'uploadcaregdc', 
+                                'uploadcare', 
+                                's3.amazonaws.com', 
+                                'googleusercontent.com', 
+                                'cdn.safti.fr', 
+                                'safti.fr', 
+                                'paruvendu.fr', 
+                                'immo-facile.com', 
+                                'mms.seloger.com', 
+                                'seloger.com',
+                                'api.jinka.fr/apiv2/media/imgsrv',  # Proxy Jinka
+                                'photos.ubif',  # Photos via proxy Jinka
+                                'res.cloudinary.com',
+                                'cloudinary.com',
+                                'photos.',
+                                'imagesv2.fnaim.fr',  # Accepter FNAIM si image visible
+                            ]
+                            has_valid_pattern = any(pattern in src_lower for pattern in photo_patterns)
+                            
+                            # Accepter si pattern valide OU si image visible avec bonnes dimensions
+                            if not has_valid_pattern and not (is_visible and width > 200 and height > 200):
+                                continue
+                            
+                            # Exclure les logos (mais pas si image visible avec bonnes dimensions)
+                            if 'logo' in src_lower or 'source_logos' in src_lower:
+                                if not (is_visible and width > 200 and height > 200):
+                                    continue
+                            
+                            # Vérifier les dimensions finales (exclure les très petites sauf si visibles)
+                            if width > 0 and height > 0:
+                                if width < 200 or height < 200:
+                                    # Si l'image est visible malgré sa petite taille, on l'accepte quand même
+                                    if not is_visible:
+                                        continue
                             
                             photos.append({
                                 'url': src_to_use,

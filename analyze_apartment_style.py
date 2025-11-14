@@ -26,37 +26,32 @@ class ApartmentStyleAnalyzer:
         self.openai_base_url = "https://api.openai.com/v1"
         self.text_ai_analyzer = TextAIAnalyzer()
         self.cuisine_text_extractor = CuisineTextExtractor()
-        self.use_text_analysis = True  # Activer l'analyse texte IA
+        self.use_text_analysis_style = False  # DÉSACTIVÉ pour le STYLE: Utiliser uniquement l'analyse des photos (plus fiable)
+        self.use_text_analysis_cuisine = True  # ACTIVÉ pour la CUISINE: Analyse textuelle + photos
         self.cache = get_cache()
         
     def analyze_apartment_photos_from_data(self, apartment_data):
         """Analyse les photos directement depuis les données d'appartement
-        PRIORITÉ: Analyse textuelle pour mention explicite + caractéristiques
-        Si non trouvé → analyse visuelle sur top 5 photos avec indices précis
+        STYLE: 100% analyse photos (analyse textuelle désactivée pour éviter erreurs)
+        CUISINE: Analyse textuelle + photos (combinée)
         """
         description = apartment_data.get('description', '')
         caracteristiques = apartment_data.get('caracteristiques', '')
         photos = apartment_data.get('photos', [])
         
-        # PRIORITÉ 1: Analyser le texte d'abord (IA intelligente)
+        # ANALYSE TEXTUELLE pour la CUISINE uniquement (pas pour le style)
         text_analysis = None
-        if self.use_text_analysis:
-            text_analysis = self.analyze_text(description, caracteristiques)
-            
-            # Si mention explicite + caractéristiques détectées → confiance 100%
-            if text_analysis and text_analysis.get('style'):
-                style_data = text_analysis.get('style', {})
-                # Si confiance = 1.0 (100%), on retourne immédiatement
-                if style_data.get('confidence', 0) >= 1.0:
-                    return {
-                        'style': style_data,
-                        'cuisine': text_analysis.get('cuisine', {}),
-                        'luminosite': {'type': 'inconnue', 'confidence': 0, 'score': 0},
-                        'photos_analyzed': 0,
-                        'method': 'text_explicit_100pc'
-                    }
+        if self.use_text_analysis_cuisine:
+            # Analyser uniquement la cuisine depuis le texte
+            cuisine_result = self.cuisine_text_extractor.extract_cuisine_from_text(description, caracteristiques)
+            if cuisine_result:
+                text_analysis = {
+                    'cuisine': cuisine_result,
+                    'style': None  # Style désactivé dans l'analyse textuelle
+                }
         
-        # PRIORITÉ 2: Si pas de mention explicite → analyser les photos
+        # STYLE: Analyser UNIQUEMENT depuis les photos (analyse textuelle désactivée)
+        # L'analyse textuelle était trop permissive et causait des erreurs de classification
         photo_analysis = None
         if photos:
             # Prendre les 5 premières photos pour analyse détaillée (suffisant pour détecter le style)
@@ -96,27 +91,27 @@ class ApartmentStyleAnalyzer:
                 if analyses:
                     photo_analysis = self.aggregate_analyses(analyses)
         
-        # Si on arrive ici, pas de mention explicite trouvée dans le texte
-        # Utiliser l'analyse visuelle comme source principale
+        # STYLE: Utiliser l'analyse visuelle uniquement (100% photos, pas de texte)
+        # CUISINE: Combiner analyse photos + texte si disponible
         if photo_analysis:
-            return {
+            result = {
                 'style': photo_analysis.get('style', {}),
                 'cuisine': photo_analysis.get('cuisine', {}),
                 'luminosite': photo_analysis.get('luminosite', {}),
                 'photos_analyzed': photo_analysis.get('photos_analyzed', 0),
                 'method': 'photo_analysis'
             }
+            
+            # Si on a une analyse textuelle pour la cuisine, on peut l'utiliser en complément
+            # (mais le style vient toujours des photos uniquement)
+            if text_analysis and text_analysis.get('cuisine'):
+                # La cuisine peut être combinée texte + photos si nécessaire
+                # Pour l'instant, on garde celle des photos par défaut
+                pass
+            
+            return result
         
-        # Fallback: utiliser texte même si pas 100% confiance
-        if text_analysis:
-            return {
-                'style': text_analysis.get('style', {}),
-                'cuisine': text_analysis.get('cuisine', {}),
-                'luminosite': {'type': 'inconnue', 'confidence': 0, 'score': 0},
-                'photos_analyzed': 0,
-                'method': 'text_fallback'
-            }
-        
+        # Pas de photos disponibles → retourner None (pas de fallback texte pour le style)
         return None
     
     def analyze_text(self, description: str, caracteristiques: str = ""):
@@ -439,13 +434,19 @@ class ApartmentStyleAnalyzer:
 ### STYLE À DÉTERMINER :
 
 1. **ANCIEN (Haussmannien)** :
-   - Caractéristiques : Moulures au plafond, cheminée, parquet pointe de Hongrie, balcon fer forgé, balcons en fer forgé, hauteur sous plafond importante, éléments architecturaux décoratifs, poutres apparentes (si contexte ancien)
+   - Caractéristiques OBLIGATOIRES : Moulures au plafond, cheminée, parquet pointe de Hongrie, balcon fer forgé, balcons en fer forgé, hauteur sous plafond importante (>2.80m), éléments architecturaux décoratifs
    - Contexte : Immeuble haussmannien, appartement rénové avec conservation des éléments d'origine
+   - ⚠️ ATTENTION : Si tu vois seulement "parquet" ou "moulures" isolés SANS les autres éléments caractéristiques, ce n'est PAS forcément ancien
 
 2. **NEUF (Moderne/Contemporain)** :
-   - Caractéristiques : Design épuré, sol moderne (carrelage/stratifié), terrasse métal, fenêtres modernes, plafond bas/réduit, lignes minimalistes
-   - **INDICES FORTS** : Vue sur Paris + étage élevé (5ème+, 10ème+, dernier étage) = très caractéristique du Neuf
-   - Contexte : Construction récente, rénovation complète sans éléments anciens, étages élevés avec vue panoramique
+   - Caractéristiques : Design épuré, sol moderne (carrelage/stratifié/parquet moderne), terrasse métal, fenêtres modernes, plafond bas/réduit (<2.60m), lignes minimalistes, mobilier moderne
+   - **INDICES FORTS pour NEUF** :
+     * Vue panoramique sur Paris depuis étage élevé (5ème étage et plus) = TRÈS caractéristique du Neuf
+     * Terrasse métallique moderne avec vue dégagée = Neuf
+     * Design épuré + fenêtres modernes + sol moderne = Neuf
+     * Absence totale d'éléments anciens (pas de moulures, pas de cheminée, pas de balcon fer forgé) = Neuf
+   - Contexte : Construction récente (années 2000+), rénovation complète sans éléments anciens, étages élevés avec vue panoramique
+   - ⚠️ IMPORTANT : Si tu vois une vue panoramique sur Paris depuis un étage élevé, c'est TRÈS PROBABLEMENT du Neuf, même si le design semble simple
 
 3. **ATYPIQUE (Loft/Unique)** :
    - Caractéristiques : Espaces ouverts, volumes généreux, poutres apparentes, béton brut, caractère industriel, conversion d'entrepôt/atelier
@@ -606,13 +607,15 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
         style_justifications_by_style = {}  # Regrouper les justifications par style
         
         for style in styles:
-            # Fusionner 70s et 60s avec moderne
+            # Fusionner 70s, 60s, contemporain, récent avec moderne
             style_normalized = style.lower()
             if '70' in style_normalized or 'seventies' in style_normalized or '60' in style_normalized:
                 style_normalized = 'moderne'
-            elif style_normalized not in ['moderne', 'contemporain', 'haussmannien', 'atypique', 'loft']:
-                # Si pas dans les styles connus, garder tel quel mais logger
-                style_normalized = style.lower()
+            elif 'contemporain' in style_normalized or 'récent' in style_normalized or 'recent' in style_normalized:
+                style_normalized = 'moderne'
+            elif style_normalized not in ['moderne', 'contemporain', 'haussmannien', 'atypique', 'loft', 'autre']:
+                # Si pas dans les styles connus, considérer comme moderne (neuf) par défaut
+                style_normalized = 'moderne'
             style_counts[style_normalized] = style_counts.get(style_normalized, 0) + 1
         
         # Regrouper les justifications par style détecté
@@ -620,8 +623,11 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
             style_normalized = style.lower()
             if '70' in style_normalized or 'seventies' in style_normalized or '60' in style_normalized:
                 style_normalized = 'moderne'
-            elif style_normalized not in ['moderne', 'contemporain', 'haussmannien', 'atypique', 'loft']:
-                style_normalized = style.lower()
+            elif 'contemporain' in style_normalized or 'récent' in style_normalized or 'recent' in style_normalized:
+                style_normalized = 'moderne'
+            elif style_normalized not in ['moderne', 'contemporain', 'haussmannien', 'atypique', 'loft', 'autre']:
+                # Si pas dans les styles connus, considérer comme moderne (neuf) par défaut
+                style_normalized = 'moderne'
             
             if style_normalized not in style_justifications_by_style:
                 style_justifications_by_style[style_normalized] = []

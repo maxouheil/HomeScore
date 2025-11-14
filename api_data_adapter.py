@@ -4,15 +4,17 @@ Adaptateur de données API → Format scraping
 Convertit les données de l'API Jinka vers le format utilisé par le système de scoring existant
 """
 
+import re
 from typing import Dict, Any, List, Optional
 
 
-def adapt_api_to_scraped_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
+def adapt_api_to_scraped_format(api_data: Dict[str, Any], alert_token: Optional[str] = None) -> Dict[str, Any]:
     """
     Convertit les données de l'API vers le format scraping actuel
     
     Args:
         api_data: Données brutes de l'API (format de /apiv2/alert/{token}/ad/{id})
+        alert_token: Token d'alerte pour construire l'URL (optionnel)
     
     Returns:
         Données au format scraping compatible avec scoring existant
@@ -45,7 +47,8 @@ def adapt_api_to_scraped_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
     else:
         prix_m2_str = None
     
-    # Localisation
+    # Localisation - Récupérée DIRECTEMENT depuis l'API (pas de scraping HTML)
+    # Les champs 'city' et 'postal_code' viennent de l'endpoint /apiv2/alert/{token}/ad/{id}
     city = ad.get('city', '')
     postal_code = ad.get('postal_code', '')
     localisation = f"{city} ({postal_code})" if postal_code else city
@@ -114,10 +117,55 @@ def adapt_api_to_scraped_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
         'screenshot': None  # Nécessiterait génération séparée
     }
     
+    # Extraire le token depuis api_data si disponible, sinon utiliser celui passé en paramètre
+    token = api_data.get('token') or api_data.get('alert_token') or alert_token or ''
+    
+    # Créer l'objet exposition avec etage_num depuis l'API et extraction depuis description
+    exposition_data = {}
+    exposition_dir = None
+    exposition_explicite = False
+    
+    # Essayer d'extraire l'exposition depuis la description si mentionnée explicitement
+    if description:
+        # Recherche simple d'exposition explicite dans la description
+        text_lower = description.lower()
+        # Patterns pour exposition explicite (par ordre de spécificité)
+        expo_patterns = [
+            # Patterns avec contexte explicite
+            (r'exposition\s+(sud|nord|est|ouest|sud-ouest|nord-est|sud-est|nord-ouest)', 'exposition'),
+            (r'orienté\s+(sud|nord|est|ouest|sud-ouest|nord-est|sud-est|nord-ouest)', 'orienté'),
+            (r'plein\s+(sud|nord|est|ouest)', 'plein'),
+            (r'(sud|nord|est|ouest|sud-ouest|nord-est|sud-est|nord-ouest)\s+exposé', 'exposé'),
+            # Patterns pour directions composées (sud-ouest, nord-est, etc.) - doivent être avant les simples
+            (r'\b(sud-ouest|nord-est|sud-est|nord-ouest)\b', 'simple'),
+            # Patterns pour directions simples (nord, sud, est, ouest) - en dernier pour éviter faux positifs
+            (r'\b(nord|sud|est|ouest)\b', 'simple'),
+        ]
+        
+        for pattern, context in expo_patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                expo_found = match.group(1) if match.lastindex else match.group(0)
+                # Normaliser l'exposition trouvée
+                expo_found = expo_found.replace('-', '_').replace(' ', '_')
+                exposition_dir = expo_found
+                exposition_explicite = True
+                break
+    
+    # Construire l'objet exposition
+    if floor is not None or exposition_dir:
+        exposition_data = {
+            'exposition': exposition_dir,  # Direction d'exposition si trouvée dans la description
+            'exposition_explicite': exposition_explicite,  # True si mentionnée explicitement
+            'details': {}
+        }
+        if floor is not None:
+            exposition_data['details']['etage_num'] = floor  # Stocker le numéro d'étage pour le formatage
+    
     # Construire l'objet final
     adapted_data = {
         'id': apartment_id,
-        'url': f"https://www.jinka.fr/alert_result?token={api_data.get('token', '')}&ad={apartment_id}",
+        'url': f"https://www.jinka.fr/alert_result?token={token}&ad={apartment_id}" if token else f"https://www.jinka.fr/alert_result?ad={apartment_id}",
         'scraped_at': created_at,  # Utiliser created_at comme date de scraping
         'titre': titre,
         'prix': prix_str,
@@ -134,6 +182,7 @@ def adapt_api_to_scraped_format(api_data: Dict[str, Any]) -> Dict[str, Any]:
         'caracteristiques': caracteristiques,
         'etage': etage_str,
         'agence': agence,
+        'exposition': exposition_data if exposition_data else None,  # Ajouter les données d'exposition depuis l'API
         # Champs supplémentaires de l'API (conservés pour référence)
         '_api_data': {
             'rent': rent,
@@ -326,4 +375,6 @@ if __name__ == "__main__":
                 break
     else:
         print("❌ Fichier de test non trouvé")
+
+
 

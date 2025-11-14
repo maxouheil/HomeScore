@@ -85,3 +85,8 @@ def update_scores_with_brightness():
 if __name__ == "__main__":
     update_scores_with_brightness()
 
+
+
+
+
+

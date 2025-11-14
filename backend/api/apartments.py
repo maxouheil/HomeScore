@@ -168,11 +168,13 @@ def enrich_apartment_with_indices(apartment: Dict[str, Any]) -> Dict[str, Any]:
                     }
             
             # Exposition
-            # Créer formatted_data.exposition si l'appartement a soit scores_detaille.ensoleillement, soit exposition (depuis scraping)
+            # Créer formatted_data.exposition si l'appartement a soit scores_detaille.ensoleillement, soit exposition (depuis scraping), soit etage_num depuis API
             has_ensoleillement_score = 'ensoleillement' in apartment.get('scores_detaille', {})
-            has_exposition_data = bool(apartment.get('exposition', {}).get('exposition'))
+            exposition_obj = apartment.get('exposition', {})
+            has_exposition_data = bool(exposition_obj.get('exposition'))
+            has_etage_num = 'etage_num' in exposition_obj.get('details', {})
             
-            if has_ensoleillement_score or has_exposition_data:
+            if has_ensoleillement_score or has_exposition_data or has_etage_num:
                 try:
                     exposition_formatted = format_exposition(apartment)
                     if 'formatted_data' not in apartment:

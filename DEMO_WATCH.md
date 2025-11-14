@@ -156,3 +156,8 @@ Pour un workflow optimal :
 Comme ça vous voyez la régénération en temps réel ! 🎉
 
 
+
+
+
+
+

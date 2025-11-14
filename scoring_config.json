@@ -132,8 +132,8 @@
         },
         "tier2": {
           "score": 5,
-          "conditions": ["Pas d'ouverture mais travaux possibles"],
-          "description": "Cuisine fermée mais modifiable"
+          "conditions": ["Cuisine non trouvée dans les photos"],
+          "description": "Cuisine non trouvée - score neutre"
         },
         "tier3": {
           "score": 0,
@@ -167,6 +167,24 @@
         "excellent": "Vue dégagée, balcon/terrasse",
         "bon": "Vue correcte",
         "moyen": "Vue limitée"
+      }
+    },
+    "baignoire": {
+      "poids": 10,
+      "description": "Présence d'une baignoire dans la salle de bain",
+      "tiers": {
+        "tier1": {
+          "score": 10,
+          "description": "Baignoire présente"
+        },
+        "tier2": {
+          "score": 5,
+          "description": "Cuisine/SDB non trouvée"
+        },
+        "tier3": {
+          "score": 0,
+          "description": "Pas de baignoire (seulement douche)"
+        }
       }
     }
   },

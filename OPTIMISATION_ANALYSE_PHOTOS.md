@@ -334,3 +334,8 @@ Le prompt est dans `analyze_photos_unified.py`, fonction `analyze_photo_unified(
 
 2024-11-03 - Optimisation majeure de l'analyse des photos pour réduire les appels API de 72%
 
+
+
+
+
+

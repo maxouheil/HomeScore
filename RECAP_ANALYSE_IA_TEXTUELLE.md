@@ -253,3 +253,8 @@ Si l'IA n'est pas disponible (pas de clé API, erreur, timeout) :
 **Version** : 1.0 - Analyse IA textuelle intelligente
 
 
+
+
+
+
+
