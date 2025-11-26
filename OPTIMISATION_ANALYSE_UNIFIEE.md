@@ -71,3 +71,6 @@ Test réussi avec `scoring_optimized.py` :
 2. Vérifier que tous les scripts utilisent GPT-4o-mini
 3. Documenter les économies de coûts réalisées
 
+
+
+

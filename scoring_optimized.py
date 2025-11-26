@@ -24,6 +24,21 @@ def analyze_photos_once(apartment):
             'luminosite': {...}
         }
     """
+    # PRIORITÉ: Utiliser l'analyse existante dans le fichier si disponible (plus récente)
+    # Cela évite d'utiliser un cache obsolète
+    existing_style_analysis = apartment.get('style_analysis')
+    if existing_style_analysis:
+        print("   📸 Utilisation de l'analyse existante depuis le fichier...")
+        result = {
+            'style_analysis': existing_style_analysis,
+            'cuisine_result': existing_style_analysis.get('cuisine', {}),
+            'luminosite': existing_style_analysis.get('luminosite', {}),
+            'baignoire_result': None  # Baignoire analysée séparément
+        }
+        # Retourner directement avec l'analyse existante (pas besoin de réanalyser)
+        return result
+    
+    # Si pas d'analyse existante, faire l'analyse unifiée
     print("   📸 Analyse UNIFIÉE des photos (style + cuisine + luminosité + baignoire ensemble)...")
     
     result = {
@@ -53,7 +68,8 @@ def analyze_photos_once(apartment):
         unified_analyzer = UnifiedApartmentAnalyzer()
         
         # Analyser l'appartement UNE SEULE FOIS pour tout extraire (style, cuisine, baignoire, luminosité)
-        unified_result = unified_analyzer.analyze_apartment_unified(apartment, max_photos=5)
+        # OPTIMISATION: Réduire à 3 photos (au lieu de 5) pour réduire les coûts de 24%
+        unified_result = unified_analyzer.analyze_apartment_unified(apartment, max_photos=3)
         
         if unified_result:
             # 1. Style
@@ -183,7 +199,55 @@ def score_style_optimized(apartment, config, photo_analysis_cache):
     
     if style_analysis:
         style_data = style_analysis.get('style', {})
-        style_type = style_data.get('type', '').lower()
+        style_type = style_data.get('type', '').lower() if style_data.get('type') else ''
+        justification_raw = style_data.get('justification', '') or ''
+        justification = justification_raw.lower() if justification_raw else ''
+        
+        # PRIORITÉ 1: Vérifier la justification ET la description pour détecter les indices haussmanniens
+        # Même si style_type est "moderne", si la justification contient des indices haussmanniens,
+        # c'est probablement un appartement ancien mal classé par l'IA
+        haussmann_indices = [
+            'moulures', 'moulure', 
+            'cheminée', 'cheminées',
+            'parquet pointe', 'parquet pointe de hongrie', 'parquet pointe de hongrie',
+            'balcon fer forgé', 'balcons fer forgé', 'balcon en fer', 'balcons en fer', 'fer forgé',
+            'hauteur sous plafond', 'hauteur sous plafonds',
+            'haussmann', 'haussmannien'
+        ]
+        
+        # Vérifier dans la justification (sans négations)
+        justification_lower = justification.lower() if justification else ''
+        # Exclure les négations ("pas de moulures", "sans moulures", etc.)
+        negation_patterns = ['pas de', 'sans', 'aucun', 'aucune', 'absence de', 'absence d']
+        has_negation = any(neg in justification_lower for neg in negation_patterns)
+        
+        if justification and not has_negation:
+            # Compter les indices positifs trouvés
+            indices_found = []
+            for idx in haussmann_indices:
+                if idx in justification_lower:
+                    indices_found.append(idx)
+            
+            # PRIORITÉ ABSOLUE: Si au moins 2 indices haussmanniens dans la justification,
+            # c'est très probablement haussmannien, même si le type est "moderne" ou "atypique"
+            if len(indices_found) >= 2:
+                # CORRECTION: Mettre à jour aussi style_analysis.type pour cohérence
+                if style_analysis and style_analysis.get('style'):
+                    style_analysis['style']['type'] = 'haussmannien'
+                    print(f"   🔄 Correction style_analysis.type: '{style_type}' → 'haussmannien' (indices haussmanniens détectés)")
+                
+                return {
+                    'score': tier_config['tier1']['score'],
+                    'tier': 'tier1',
+                    'justification': style_data.get('justification', f"Style ancien détecté via indices: {len(indices_found)} éléments haussmanniens"),
+                    'details': style_data.get('details', {})
+                }
+            # Si moins de 2 indices dans la justification, on passe au type détecté par l'IA
+            # (on ne vérifie plus le texte de l'annonce, uniquement la justification de l'IA Vision)
+        
+        # NOTE: On ne vérifie plus le texte de l'annonce (description/caractéristiques)
+        # On utilise uniquement la justification générée par l'IA depuis les photos
+        # Si pas assez d'indices dans la justification, on passe au type détecté par l'IA
         
         if style_type:
             # Tier1: Ancien (Haussmannien) = 20 pts
@@ -215,35 +279,13 @@ def score_style_optimized(apartment, config, photo_analysis_cache):
                 'details': style_data.get('details', {})
             }
     
-    # Fallback: méthode ancienne avec analyse texte seule
-    description = apartment.get('description', '').lower()
-    caracteristiques = apartment.get('caracteristiques', '').lower()
-    titre = apartment.get('titre', '').lower()
-    text_combined = f"{titre} {description} {caracteristiques}"
-    
-    # Mots-clés directs pour détecter "Atypique"
-    atypique_keywords = ['atypique', 'loft', 'unique', 'original', 'décalé', 'insolite']
-    if any(keyword in text_combined for keyword in atypique_keywords):
-        return {
-            'score': tier_config['tier2']['score'],
-            'tier': 'tier2',
-            'justification': "Style atypique détecté dans le texte"
-        }
-    
-    # Mots-clés Haussmannien
-    haussmann_keywords = ['haussmann', 'moulur', 'parquet', 'cheminée', 'ancien immeuble']
-    if any(keyword in text_combined for keyword in haussmann_keywords):
-        return {
-            'score': tier_config['tier1']['score'],
-            'tier': 'tier1',
-            'justification': "Style haussmannien détecté dans le texte"
-        }
-    
-    # Par défaut: Neuf
+    # Pas d'analyse photo disponible → "Non spécifié"
+    # On n'utilise plus le texte comme fallback (100% analyse photos uniquement)
     return {
-        'score': tier_config['tier3']['score'],
-        'tier': 'tier3',
-        'justification': "Style moderne/neuf"
+        'score': 0,  # Score neutre si pas d'info
+        'tier': 'tier3',  # Par défaut tier3 si pas d'info
+        'justification': "Style non spécifié (pas de photos disponibles pour analyse)",
+        'details': {}
     }
 
 

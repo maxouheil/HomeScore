@@ -195,3 +195,6 @@ if __name__ == "__main__":
     
     show_apartment_data(apartment_id)
 
+
+
+

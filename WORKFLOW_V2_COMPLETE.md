@@ -183,3 +183,6 @@ Les images seront automatiquement utilisées depuis `data/photos/` si disponible
 
 **Dernière mise à jour** : 2025-11-14
 
+
+
+

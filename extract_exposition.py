@@ -84,13 +84,27 @@ class ExpositionExtractor:
             'faible': ['vis-à-vis', 'vue obstruée', 'pas de vue', 'vue sur mur']
         }
     
-    def _add_brightness_to_result(self, result: Dict, photos: List[str]) -> Dict:
-        """Ajoute brightness_value aux détails d'un résultat, même si exposition déjà trouvée"""
+    def _add_brightness_to_result(self, result: Dict, photos: List) -> Dict:
+        """Ajoute brightness_value et visavis aux détails d'un résultat, même si exposition déjà trouvée"""
         if not photos or not result:
             return result
         
         try:
-            photo_result = self.extract_exposition_photos(photos)
+            # Extraire les URLs des photos (peut être une liste de strings ou une liste de dicts)
+            photo_urls = []
+            for photo in photos:
+                if isinstance(photo, str):
+                    photo_urls.append(photo)
+                elif isinstance(photo, dict):
+                    photo_url = photo.get('url')
+                    if photo_url:
+                        photo_urls.append(photo_url)
+            
+            if not photo_urls:
+                return result
+            
+            # Analyser la luminosité des photos
+            photo_result = self.extract_exposition_photos(photo_urls)
             if photo_result and photo_result.get('photos_analyzed', 0) > 0:
                 photo_details = photo_result.get('details', {})
                 brightness_value = photo_details.get('brightness_value')
@@ -99,8 +113,21 @@ class ExpositionExtractor:
                         result['details'] = {}
                     result['details']['brightness_value'] = brightness_value
                     result['details']['image_brightness'] = brightness_value
+            
+            # Analyser le vis-à-vis depuis les photos
+            visavis_result = self.photo_analyzer.analyze_photos_visavis(photo_urls)
+            if visavis_result and visavis_result.get('photos_analyzed', 0) > 0:
+                visavis_distance = visavis_result.get('visavis_distance')
+                visavis_category = visavis_result.get('visavis_category')
+                if visavis_distance is not None:
+                    if 'details' not in result:
+                        result['details'] = {}
+                    result['details']['visavis_distance'] = visavis_distance
+                    result['details']['visavis_category'] = visavis_category
+                    result['details']['visavis_confidence'] = visavis_result.get('confidence', 0.0)
+                    result['details']['visavis_justification'] = visavis_result.get('justification', '')
         except Exception:
-            # En cas d'erreur, continuer sans brightness_value
+            # En cas d'erreur, continuer sans brightness_value ni visavis
             pass
         
         return result
@@ -367,6 +394,15 @@ class ExpositionExtractor:
     
     def extract_exposition_photos(self, photos_urls: List[str]) -> Dict:
         """Extrait l'exposition depuis les photos (Phase 2)"""
+        if not photos_urls:
+            return {
+                'exposition': None,
+                'score': 0,
+                'tier': 'tier3',
+                'justification': 'Aucune photo disponible',
+                'photos_analyzed': 0,
+                'details': {}
+            }
         return self.photo_analyzer.analyze_photos_exposition(photos_urls)
     
     def get_exposition_score(self, exposition_data: Dict) -> int:
@@ -476,6 +512,8 @@ class ExpositionExtractor:
         3. Si photos analysées → utiliser résultat photos
         4. Sinon → analyser contextuel (dernier recours)
         5. Sinon → retourner inconnu
+        
+        NOUVEAU: Analyse du vis-à-vis depuis les photos pour tous les cas
         """
         description = apartment_data.get('description', '')
         caracteristiques = apartment_data.get('caracteristiques', '')
@@ -485,16 +523,41 @@ class ExpositionExtractor:
         # Phase 1: Analyse textuelle (avec bonus étage)
         text_result = self.extract_exposition_textuelle(description, caracteristiques, etage)
         
-        # Si exposition explicite trouvée → analyser quand même les photos pour brightness_value
+        # Si exposition explicite trouvée → analyser quand même les photos pour brightness_value et visavis
         if text_result.get('exposition_explicite', False) and text_result.get('exposition'):
-            # Toujours analyser les photos pour obtenir brightness_value
+            # Toujours analyser les photos pour obtenir brightness_value et visavis
             text_result = self._add_brightness_to_result(text_result, photos)
             return text_result
         
         # Phase 2: Analyse des photos (si pas d'exposition explicite)
         photo_result = None
         if photos:
-            photo_result = self.extract_exposition_photos(photos)
+            # Extraire les URLs des photos
+            photo_urls = []
+            for photo in photos:
+                if isinstance(photo, str):
+                    photo_urls.append(photo)
+                elif isinstance(photo, dict):
+                    photo_url = photo.get('url')
+                    if photo_url:
+                        photo_urls.append(photo_url)
+            
+            if photo_urls:
+                photo_result = self.extract_exposition_photos(photo_urls)
+                
+                # Ajouter l'analyse du vis-à-vis au résultat photo
+                if photo_result:
+                    visavis_result = self.photo_analyzer.analyze_photos_visavis(photo_urls)
+                    if visavis_result and visavis_result.get('photos_analyzed', 0) > 0:
+                        visavis_distance = visavis_result.get('visavis_distance')
+                        visavis_category = visavis_result.get('visavis_category')
+                        if visavis_distance is not None:
+                            if 'details' not in photo_result:
+                                photo_result['details'] = {}
+                            photo_result['details']['visavis_distance'] = visavis_distance
+                            photo_result['details']['visavis_category'] = visavis_category
+                            photo_result['details']['visavis_confidence'] = visavis_result.get('confidence', 0.0)
+                            photo_result['details']['visavis_justification'] = visavis_result.get('justification', '')
         
         # Si photos analysées avec succès → utiliser résultat photos
         if photo_result and photo_result.get('photos_analyzed', 0) > 0:
@@ -506,12 +569,12 @@ class ExpositionExtractor:
         # Si contextuel confiant → combiner avec textuel
         if contextual_result.get('confidence', 0) > 0.5:
             combined = self._combine_results(contextual_result, text_result)
-            # Toujours ajouter brightness_value si photos disponibles
+            # Toujours ajouter brightness_value et visavis si photos disponibles
             combined = self._add_brightness_to_result(combined, photos)
             return combined
         
         # Sinon → retourner résultat textuel (peut être None si aucune info)
-        # Toujours ajouter brightness_value si photos disponibles
+        # Toujours ajouter brightness_value et visavis si photos disponibles
         if text_result:
             text_result = self._add_brightness_to_result(text_result, photos)
         return text_result

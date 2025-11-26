@@ -6,6 +6,8 @@ Convertit les données de l'API Jinka vers le format utilisé par le système de
 
 import re
 from typing import Dict, Any, List, Optional
+from geocoding import get_precise_location
+from criteria.localisation import get_metro_name
 
 
 def adapt_api_to_scraped_format(api_data: Dict[str, Any], alert_token: Optional[str] = None) -> Dict[str, Any]:
@@ -47,11 +49,10 @@ def adapt_api_to_scraped_format(api_data: Dict[str, Any], alert_token: Optional[
     else:
         prix_m2_str = None
     
-    # Localisation - Récupérée DIRECTEMENT depuis l'API (pas de scraping HTML)
-    # Les champs 'city' et 'postal_code' viennent de l'endpoint /apiv2/alert/{token}/ad/{id}
+    # Localisation - Format de base depuis l'API (pour fallback)
     city = ad.get('city', '')
     postal_code = ad.get('postal_code', '')
-    localisation = f"{city} ({postal_code})" if postal_code else city
+    localisation_base = f"{city} ({postal_code})" if postal_code else city
     
     # Coordonnées GPS
     lat = ad.get('lat')
@@ -162,6 +163,45 @@ def adapt_api_to_scraped_format(api_data: Dict[str, Any], alert_token: Optional[
         if floor is not None:
             exposition_data['details']['etage_num'] = floor  # Stocker le numéro d'étage pour le formatage
     
+    # Récupérer la localisation précise depuis les coordonnées GPS (géocodage inverse)
+    localisation_precise = None
+    if lat is not None and lng is not None:
+        # Créer un dict temporaire pour le géocodage
+        temp_apt = {'coordinates': coordinates, '_api_data': {'lat': lat, 'lng': lng}}
+        localisation_precise = get_precise_location(temp_apt)
+    
+    # Construire le format "Metro X · 34, rue X" pour localisation
+    localisation_parts = []
+    
+    # 1. Récupérer le métro (meilleure station depuis les transports disponibles)
+    temp_apt_for_metro = {
+        'map_info': map_info,
+        'transports': transports
+    }
+    metro_name = get_metro_name(temp_apt_for_metro)
+    if metro_name:
+        localisation_parts.append(f"Metro {metro_name}")
+    
+    # 2. Extraire la rue depuis localisation_precise
+    street_address = None
+    if localisation_precise:
+        # Format: "35 Rue Mélingue, 75019 Paris 19e"
+        # Extraire juste la partie avant la virgule (rue + numéro)
+        if ',' in localisation_precise:
+            street_address = localisation_precise.split(',')[0].strip()
+        else:
+            street_address = localisation_precise
+    
+    if street_address:
+        localisation_parts.append(street_address)
+    
+    # Construire la localisation finale
+    if localisation_parts:
+        localisation = " · ".join(localisation_parts)
+    else:
+        # Fallback sur le format de base si pas de métro ni d'adresse précise
+        localisation = localisation_base
+    
     # Construire l'objet final
     adapted_data = {
         'id': apartment_id,
@@ -171,6 +211,7 @@ def adapt_api_to_scraped_format(api_data: Dict[str, Any], alert_token: Optional[
         'prix': prix_str,
         'prix_m2': prix_m2_str,
         'localisation': localisation,
+        'localisation_precise': localisation_precise,  # Adresse précise depuis géocodage inverse
         'coordinates': coordinates,
         'map_info': map_info,
         'surface': surface_str,

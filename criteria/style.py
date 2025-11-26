@@ -70,11 +70,11 @@ def format_style(apartment):
     if not justification:
         justification = style_data.get('justification', '')
     
-    # Formater la chaîne d'indices avec la justification
+    # Formater la chaîne d'indices avec la justification sur une ligne séparée
     indices_str = None
     if justification:
         # La justification contient déjà une phrase qui justifie le côté ancien ou neuf
-        indices_str = f"Style Indice: {justification}"
+        indices_str = f"Style Indice:\n{justification}"
     
     return {
         'main_value': style_name,

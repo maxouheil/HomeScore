@@ -435,8 +435,13 @@ class ApartmentStyleAnalyzer:
 
 1. **ANCIEN (Haussmannien)** :
    - Caractéristiques OBLIGATOIRES : Moulures au plafond, cheminée, parquet pointe de Hongrie, balcon fer forgé, balcons en fer forgé, hauteur sous plafond importante (>2.80m), éléments architecturaux décoratifs
-   - Contexte : Immeuble haussmannien, appartement rénové avec conservation des éléments d'origine
+   - **INDICES SUPPLÉMENTAIRES pour ANCIEN** :
+     * Poutres apparentes au plafond = Peut être ancien (combles aménagés, charpente visible)
+     * Charpente visible = Ancien immeuble
+     * Combles aménagés avec poutres = Ancien
+   - Contexte : Immeuble haussmannien, appartement rénové avec conservation des éléments d'origine, combles aménagés
    - ⚠️ ATTENTION : Si tu vois seulement "parquet" ou "moulures" isolés SANS les autres éléments caractéristiques, ce n'est PAS forcément ancien
+   - ⚠️ IMPORTANT : Les poutres apparentes dans un contexte ancien (sans béton brut ni caractère industriel) = Ancien, pas Atypique
 
 2. **NEUF (Moderne/Contemporain)** :
    - Caractéristiques : Design épuré, sol moderne (carrelage/stratifié/parquet moderne), terrasse métal, fenêtres modernes, plafond bas/réduit (<2.60m), lignes minimalistes, mobilier moderne
@@ -449,8 +454,15 @@ class ApartmentStyleAnalyzer:
    - ⚠️ IMPORTANT : Si tu vois une vue panoramique sur Paris depuis un étage élevé, c'est TRÈS PROBABLEMENT du Neuf, même si le design semble simple
 
 3. **ATYPIQUE (Loft/Unique)** :
-   - Caractéristiques : Espaces ouverts, volumes généreux, poutres apparentes, béton brut, caractère industriel, conversion d'entrepôt/atelier
+   - Caractéristiques OBLIGATOIRES : Espaces ouverts, volumes généreux, béton brut, caractère industriel, conversion d'entrepôt/atelier
+   - **INDICES FORTS pour ATYPIQUE** :
+     * Béton brut ou briques apparentes = TRÈS caractéristique de l'atypique/loft
+     * Caractère industriel ou ancien entrepôt réhabilité = Atypique
+     * Espace ouvert avec volumes généreux + caractère industriel = Atypique
+     * Poutres apparentes + béton brut + caractère industriel = Atypique
    - Contexte : Loft, ancien entrepôt réhabilité, espace atypique
+   - ⚠️ ATTENTION : Les poutres apparentes SEULES ne signifient pas atypique - elles peuvent être dans un ancien immeuble (combles aménagés)
+   - ⚠️ IMPORTANT : Pour être atypique, il faut aussi du béton brut, un caractère industriel, ou une conversion d'entrepôt
 
 ### CUISINE OUVERTE :
 - Oui: cuisine visible depuis le salon, pas de séparation murale
@@ -652,6 +664,21 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
         final_style = max(style_counts, key=style_counts.get) if style_counts else 'inconnu'
         final_cuisine_ouverte = cuisine_ouverte_ratio > 0.5
         final_luminosite = max(luminosite_counts, key=luminosite_counts.get) if luminosite_counts else 'inconnue'
+        
+        # CORRECTION: Si "poutres apparentes" est dans les justifications, considérer comme "ancien" (haussmannien)
+        # Les poutres apparentes sont caractéristiques des anciens immeubles (combles aménagés, charpente visible)
+        all_justifications_combined = " ".join([j for just_list in style_justifications_by_style.values() for j in just_list]).lower()
+        if 'poutres apparentes' in all_justifications_combined or 'poutre' in all_justifications_combined:
+            # Vérifier si c'est vraiment atypique (loft industriel) ou ancien (charpente visible)
+            # Si pas d'autres indices atypiques forts (béton brut, industriel), considérer comme ancien
+            has_atypique_indicators = any(indicator in all_justifications_combined for indicator in ['béton brut', 'industriel', 'loft', 'entrepôt', 'atelier'])
+            if not has_atypique_indicators and final_style not in ['haussmannien', 'atypique', 'loft']:
+                print(f"   🔄 Correction: '{final_style}' → 'haussmannien' (poutres apparentes = ancien)")
+                final_style = 'haussmannien'
+                # Ajouter "haussmannien" aux styles si pas déjà présent
+                if 'haussmannien' not in style_counts:
+                    style_counts['haussmannien'] = 0
+                style_counts['haussmannien'] += 1
         
         # Sélectionner et combiner les justifications pour le style final
         # Les justifications sont au format tags séparés par virgules, on les combine intelligemment

@@ -271,3 +271,6 @@ python show_apartment_data.py
 **Dernière mise à jour** : 2025-11-14
 **Statut** : Phase 1 et 2 complétées ✅
 
+
+
+

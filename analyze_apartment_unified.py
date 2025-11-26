@@ -29,10 +29,10 @@ class UnifiedApartmentAnalyzer:
     
     def _get_cache_input_data(self, apartment_id: str, photos: List[Dict]) -> str:
         """Génère les données d'entrée pour le cache basées sur l'ID et les URLs des photos"""
-        photo_urls = [p.get('url', '') for p in photos[:5]]
+        photo_urls = [p.get('url', '') for p in photos[:3]]  # Optimisé: 3 photos au lieu de 5
         return f"{apartment_id}:{':'.join(photo_urls)}"
     
-    def _load_photos_for_analysis(self, photos: List[Dict], max_photos: int = 5) -> List[bytes]:
+    def _load_photos_for_analysis(self, photos: List[Dict], max_photos: int = 3) -> List[bytes]:
         """
         Charge les photos depuis les chemins locaux ou URLs
         
@@ -72,7 +72,7 @@ class UnifiedApartmentAnalyzer:
     def analyze_apartment_unified(
         self, 
         apartment_data: Dict,
-        max_photos: int = 5
+        max_photos: int = 3  # Optimisé: 3 photos par défaut (au lieu de 5)
     ) -> Optional[Dict]:
         """
         Analyse un appartement en UNE SEULE requête GPT-4o-mini Vision
@@ -85,7 +85,7 @@ class UnifiedApartmentAnalyzer:
         
         Args:
             apartment_data: Données de l'appartement
-            max_photos: Nombre maximum de photos à analyser
+            max_photos: Nombre maximum de photos à analyser (défaut: 3 pour optimiser les coûts)
         
         Returns:
             Résultat unifié de l'analyse
@@ -95,15 +95,24 @@ class UnifiedApartmentAnalyzer:
         caracteristiques = apartment_data.get('caracteristiques', '')
         photos = apartment_data.get('photos', [])
         
+        # OPTIMISATION 1: Vérifier si l'appartement a déjà des données d'analyse
+        existing_analysis = apartment_data.get('_analysis_data') or apartment_data.get('style_analysis')
+        if existing_analysis:
+            print(f"   💾 Données d'analyse déjà présentes pour {apartment_id}, skip")
+            # Convertir au format unifié si nécessaire
+            if isinstance(existing_analysis, dict) and 'style' in existing_analysis:
+                return existing_analysis
+            # Sinon, retourner None pour forcer une nouvelle analyse si format incompatible
+        
         if not photos:
             print(f"   ⚠️  Aucune photo pour l'appartement {apartment_id}")
             return None
         
-        # Vérifier le cache
+        # OPTIMISATION 2: Vérifier le cache (amélioré)
         cache_input_data = self._get_cache_input_data(apartment_id, photos)
         cached = self.cache.get("unified_analysis", cache_input_data)
         if cached:
-            print(f"   💾 Cache hit: analyse unifiée")
+            print(f"   💾 Cache hit: analyse unifiée (évite re-analyse IA)")
             return cached
         
         print(f"   🤖 Analyse unifiée avec {self.model} ({len(photos[:max_photos])} photos)...")
@@ -341,7 +350,7 @@ if __name__ == "__main__":
         print(f"   Photos: {len(test_apt.get('photos', []))}")
         
         analyzer = UnifiedApartmentAnalyzer()
-        result = analyzer.analyze_apartment_unified(test_apt, max_photos=5)
+        result = analyzer.analyze_apartment_unified(test_apt, max_photos=3)  # Optimisé: 3 photos
         
         if result:
             print(f"\n✅ RÉSULTATS DE L'ANALYSE UNIFIÉE:")

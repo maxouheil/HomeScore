@@ -258,3 +258,6 @@ Si l'IA n'est pas disponible (pas de clé API, erreur, timeout) :
 
 
 
+
+
+

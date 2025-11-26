@@ -13,6 +13,8 @@ from urllib.parse import urlparse, parse_qs
 from jinka_api_client import JinkaAPIClient
 from api_data_adapter import adapt_api_to_scraped_format, adapt_dashboard_to_apartment_list
 from extract_exposition import ExpositionExtractor
+from analyze_apartment_style import ApartmentStyleAnalyzer
+from extract_baignoire import BaignoireExtractor
 
 
 class JinkaAPIScraper:
@@ -31,6 +33,8 @@ class JinkaAPIScraper:
         self.api_client: Optional[JinkaAPIClient] = None
         self.apartments: List[Dict[str, Any]] = []
         self.exposition_extractor = ExpositionExtractor()
+        self.style_analyzer = ApartmentStyleAnalyzer()
+        self.baignoire_extractor = BaignoireExtractor()
         self.alert_token: Optional[str] = None
     
     async def setup(self):
@@ -231,6 +235,23 @@ class JinkaAPIScraper:
             if 'description' in apartment_data:
                 # L'extraction d'exposition peut être faite ici si nécessaire
                 pass
+            
+            # Analyser le style et la cuisine depuis les photos (DÉSACTIVÉ pour scraping rapide)
+            # L'analyse IA sera faite plus tard avec batch_analyze_paris.py
+            # try:
+            #     style_analysis = self.style_analyzer.analyze_apartment_photos_from_data(apartment_data)
+            #     if style_analysis:
+            #         apartment_data['style_analysis'] = style_analysis
+            # except Exception as e:
+            #     print(f"   ⚠️ Erreur analyse style/cuisine: {e}")
+            
+            # Analyser la baignoire (DÉSACTIVÉ pour scraping rapide)
+            # try:
+            #     baignoire_data = self.baignoire_extractor.extract_baignoire_ultimate(apartment_data)
+            #     if baignoire_data:
+            #         apartment_data['baignoire'] = baignoire_data
+            # except Exception as e:
+            #     print(f"   ⚠️ Erreur analyse baignoire: {e}")
             
             return apartment_data
             

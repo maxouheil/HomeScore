@@ -3,7 +3,7 @@ Serveur FastAPI principal pour l'API HomeScore
 """
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from backend.api import apartments
+from backend.api import apartments, alerts
 from backend.watch_service import WatchService
 import uvicorn
 
@@ -24,6 +24,7 @@ app.add_middleware(
 
 # Inclure les routers
 app.include_router(apartments.router)
+app.include_router(alerts.router)
 
 # Store des connexions WebSocket actives
 active_connections: list[WebSocket] = []
@@ -96,6 +97,7 @@ async def root():
         "version": "1.0.0",
         "endpoints": {
             "apartments": "/api/apartments",
+            "alerts": "/api/alerts",
             "websocket": "/ws"
         }
     }

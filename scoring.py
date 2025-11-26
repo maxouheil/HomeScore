@@ -58,91 +58,127 @@ def calculate_prix_m2(apartment):
     return prix_m2
 
 
+def get_api_metro_stations(apartment):
+    """
+    Récupère UNIQUEMENT les stations de métro depuis l'API (map_info.metros + transports)
+    Ne cherche JAMAIS dans la description
+    
+    Returns:
+        list: Liste des stations depuis l'API uniquement
+    """
+    import re
+    all_stations = []
+    
+    # Source 1: map_info.metros (depuis API)
+    map_info = apartment.get('map_info', {})
+    metros = map_info.get('metros', [])
+    for metro in metros:
+        if isinstance(metro, str):
+            # Nettoyer (enlever "métro " si présent)
+            metro = re.sub(r'^métro\s+', '', metro, flags=re.IGNORECASE).strip()
+            # Si trop long, extraire juste le nom de la station (avant le premier "-" ou ",")
+            if len(metro) > 50:
+                metro = metro.split('-')[0].split(',')[0].strip()
+            if metro and len(metro) > 2 and metro != "m" and len(metro) < 50:
+                # Extraire le nom de la station (enlever parenthèses, etc.)
+                metro = re.sub(r'\s*\([^)]*\)', '', metro).strip()
+                if metro and metro not in all_stations:
+                    all_stations.append(metro)
+    
+    # Source 2: transports (depuis API via stops[])
+    transports = apartment.get('transports', [])
+    for transport in transports:
+        if isinstance(transport, str):
+            # Nettoyer le transport (enlever numéros de ligne, etc.)
+            transport_clean = re.sub(r'\s+\d+\s*$', '', transport.strip())
+            transport_clean = re.sub(r'\s*\([^)]*\)', '', transport_clean).strip()
+            # Chercher une station de métro valide
+            if re.search(r'^[A-Za-z\s\-éàèùîêôûçâë]+$', transport_clean) and len(transport_clean) > 2:
+                # Vérifier que ce n'est pas un faux positif
+                excluded = ['Paris', 'Entre', '€', 'm²', 'pièces', 'chambres', 'Proche']
+                if not any(excl.lower() in transport_clean.lower() for excl in excluded):
+                    if transport_clean not in all_stations:
+                        all_stations.append(transport_clean)
+    
+    # Dédupliquer en préservant l'ordre
+    seen = set()
+    unique_stations = []
+    for station in all_stations:
+        station_lower = station.lower()
+        if station_lower not in seen:
+            seen.add(station_lower)
+            unique_stations.append(station)
+    
+    return unique_stations
+
+
 def score_localisation(apartment, config):
-    """Score localisation selon zones définies dans config - utilise TOUTES les stations et rues"""
+    """Score localisation selon zones définies dans config
+    
+    UTILISE UNIQUEMENT les stations réelles de l'API (map_info.metros + transports)
+    JAMAIS la description pour éviter les faux positifs
+    """
     tier_config = config['axes']['localisation']['tiers']
     
-    # Récupérer localisation, quartier, description, toutes les stations de métro
+    # Récupérer localisation et quartier (pour fallback si pas de stations)
     localisation = apartment.get('localisation', '').lower()
-    description = apartment.get('description', '').lower()
-    caracteristiques = apartment.get('caracteristiques', '').lower()
-    text_combined = f"{localisation} {description} {caracteristiques}"
-    
     quartier = get_quartier_name(apartment)
     if quartier:
         quartier = quartier.lower()
     
-    # Récupérer TOUTES les stations de métro (pas seulement la meilleure pour l'affichage)
-    all_stations = get_all_metro_stations(apartment)
-    all_stations_lower = [s.lower() for s in all_stations] if all_stations else []
+    # Récupérer UNIQUEMENT les stations de métro depuis l'API (pas la description)
+    api_stations = get_api_metro_stations(apartment)
+    api_stations_lower = [s.lower() for s in api_stations] if api_stations else []
     
-    # Vérifier tier1 (zones premium) - vérifier toutes les stations et dans le texte
     tier1_zones = [z.lower() for z in tier_config['tier1']['zones']]
-    for zone in tier1_zones:
-        # Vérifier dans localisation, quartier, texte combiné, ou n'importe quelle station
-        zone_matched = False
-        matched_station = None
-        
-        if zone in localisation or zone in text_combined:
-            zone_matched = True
-        elif quartier and zone in quartier:
-            zone_matched = True
-        else:
-            # Vérifier toutes les stations
-            for station in all_stations_lower:
-                if zone in station or station in zone:
-                    zone_matched = True
-                    matched_station = station
-                    break
-        
-        if zone_matched:
-            score = tier_config['tier1']['score']
-            # Bonus Place de la Réunion
-            if 'place de la réunion' in localisation or (quartier and 'place de la réunion' in quartier) or 'place de la réunion' in text_combined:
-                score += config['bonus']['place_reunion']
-            
-            # Construire la justification avec la station trouvée
-            if matched_station:
-                justification = f"Zone premium: {zone} (métro {matched_station})"
-            else:
-                justification = f"Zone premium: {zone}"
-            
-            return {
-                'score': score,
-                'tier': 'tier1',
-                'justification': justification
-            }
-    
-    # Vérifier tier2 (bonnes zones) - vérifier toutes les stations ET dans le texte (pour "Rue des Boulets", "Nation")
     tier2_zones = [z.lower() for z in tier_config['tier2']['zones']]
+    
+    # PRIORITÉ 1 : Vérifier Tier 1 dans les STATIONS API uniquement
+    for zone in tier1_zones:
+        for station in api_stations_lower:
+            if zone in station or station in zone:
+                score = tier_config['tier1']['score']
+                # Bonus Place de la Réunion
+                if 'place de la réunion' in zone:
+                    score += config['bonus']['place_reunion']
+                return {
+                    'score': score,
+                    'tier': 'tier1',
+                    'justification': f"Zone premium: {zone} (métro {station})"
+                }
+    
+    # PRIORITÉ 2 : Vérifier Tier 2 dans les STATIONS API uniquement
     for zone in tier2_zones:
-        # Vérifier dans localisation, quartier, texte combiné, ou n'importe quelle station
-        zone_matched = False
-        matched_station = None
+        for station in api_stations_lower:
+            if zone in station or station in zone:
+                return {
+                    'score': tier_config['tier2']['score'],
+                    'tier': 'tier2',
+                    'justification': f"Bonne zone: {zone} (métro {station})"
+                }
+    
+    # PRIORITÉ 3 : Fallback - Vérifier Tier 1 dans localisation/quartier (si pas de stations API)
+    if not api_stations:  # Seulement si aucune station API disponible
+        for zone in tier1_zones:
+            if zone in localisation or (quartier and zone in quartier):
+                score = tier_config['tier1']['score']
+                # Bonus Place de la Réunion
+                if 'place de la réunion' in localisation or (quartier and 'place de la réunion' in quartier):
+                    score += config['bonus']['place_reunion']
+                return {
+                    'score': score,
+                    'tier': 'tier1',
+                    'justification': f"Zone premium: {zone}"
+                }
         
-        # Chercher dans le texte combiné (description, caractéristiques) pour détecter les rues comme "Rue des Boulets"
-        if zone in localisation or zone in text_combined:
-            zone_matched = True
-        elif quartier and zone in quartier:
-            zone_matched = True
-        else:
-            # Vérifier toutes les stations (pour "Nation" par exemple)
-            for station in all_stations_lower:
-                if zone in station or station in zone:
-                    zone_matched = True
-                    matched_station = station
-                    break
-        
-        if zone_matched:
-            justification = f"Bonne zone: {zone}"
-            if matched_station:
-                justification += f" (métro {matched_station})"
-            
-            return {
-                'score': tier_config['tier2']['score'],
-                'tier': 'tier2',
-                'justification': justification
-            }
+        # PRIORITÉ 4 : Fallback - Vérifier Tier 2 dans localisation/quartier
+        for zone in tier2_zones:
+            if zone in localisation or (quartier and zone in quartier):
+                return {
+                    'score': tier_config['tier2']['score'],
+                    'tier': 'tier2',
+                    'justification': f"Bonne zone: {zone}"
+                }
     
     # Par défaut tier3
     return {
@@ -159,9 +195,9 @@ def score_prix(apartment, config):
     
     if prix_m2 is None:
         return {
-            'score': 0,
-            'tier': 'tier3',
-            'justification': "Prix/m² non disponible"
+            'score': tier_config['tier2']['score'],
+            'tier': 'tier2',
+            'justification': "Prix/m² non disponible - note moyenne par défaut"
         }
     
     # Vérifier tier1 (< 9500)
@@ -189,13 +225,72 @@ def score_prix(apartment, config):
 
 
 def score_style(apartment, config):
-    """Score style avec validation croisée texte + photos
-    Utilise analyze_apartment_photos_from_data() qui combine texte + photos
+    """Score style avec priorité sur données API (buy_type, year)
+    PRIORITÉ 1: buy_type et year depuis l'API
+    PRIORITÉ 2: style_analysis (analyse IA)
+    PRIORITÉ 3: Analyse texte seule
     Ancien (20pts) / Atypique (10pts) / Neuf (0pts)
     """
     tier_config = config['axes']['style']['tiers']
     
-    # Essayer d'abord avec style_analysis existant (peut contenir validation croisée)
+    # PRIORITÉ 1: Utiliser buy_type et year depuis l'API si disponibles
+    api_data = apartment.get('_api_data', {})
+    if api_data:
+        buy_type = api_data.get('buy_type')
+        features = api_data.get('features', {})
+        year = features.get('year') if isinstance(features, dict) else None
+        
+        # Si buy_type == "new" → Neuf (Tier3 = 0 pts)
+        if buy_type == 'new':
+            return {
+                'score': tier_config['tier3']['score'],
+                'tier': 'tier3',
+                'justification': 'Appartement neuf (buy_type: new)',
+                'source': 'api_buy_type'
+            }
+        
+        # Si buy_type == "old" et qu'on a l'année
+        if buy_type == 'old' and year:
+            # Haussmannien (1850-1900) → Tier1 (20 pts)
+            if 1850 <= year <= 1900:
+                return {
+                    'score': tier_config['tier1']['score'],
+                    'tier': 'tier1',
+                    'justification': f'Style haussmannien (construction {year})',
+                    'source': 'api_year',
+                    'year': year
+                }
+            # Ancien avant 1850 → Tier1 (20 pts)
+            elif year < 1850:
+                return {
+                    'score': tier_config['tier1']['score'],
+                    'tier': 'tier1',
+                    'justification': f'Style ancien (construction {year})',
+                    'source': 'api_year',
+                    'year': year
+                }
+            # Ancien 1900-1950 → Tier2 (10 pts) - Ancien mais pas haussmannien
+            elif 1900 < year <= 1950:
+                return {
+                    'score': tier_config['tier2']['score'],
+                    'tier': 'tier2',
+                    'justification': f'Style ancien (construction {year})',
+                    'source': 'api_year',
+                    'year': year
+                }
+            # Récent après 1950 → Tier3 (0 pts)
+            elif year > 1950:
+                return {
+                    'score': tier_config['tier3']['score'],
+                    'tier': 'tier3',
+                    'justification': f'Style récent (construction {year})',
+                    'source': 'api_year',
+                    'year': year
+                }
+        
+        # Si buy_type == "old" mais pas d'année, continuer avec fallback
+    
+    # PRIORITÉ 2: Essayer avec style_analysis existant (analyse IA)
     style_analysis = apartment.get('style_analysis', {})
     style_data = style_analysis.get('style', {})
     style_type = style_data.get('type', '').lower()
@@ -321,11 +416,11 @@ def score_style(apartment, config):
             'justification': f"Style atypique détecté (loft/atypique/unique/original)"
         }
     
-    # Tout le reste = Neuf (0 pts)
+    # Si rien n'est trouvé après toutes les tentatives = note moyenne par défaut
     return {
-        'score': tier_config['tier3']['score'],
-        'tier': 'tier3',
-        'justification': "Style neuf (par défaut)"
+        'score': tier_config['tier2']['score'],
+        'tier': 'tier2',
+        'justification': "Style non analysé - note moyenne par défaut"
     }
 
 
@@ -368,16 +463,16 @@ def score_ensoleillement(apartment, config):
             'details': apartment.get('exposition', {}).get('details', {})
         }
     except Exception as e:
-        # Fallback en cas d'erreur
+        # Fallback en cas d'erreur - note moyenne par défaut
         import traceback
         print(f"⚠️ Erreur dans score_ensoleillement: {e}")
         traceback.print_exc()
         
-        # Fallback minimal
+        # Fallback avec note moyenne par défaut
         return {
-            'score': tier_config['tier3']['score'],
-            'tier': 'tier3',
-            'justification': 'Erreur de calcul',
+            'score': tier_config['tier2']['score'],
+            'tier': 'tier2',
+            'justification': 'Ensoleillement non analysé - note moyenne par défaut',
             'confidence': 50,
             'details': {}
         }
@@ -464,6 +559,40 @@ def score_cuisine(apartment, config):
     """Score cuisine avec validation croisée texte + photos"""
     tier_config = config['axes']['cuisine']['tiers']
     
+    # PRIORITÉ: Utiliser les données existantes si disponibles (depuis style_analysis)
+    style_analysis = apartment.get('style_analysis', {})
+    cuisine_data = style_analysis.get('cuisine', {})
+    
+    # Si on a déjà une analyse cuisine avec des données valides, l'utiliser
+    if cuisine_data and cuisine_data.get('ouverte') is not None:
+        cuisine_ouverte = cuisine_data.get('ouverte', False)
+        confidence = cuisine_data.get('confidence', 0)
+        justification = cuisine_data.get('justification', '')
+        
+        if cuisine_ouverte:
+            return {
+                'score': tier_config['tier1']['score'],
+                'tier': 'tier1',
+                'justification': justification or "Cuisine ouverte",
+                'details': {
+                    'confidence': confidence,
+                    'photo_validation': cuisine_data.get('photo_validation'),
+                    'validation_status': 'from_style_analysis'
+                }
+            }
+        else:
+            return {
+                'score': tier_config['tier3']['score'],
+                'tier': 'tier3',
+                'justification': justification or "Cuisine fermée",
+                'details': {
+                    'confidence': confidence,
+                    'photo_validation': cuisine_data.get('photo_validation'),
+                    'validation_status': 'from_style_analysis'
+                }
+            }
+    
+    # Sinon, analyser depuis le texte et les photos
     try:
         from extract_cuisine_text import CuisineTextExtractor
         extractor = CuisineTextExtractor()
@@ -485,9 +614,23 @@ def score_cuisine(apartment, config):
             description, caracteristiques, photos_urls
         )
         
-        cuisine_ouverte = cuisine_result.get('ouverte', False)
+        cuisine_ouverte = cuisine_result.get('ouverte')
+        validation_status = cuisine_result.get('validation_status', '')
         
-        # tier1: ouverte uniquement (10pts)
+        # Si cuisine non analysée (ouverte est None) → tier2 (note moyenne)
+        if cuisine_ouverte is None:
+            return {
+                'score': tier_config['tier2']['score'],
+                'tier': 'tier2',
+                'justification': cuisine_result.get('justification', "Cuisine non analysée - note moyenne par défaut"),
+                'details': {
+                    'confidence': cuisine_result.get('confidence', 0),
+                    'photo_validation': cuisine_result.get('photo_validation'),
+                    'validation_status': validation_status
+                }
+            }
+        
+        # tier1: ouverte (10pts) - analysée et confirmée ouverte
         if cuisine_ouverte:
             return {
                 'score': tier_config['tier1']['score'],
@@ -496,11 +639,11 @@ def score_cuisine(apartment, config):
                 'details': {
                     'confidence': cuisine_result.get('confidence', 0),
                     'photo_validation': cuisine_result.get('photo_validation'),
-                    'validation_status': cuisine_result.get('validation_status')
+                    'validation_status': validation_status
                 }
             }
         
-        # tier3: fermée ou ambigu (0pts)
+        # tier3: fermée (0pts) - analysée et confirmée fermée
         return {
             'score': tier_config['tier3']['score'],
             'tier': 'tier3',
@@ -508,15 +651,24 @@ def score_cuisine(apartment, config):
             'details': {
                 'confidence': cuisine_result.get('confidence', 0),
                 'photo_validation': cuisine_result.get('photo_validation'),
-                'validation_status': cuisine_result.get('validation_status')
+                'validation_status': validation_status
             }
         }
     except Exception as e:
         # Fallback sur méthode ancienne si erreur
         style_analysis = apartment.get('style_analysis', {})
         cuisine_data = style_analysis.get('cuisine', {})
-        cuisine_ouverte = cuisine_data.get('ouverte', False)
+        cuisine_ouverte = cuisine_data.get('ouverte')
         
+        # Si cuisine non analysée (ouverte est None) → note moyenne par défaut
+        if cuisine_ouverte is None:
+            return {
+                'score': tier_config['tier2']['score'],
+                'tier': 'tier2',
+                'justification': "Cuisine non analysée - note moyenne par défaut"
+            }
+        
+        # tier1: ouverte
         if cuisine_ouverte:
             return {
                 'score': tier_config['tier1']['score'],
@@ -524,6 +676,7 @@ def score_cuisine(apartment, config):
                 'justification': "Cuisine ouverte"
             }
         
+        # tier3: fermée
         return {
             'score': tier_config['tier3']['score'],
             'tier': 'tier3',
@@ -568,6 +721,34 @@ def calculate_bonus_malus(apartment, config):
 
 def score_baignoire(apartment, config):
     """Score baignoire avec validation croisée texte + photos"""
+    tier_config = config['axes']['baignoire']['tiers']
+    
+    # PRIORITÉ: Utiliser les données existantes si disponibles
+    baignoire_data = apartment.get('baignoire', {})
+    
+    # Si on a déjà une analyse baignoire avec des données valides, l'utiliser
+    if baignoire_data and baignoire_data.get('has_baignoire') is not None:
+        has_baignoire = baignoire_data.get('has_baignoire', False)
+        confidence = baignoire_data.get('confidence', 0)
+        justification = baignoire_data.get('justification', '')
+        details = baignoire_data.get('details', {})
+        
+        if has_baignoire:
+            return {
+                'score': tier_config['tier1']['score'],
+                'tier': 'tier1',
+                'justification': justification or 'Baignoire détectée',
+                'details': details
+            }
+        else:
+            return {
+                'score': tier_config['tier3']['score'],
+                'tier': 'tier3',
+                'justification': justification or 'Pas de baignoire détectée',
+                'details': details
+            }
+    
+    # Sinon, analyser depuis le texte et les photos
     try:
         from extract_baignoire import BaignoireExtractor
         extractor = BaignoireExtractor()
@@ -589,24 +770,35 @@ def score_baignoire(apartment, config):
             description, caracteristiques, photos_urls
         )
         
-        has_baignoire = baignoire_result.get('has_baignoire', False)
+        has_baignoire = baignoire_result.get('has_baignoire')
         score_baignoire_val = baignoire_result.get('score', 0)
         tier_baignoire = baignoire_result.get('tier', 'tier3')
+        validation_status = baignoire_result.get('details', {}).get('validation_status', '')
+        justification = baignoire_result.get('justification', '')
         
-        # tier1: baignoire présente = 10pts (good)
-        if has_baignoire:
+        # Si baignoire non analysée (has_baignoire est None) → tier2 (note moyenne)
+        if has_baignoire is None:
             return {
-                'score': 10,
-                'tier': 'tier1',
-                'justification': baignoire_result.get('justification', 'Baignoire détectée'),
+                'score': tier_config['tier2']['score'],
+                'tier': 'tier2',
+                'justification': justification or "Salle de bain non analysée - note moyenne par défaut",
                 'details': baignoire_result.get('details', {})
             }
         
-        # tier3: pas de baignoire = 0pts
+        # tier1: baignoire présente = 10pts - analysée et confirmée présente
+        if has_baignoire:
+            return {
+                'score': tier_config['tier1']['score'],
+                'tier': 'tier1',
+                'justification': justification or 'Baignoire détectée',
+                'details': baignoire_result.get('details', {})
+            }
+        
+        # tier3: pas de baignoire = 0pts - analysée et confirmée absente
         return {
-            'score': 0,
+            'score': tier_config['tier3']['score'],
             'tier': 'tier3',
-            'justification': baignoire_result.get('justification', 'Pas de baignoire détectée'),
+            'justification': justification or 'Pas de baignoire détectée',
             'details': baignoire_result.get('details', {})
         }
     except Exception as e:
@@ -614,19 +806,104 @@ def score_baignoire(apartment, config):
         from criteria.baignoire import format_baignoire
         formatted = format_baignoire(apartment)
         has_baignoire = formatted.get('main_value') == 'Oui'
+        main_value = formatted.get('main_value', '')
         
         if has_baignoire:
             return {
-                'score': 10,
+                'score': tier_config['tier1']['score'],
                 'tier': 'tier1',
                 'justification': 'Baignoire détectée'
             }
         
+        # Si pas de données ou non spécifiée → note moyenne par défaut
+        if not main_value or main_value == 'Non spécifié':
+            return {
+                'score': tier_config['tier2']['score'],
+                'tier': 'tier2',
+                'justification': 'Salle de bain non analysée - note moyenne par défaut'
+            }
+        
         return {
-            'score': 0,
+            'score': tier_config['tier3']['score'],
             'tier': 'tier3',
             'justification': 'Pas de baignoire détectée'
         }
+
+
+def score_ascenseur(apartment, config):
+    """Score présence d'ascenseur
+    Score: 10pts si présent, 0pts sinon
+    """
+    # Vérifier depuis API data en priorité
+    api_data = apartment.get('_api_data', {})
+    features = api_data.get('features', {})
+    if isinstance(features, dict):
+        lift = features.get('lift', 0)
+        if lift == 1:
+            return {
+                'score': 10,
+                'tier': 'tier1',
+                'justification': 'Ascenseur présent (données API)'
+            }
+    
+    # Vérifier depuis caractéristiques
+    caracteristiques = apartment.get('caracteristiques', '').lower()
+    description = apartment.get('description', '').lower()
+    text_combined = f"{caracteristiques} {description}"
+    
+    if 'ascenseur' in text_combined:
+        return {
+            'score': 10,
+            'tier': 'tier1',
+            'justification': 'Ascenseur détecté dans le texte'
+        }
+    
+    # Pas d'ascenseur détecté
+    return {
+        'score': 0,
+        'tier': 'tier3',
+        'justification': 'Pas d\'ascenseur détecté'
+    }
+
+
+def score_renove(apartment, config):
+    """Score rénové/restauré
+    Score: 10pts si rénové, 0pts sinon
+    """
+    description = apartment.get('description', '').lower()
+    caracteristiques = apartment.get('caracteristiques', '').lower()
+    text_combined = f"{description} {caracteristiques}"
+    
+    # Mots-clés indiquant rénovation
+    renov_keywords = ['rénové', 'renove', 'restauré', 'restaure', 'refait', 'refait à neuf', 
+                     'entièrement rénové', 'entièrement restaure', 'récemment rénové']
+    
+    for keyword in renov_keywords:
+        if keyword in text_combined:
+            return {
+                'score': 10,
+                'tier': 'tier1',
+                'justification': f'Appartement rénové détecté ({keyword})'
+            }
+    
+    # Vérifier aussi dans style_analysis si disponible
+    style_analysis = apartment.get('style_analysis', {})
+    if style_analysis:
+        style_text = str(style_analysis).lower()
+        for keyword in renov_keywords:
+            if keyword in style_text:
+                return {
+                    'score': 10,
+                    'tier': 'tier1',
+                    'justification': f'Appartement rénové détecté dans analyse style'
+                }
+    
+    # Pas de rénovation détectée
+    return {
+        'score': 0,
+        'tier': 'tier3',
+        'justification': 'Pas de rénovation détectée'
+    }
 
 
 def score_apartment(apartment, config):

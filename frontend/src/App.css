@@ -1,2 +1,58 @@
 /* Styles spécifiques à App.jsx - styles globaux dans index.css */
 
+.main-navigation {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem 2rem;
+  background: white;
+  border-bottom: 1px solid #eee;
+  margin-bottom: 2rem;
+}
+
+.nav-button {
+  padding: 0.75rem 1.5rem;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-size: 1rem;
+  font-weight: 500;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.nav-button:hover {
+  color: #4a90e2;
+}
+
+.nav-button.active {
+  color: #4a90e2;
+  border-bottom-color: #4a90e2;
+}
+
+.nav-button-create-alert {
+  margin-left: auto;
+  background: #4a90e2;
+  color: white;
+  border-radius: 6px;
+  border-bottom: none;
+}
+
+.nav-button-create-alert:hover {
+  background: #357abd;
+  color: white;
+}
+
+@media (max-width: 768px) {
+  .main-navigation {
+    padding: 1rem;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .nav-button {
+    text-align: left;
+    padding: 0.5rem 1rem;
+  }
+}
+

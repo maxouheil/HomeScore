@@ -702,6 +702,230 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
             'detected_photos': detected_photos
         }
     
+    def analyze_photos_visavis(self, photos_urls: List[str]) -> Dict:
+        """Analyse les photos pour déterminer la distance du vis-à-vis depuis les fenêtres de la pièce principale
+        
+        Retourne:
+        - visavis_distance: distance en mètres (int ou None)
+        - visavis_category: "good" (>20m), "moyen" (10-20m), "bad" (<10m)
+        """
+        if not photos_urls:
+            return {
+                'visavis_distance': None,
+                'visavis_category': None,
+                'confidence': 0.0,
+                'justification': 'Aucune photo disponible',
+                'photos_analyzed': 0,
+                'details': {}
+            }
+        
+        try:
+            # Analyser les premières photos (max 5 pour trouver des vues par les fenêtres)
+            photos_to_analyze = photos_urls[:5]
+            analysis_results = []
+            
+            for i, photo_url in enumerate(photos_to_analyze):
+                print(f"   📸 Analyse vis-à-vis photo {i+1}/{len(photos_to_analyze)}: {photo_url[:50]}...")
+                result = self._analyze_single_photo_visavis(photo_url)
+                if result:
+                    result['photo_number'] = i + 1
+                    analysis_results.append(result)
+            
+            # Agréger les résultats
+            return self._aggregate_visavis_results(analysis_results)
+            
+        except Exception as e:
+            return {
+                'visavis_distance': None,
+                'visavis_category': None,
+                'confidence': 0.0,
+                'justification': f'Erreur analyse photos: {e}',
+                'photos_analyzed': 0,
+                'details': {}
+            }
+    
+    def _analyze_single_photo_visavis(self, photo_url: str) -> Optional[Dict]:
+        """Analyse une photo pour déterminer la distance du vis-à-vis avec cache"""
+        # Vérifier le cache d'abord
+        cached_result = self.cache.get('visavis_photo', photo_url)
+        if cached_result:
+            return cached_result
+        
+        try:
+            response = requests.get(photo_url, timeout=5)
+            if response.status_code != 200:
+                return None
+            
+            image_base64 = base64.b64encode(response.content).decode('utf-8')
+            
+            headers = {
+                'Authorization': f'Bearer {self.openai_api_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            payload = {
+                'model': 'gpt-4o-mini',
+                'messages': [
+                    {
+                        'role': 'user',
+                        'content': [
+                            {
+                                'type': 'text',
+                                'text': """Analyse cette photo d'appartement et regarde par les fenêtres de la PIÈCE PRINCIPALE (salon/séjour) pour déterminer la distance du vis-à-vis en mètres.
+
+## TÂCHE : Évaluer la distance du vis-à-vis depuis les fenêtres de la pièce principale
+
+### IMPORTANT :
+- Analyser UNIQUEMENT les fenêtres de la pièce principale (salon/séjour)
+- Ignorer les fenêtres des chambres, cuisine, salle de bain
+- Estimer la distance en mètres jusqu'aux bâtiments/immeubles visibles en face
+
+### INDICES À CHERCHER :
+- Fenêtres de la pièce principale visibles dans la photo
+- Vue depuis ces fenêtres (immeubles, bâtiments en face)
+- Distance estimée en mètres jusqu'aux bâtiments visibles
+- Largeur de la rue (si visible) pour aider à estimer la distance
+- Si pas de vis-à-vis visible ou très lointain (>50m), utiliser une grande distance (ex: 100m)
+
+### ESTIMATION DE DISTANCE :
+- Rue très étroite (<10m de large) → vis-à-vis probablement <10m
+- Rue moyenne (10-15m de large) → vis-à-vis probablement 10-20m
+- Rue large (>15m de large) → vis-à-vis probablement >20m
+- Vue dégagée, immeubles au loin → distance >30m
+
+Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
+{
+    "distance_metres": nombre entier (distance estimée en mètres, ou null si aucune fenêtre visible),
+    "fenetres_principales_visibles": true|false,
+    "vue_par_fenetre": "degagee|moyenne|obstruee",
+    "largeur_rue_estimee": "large|moyenne|etroite|non_visible",
+    "confidence": 0.0-1.0,
+    "details": "description détaillée de ce que tu vois par les fenêtres de la pièce principale"
+}"""
+                            },
+                            {
+                                'type': 'image_url',
+                                'image_url': {
+                                    'url': f'data:image/jpeg;base64,{image_base64}'
+                                }
+                            }
+                        ]
+                    }
+                ],
+                'max_tokens': 400
+            }
+            
+            response = requests.post(
+                f"{self.openai_base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=15
+            )
+            
+            if response.status_code != 200:
+                return None
+            
+            result = response.json()
+            content = result['choices'][0]['message']['content']
+            
+            # Parser le JSON
+            try:
+                if '```json' in content:
+                    content = content.split('```json')[1].split('```')[0].strip()
+                elif '```' in content:
+                    content = content.split('```')[1].split('```')[0].strip()
+                
+                analysis = json.loads(content)
+                
+                # Mettre en cache avant de retourner
+                self.cache.set('visavis_photo', photo_url, analysis)
+                
+                return analysis
+            except json.JSONDecodeError:
+                return None
+                
+        except Exception as e:
+            return None
+    
+    def _aggregate_visavis_results(self, results: List[Dict]) -> Dict:
+        """Agrège les résultats de plusieurs photos pour le vis-à-vis
+        
+        Calcule la distance moyenne et catégorise selon:
+        - <10m = bad
+        - 10-20m = moyen
+        - >20m = good
+        """
+        if not results:
+            return {
+                'visavis_distance': None,
+                'visavis_category': None,
+                'confidence': 0.0,
+                'justification': 'Aucune photo analysée avec succès',
+                'photos_analyzed': 0,
+                'details': {}
+            }
+        
+        # Extraire les distances en mètres depuis les résultats
+        distances = []
+        photos_with_windows = []
+        
+        for r in results:
+            photo_number = r.get('photo_number', 0)
+            distance_metres = r.get('distance_metres')
+            fenetres_visibles = r.get('fenetres_principales_visibles', False)
+            
+            if fenetres_visibles and distance_metres is not None:
+                try:
+                    # Convertir en int si c'est un nombre
+                    distance_int = int(float(distance_metres))
+                    if distance_int > 0:  # Ignorer les distances invalides
+                        distances.append(distance_int)
+                        photos_with_windows.append(photo_number)
+                except (ValueError, TypeError):
+                    pass
+        
+        if not distances:
+            return {
+                'visavis_distance': None,
+                'visavis_category': None,
+                'confidence': 0.0,
+                'justification': 'Aucune fenêtre de pièce principale visible sur les photos analysées',
+                'photos_analyzed': len(results),
+                'details': {}
+            }
+        
+        # Calculer la distance moyenne
+        avg_distance = int(sum(distances) / len(distances))
+        
+        # Catégoriser selon les seuils
+        if avg_distance < 10:
+            category = 'bad'
+        elif avg_distance <= 20:
+            category = 'moyen'
+        else:
+            category = 'good'
+        
+        # Confiance moyenne
+        confidences = [r.get('confidence', 0.5) for r in results if r.get('fenetres_principales_visibles', False)]
+        avg_confidence = sum(confidences) / len(confidences) if confidences else 0.5
+        
+        justification = f"Vis-à-vis estimé à {avg_distance}m depuis {len(photos_with_windows)} photo(s) de la pièce principale"
+        
+        return {
+            'visavis_distance': avg_distance,
+            'visavis_category': category,
+            'confidence': avg_confidence,
+            'justification': justification,
+            'photos_analyzed': len(results),
+            'details': {
+                'distances': distances,
+                'photos_with_windows': photos_with_windows,
+                'min_distance': min(distances),
+                'max_distance': max(distances)
+            }
+        }
+    
+    
     def validate_text_with_photos(self, text_result: Dict, photo_result: Dict, criterion: str) -> Dict:
         """Valide un résultat textuel avec un résultat photo pour ajuster la confiance
         

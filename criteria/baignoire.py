@@ -67,16 +67,25 @@ def format_baignoire(apartment):
             confidence = baignoire_data.get('confidence')
     
     # Si toujours None, vérifier le tier pour déduire (seulement si pas de résultats photos)
-    if has_baignoire is None:
-        tier = baignoire_score.get('tier', 'tier3')
+    tier = baignoire_score.get('tier', 'tier3')
+    
+    # Si tier2 = non analysée (note moyenne par défaut) → retourner "Non spécifié"
+    if tier == 'tier2':
+        main_value = "Non spécifié"
+    elif has_baignoire is None:
         # tier1 = baignoire présente (10pts), tier3 = pas de baignoire (0pts)
         has_baignoire = (tier == 'tier1')
-    
-    # Déterminer la valeur principale
-    if has_baignoire:
-        main_value = "Oui"
+        # Déterminer la valeur principale
+        if has_baignoire:
+            main_value = "Oui"
+        else:
+            main_value = "Non"
     else:
-        main_value = "Non"
+        # Déterminer la valeur principale
+        if has_baignoire:
+            main_value = "Oui"
+        else:
+            main_value = "Non"
     
     # Convertir confiance en pourcentage
     confidence_pct = None
@@ -175,13 +184,13 @@ def format_baignoire(apartment):
             # Pas de photos analysées → "Non spécifié"
             indices_parts.append("Non spécifié")
     
-    # Formater avec le préfixe "Baignoire Indice:"
+    # Formater avec le préfixe "Baignoire Indice:" sur une ligne séparée
     indices_str = None
     if indices_parts:
-        indices_str = "Baignoire Indice: " + " · ".join(indices_parts)
+        indices_str = "Baignoire Indice:\n" + " · ".join(indices_parts)
     else:
         # Fallback si aucun indice trouvé
-        indices_str = "Baignoire Indice: Non spécifié"
+        indices_str = "Baignoire Indice:\nNon spécifié"
     
     return {
         'main_value': main_value,

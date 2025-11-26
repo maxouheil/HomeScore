@@ -42,6 +42,12 @@ def load_scored_apartments():
                         apt_id = apt_data.get('id')
                         if apt_id:
                             # Les fichiers individuels ont priorité sur scraped_apartments.json
+                            # MAIS préserver l'exposition depuis scraped_apartments.json si elle existe (pour avoir visavis_distance)
+                            if apt_id in scraped_data and 'exposition' in scraped_data[apt_id] and scraped_data[apt_id]['exposition'].get('details', {}).get('visavis_distance') is not None:
+                                # Préserver l'exposition avec visavis_distance depuis scraped_apartments.json
+                                if 'exposition' not in apt_data:
+                                    apt_data['exposition'] = {}
+                                apt_data['exposition'] = scraped_data[apt_id]['exposition']
                             scraped_data[apt_id] = apt_data
                 except Exception as e:
                     # Ignorer les erreurs de lecture de fichiers individuels
@@ -58,15 +64,28 @@ def load_scored_apartments():
                 # Fusionner d'autres données utiles si nécessaire
                 if 'photos' in scraped_apt:
                     apartment['photos'] = scraped_apt['photos']
-                # Fusionner l'exposition depuis scraped_apt pour avoir brightness_value
+                # Fusionner localisation et localisation_precise depuis scraped_apt (priorité sur scores)
+                if 'localisation' in scraped_apt:
+                    apartment['localisation'] = scraped_apt['localisation']
+                if 'localisation_precise' in scraped_apt:
+                    apartment['localisation_precise'] = scraped_apt['localisation_precise']
+                # Fusionner transports et map_info pour avoir les métros à jour
+                if 'transports' in scraped_apt:
+                    apartment['transports'] = scraped_apt['transports']
+                if 'map_info' in scraped_apt:
+                    if 'map_info' not in apartment:
+                        apartment['map_info'] = {}
+                    apartment['map_info'].update(scraped_apt['map_info'])
+                # Fusionner l'exposition depuis scraped_apt pour avoir brightness_value et visavis
                 if 'exposition' in scraped_apt:
                     scraped_expo = scraped_apt['exposition']
                     # Si l'appartement a déjà une exposition, fusionner les détails
                     if 'exposition' in apartment:
-                        # Fusionner les détails pour avoir brightness_value
+                        # Fusionner les détails pour avoir brightness_value et visavis
                         if 'details' in scraped_expo:
                             if 'details' not in apartment['exposition']:
                                 apartment['exposition']['details'] = {}
+                            # Fusionner tous les détails (brightness_value, visavis, etc.)
                             apartment['exposition']['details'].update(scraped_expo['details'])
                         # Mettre à jour l'exposition principale si elle existe dans scraped
                         if scraped_expo.get('exposition'):
@@ -75,11 +94,31 @@ def load_scored_apartments():
                         if 'exposition_explicite' in scraped_expo:
                             apartment['exposition']['exposition_explicite'] = scraped_expo['exposition_explicite']
                     else:
-                        # Sinon, utiliser directement l'exposition scrapée
-                        apartment['exposition'] = scraped_expo
+                        # Sinon, utiliser directement l'exposition scrapée (inclut visavis dans details)
+                        # Faire une copie profonde pour éviter les références partagées
+                        import copy
+                        apartment['exposition'] = copy.deepcopy(scraped_expo)
+                        # S'assurer que le vis-à-vis est bien copié (vérification supplémentaire)
+                        if scraped_expo.get('details', {}).get('visavis_distance') is not None:
+                            if 'details' not in apartment['exposition']:
+                                apartment['exposition']['details'] = {}
+                            # Toujours copier le vis-à-vis pour être sûr
+                            apartment['exposition']['details']['visavis_distance'] = scraped_expo['details']['visavis_distance']
+                            if 'visavis_category' in scraped_expo.get('details', {}):
+                                apartment['exposition']['details']['visavis_category'] = scraped_expo['details']['visavis_category']
+                            if 'visavis_confidence' in scraped_expo.get('details', {}):
+                                apartment['exposition']['details']['visavis_confidence'] = scraped_expo['details']['visavis_confidence']
+                            if 'visavis_justification' in scraped_expo.get('details', {}):
+                                apartment['exposition']['details']['visavis_justification'] = scraped_expo['details']['visavis_justification']
                 
                 # Si pas d'exposition ou pas d'exposition_explicite, essayer d'extraire depuis la description
-                if 'exposition' not in apartment or not apartment.get('exposition', {}).get('exposition_explicite'):
+                # MAIS seulement si l'exposition n'a pas déjà été copiée depuis scraped_apt (pour préserver visavis_distance)
+                # Vérifier si l'exposition a été copiée depuis scraped_apt (présence de visavis_distance ou brightness_value)
+                exposition_has_visavis = apartment.get('exposition', {}).get('details', {}).get('visavis_distance') is not None
+                exposition_has_brightness = apartment.get('exposition', {}).get('details', {}).get('brightness_value') is not None
+                exposition_was_copied = exposition_has_visavis or exposition_has_brightness
+                
+                if 'exposition' not in apartment or (not apartment.get('exposition', {}).get('exposition_explicite') and not exposition_was_copied):
                     description = scraped_apt.get('description', '') or apartment.get('description', '')
                     caracteristiques = scraped_apt.get('caracteristiques', '') or apartment.get('caracteristiques', '')
                     if description:
@@ -101,11 +140,17 @@ def load_scored_apartments():
                                 expo_found = match.group(1) if match.lastindex else match.group(0)
                                 expo_found = expo_found.replace('-', '_').replace(' ', '_')
                                 
-                                # Créer ou mettre à jour l'objet exposition
-                                if 'exposition' not in apartment:
-                                    apartment['exposition'] = {}
-                                apartment['exposition']['exposition'] = expo_found
-                                apartment['exposition']['exposition_explicite'] = True
+                                # Créer ou mettre à jour l'objet exposition (préserver les détails existants)
+                                # IMPORTANT: Ne pas écraser l'exposition si elle a déjà été copiée depuis scraped_apt avec visavis_distance
+                                exposition_has_visavis = apartment.get('exposition', {}).get('details', {}).get('visavis_distance') is not None
+                                if not exposition_has_visavis:
+                                    # Seulement créer/mettre à jour si pas de visavis (pour ne pas écraser)
+                                    if 'exposition' not in apartment:
+                                        apartment['exposition'] = {}
+                                    elif 'details' not in apartment['exposition']:
+                                        apartment['exposition']['details'] = {}
+                                    apartment['exposition']['exposition'] = expo_found
+                                    apartment['exposition']['exposition_explicite'] = True
                                 
                                 # Ajouter etage_num si disponible
                                 if 'details' not in apartment['exposition']:
@@ -613,12 +658,12 @@ def format_style_criterion(apartment):
     if justification:
         # Utiliser la justification comme indices si elle est disponible
         # La justification contient déjà une phrase qui justifie le côté ancien ou neuf
-        indices_str = f"Style Indice: {justification}"
+        indices_str = f"Style Indice:\n{justification}"
     else:
         # Fallback: chercher dans style_data.justification
         style_justification = style_data.get('justification', '')
         if style_justification:
-            indices_str = f"Style Indice: {style_justification}"
+            indices_str = f"Style Indice:\n{style_justification}"
         else:
             # Fallback 2: extraire depuis details ou style_haussmannien
             indices = []
@@ -647,15 +692,15 @@ def format_style_criterion(apartment):
                         indices = elements[:3]
             
             if indices:
-                indices_str = "Style Indice: " + " · ".join(indices)
+                indices_str = "Style Indice:\n" + " · ".join(indices)
             else:
                 # Dernier fallback: créer une phrase basée sur le style détecté
                 if 'haussmann' in style_type.lower():
-                    indices_str = "Style Indice: Style ancien détecté (moulures, parquet, hauteur sous plafond)"
+                    indices_str = "Style Indice:\nStyle ancien détecté (moulures, parquet, hauteur sous plafond)"
                 elif 'moderne' in style_type.lower() or 'contemporain' in style_type.lower():
-                    indices_str = "Style Indice: Style neuf détecté (design épuré, matériaux modernes)"
+                    indices_str = "Style Indice:\nStyle neuf détecté (design épuré, matériaux modernes)"
                 else:
-                    indices_str = "Style Indice: Style non spécifié"
+                    indices_str = "Style Indice:\nStyle non spécifié"
     
     return {
         'main_value': style_name,
@@ -756,10 +801,10 @@ def format_exposition_criterion(apartment):
     elif 'balcon' in text:
         indices_parts.append("Balcon mentionné")
     
-    # Formater avec le préfixe "Expo Indice:"
+    # Formater avec le préfixe "Expo Indice:" sur une ligne séparée
     indices_str = None
     if indices_parts:
-        indices_str = "Expo Indice: " + " · ".join(indices_parts)
+        indices_str = "Expo Indice:\n" + " · ".join(indices_parts)
     
     return {
         'main_value': main_value,
@@ -803,7 +848,7 @@ def format_cuisine_criterion(apartment):
             return {
                 'main_value': main_value,
                 'confidence': None,
-                'indices': "Cuisine Indice: Non spécifié"
+                'indices': "Cuisine Indice:\nNon spécifié"
             }
         # tier1 = ouverte (10pts), tier3 = fermée (0pts)
         cuisine_ouverte = (tier == 'tier1')
@@ -892,8 +937,8 @@ def format_cuisine_criterion(apartment):
         # Si aucune détection photo, dire qu'on a analysé les 5 premières images
         indices_parts.append(f"Cuisine {main_value.lower()} - 5 premières images analysées")
     
-    # Formater avec le préfixe "Cuisine Indice:"
-    indices_str = "Cuisine Indice: " + " · ".join(indices_parts)
+    # Formater avec le préfixe "Cuisine Indice:" sur une ligne séparée
+    indices_str = "Cuisine Indice:\n" + " · ".join(indices_parts)
     
     return {
         'main_value': main_value,
@@ -914,7 +959,7 @@ def format_baignoire_criterion(apartment, baignoire_extractor=None):
         return {
             'main_value': "Non spécifié",
             'confidence': None,
-            'indices': "Baignoire Indice: Non spécifié"
+            'indices': "Baignoire Indice:\nNon spécifié"
         }
     
     try:

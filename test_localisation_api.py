@@ -140,3 +140,6 @@ async def test_localisation_from_api():
 if __name__ == "__main__":
     asyncio.run(test_localisation_from_api())
 
+
+
+

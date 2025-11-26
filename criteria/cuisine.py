@@ -47,17 +47,28 @@ def format_cuisine(apartment):
             confidence = cuisine_data.get('confidence')
     
     # Si toujours None OU si conflit, vérifier le tier pour déduire (tier = résultat final après validation)
-    if cuisine_ouverte is None or validation_status == 'conflict':
-        tier = cuisine_score.get('tier', 'tier3')
+    tier = cuisine_score.get('tier', 'tier3')
+    
+    # PRIORITÉ: Si tier2 = non analysée (note moyenne par défaut) → retourner "Non spécifié"
+    # Cette vérification doit être faite AVANT toute autre logique pour garantir la cohérence
+    if tier == 'tier2':
+        main_value = "Non spécifié"
+        # Ne pas modifier cuisine_ouverte, on retourne directement
+    elif cuisine_ouverte is None or validation_status == 'conflict':
         # tier1 = ouverte (10pts), tier3 = fermée (0pts)
         # En cas de conflit, le tier représente le résultat final après validation croisée
         cuisine_ouverte = (tier == 'tier1')
-    
-    # Simplifié: seulement Ouverte ou Fermée (plus de Semi Ouverte)
-    if cuisine_ouverte:
-        main_value = "Ouverte"
+        # Simplifié: seulement Ouverte ou Fermée (plus de Semi Ouverte)
+        if cuisine_ouverte:
+            main_value = "Ouverte"
+        else:
+            main_value = "Fermée"
     else:
-        main_value = "Fermée"
+        # Simplifié: seulement Ouverte ou Fermée (plus de Semi Ouverte)
+        if cuisine_ouverte:
+            main_value = "Ouverte"
+        else:
+            main_value = "Fermée"
     
     # Convertir confiance en pourcentage
     confidence_pct = None
@@ -132,13 +143,13 @@ def format_cuisine(apartment):
         if 'comptoir' in details.lower():
             indices_parts.append('comptoir détecté')
     
-    # Formater avec le préfixe "Cuisine Indice:"
+    # Formater avec le préfixe "Cuisine Indice:" sur une ligne séparée
     indices_str = None
     if indices_parts:
-        indices_str = "Cuisine Indice: " + " · ".join(indices_parts)
+        indices_str = "Cuisine Indice:\n" + " · ".join(indices_parts)
     else:
         # Fallback si aucun indice trouvé
-        indices_str = "Cuisine Indice: Non spécifié"
+        indices_str = "Cuisine Indice:\nNon spécifié"
     
     return {
         'main_value': main_value,

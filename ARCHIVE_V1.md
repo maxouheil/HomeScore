@@ -47,3 +47,6 @@ Pour migrer vers v2 :
 **Date d'archivage** : 2025-11-14
 **Version de remplacement** : HomeScore v2 (API)
 
+
+
+

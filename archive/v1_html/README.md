@@ -28,3 +28,6 @@ python homescore_v2.py
 - Les données v1 sont conservées dans `data/`
 - La v2 utilise `data/scores_v2/` pour éviter les conflits
 
+
+
+

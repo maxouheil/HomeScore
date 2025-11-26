@@ -311,7 +311,7 @@ def format_exposition(apartment):
     else:
         main_value_display = "Luminosité moyenne"
     
-    # 4. Construire les indices
+    # 4. Construire les indices (ordre: étage, vis-à-vis, exposition mentionnée)
     indices_parts = []
     
     # Étage
@@ -323,6 +323,11 @@ def format_exposition(apartment):
         else:
             indices_parts.append(f"{etage_num}e étage")
     
+    # Vis-à-vis (depuis analyse image) - juste après l'étage
+    visavis_distance = expo_details.get('visavis_distance')
+    if visavis_distance is not None:
+        indices_parts.append(f"Vis-à-vis {visavis_distance}m")
+    
     # Exposition - UNIQUEMENT si explicitement mentionnée dans le texte
     exposition_explicite = exposition.get('exposition_explicite', False)
     if exposition_explicite and exposition_dir and exposition_dir.lower() not in ['inconnue', 'inconnu', 'non spécifiée', 'none', 'null']:
@@ -331,17 +336,17 @@ def format_exposition(apartment):
         expo_display = '-'.join([word.capitalize() for word in expo_display])
         indices_parts.append(f"{expo_display} mentionné")
     
-    # Luminosité image
+    # Luminosité image (optionnel, à la fin)
     if brightness_value is not None:
         indices_parts.append(f"Luminosité {brightness_value:.1f}")
     
-    # Formater avec le préfixe "Exposition Indice:" (même format que cuisine et baignoire)
+    # Formater avec le préfixe "Exposition Indice:" sur une ligne séparée (même format que cuisine et baignoire)
     indices_str = None
     if indices_parts:
-        indices_str = "Exposition Indice: " + " · ".join(indices_parts)
+        indices_str = "Exposition Indice:\n" + " · ".join(indices_parts)
     else:
         # Fallback si aucun indice trouvé
-        indices_str = "Exposition Indice: Non spécifié"
+        indices_str = "Exposition Indice:\nNon spécifié"
     
     return {
         'main_value': main_value_display,
