@@ -33,8 +33,8 @@ class AlertFilters(BaseModel):
 
 
 class AlertCriteria(BaseModel):
-    primary: List[str] = Field(default=[], max_items=3, min_items=3)
-    secondary: List[str] = Field(default=[], max_items=1, min_items=1)
+    primary: List[str] = Field(default=[], max_items=2, min_items=2)
+    secondary: List[str] = Field(default=[], max_items=2, min_items=2)
 
 
 class AlertCreate(BaseModel):
@@ -110,17 +110,17 @@ async def create_alert(alert_data: AlertCreate) -> Dict[str, Any]:
     """
     Crée une nouvelle alerte
     """
-    # Validation: exactement 3 critères principaux et 1 secondaire
-    if len(alert_data.criteria.primary) != 3:
+    # Validation: exactement 2 critères principaux et 2 secondaires
+    if len(alert_data.criteria.primary) != 2:
         raise HTTPException(
             status_code=400,
-            detail="Une alerte doit avoir exactement 3 critères principaux"
+            detail="Une alerte doit avoir exactement 2 critères principaux"
         )
     
-    if len(alert_data.criteria.secondary) != 1:
+    if len(alert_data.criteria.secondary) != 2:
         raise HTTPException(
             status_code=400,
-            detail="Une alerte doit avoir exactement 1 critère secondaire"
+            detail="Une alerte doit avoir exactement 2 critères secondaires"
         )
     
     # Créer l'alerte
@@ -173,16 +173,16 @@ async def update_alert(alert_id: str, alert_update: AlertUpdate) -> Dict[str, An
         alert['filters'] = alert_update.filters.dict()
     
     if alert_update.criteria is not None:
-        # Validation: exactement 3 critères principaux et 1 secondaire
-        if len(alert_update.criteria.primary) != 3:
+        # Validation: exactement 2 critères principaux et 2 secondaires
+        if len(alert_update.criteria.primary) != 2:
             raise HTTPException(
                 status_code=400,
-                detail="Une alerte doit avoir exactement 3 critères principaux"
+                detail="Une alerte doit avoir exactement 2 critères principaux"
             )
-        if len(alert_update.criteria.secondary) != 1:
+        if len(alert_update.criteria.secondary) != 2:
             raise HTTPException(
                 status_code=400,
-                detail="Une alerte doit avoir exactement 1 critère secondaire"
+                detail="Une alerte doit avoir exactement 2 critères secondaires"
             )
         alert['criteria'] = alert_update.criteria.dict()
     
@@ -214,38 +214,51 @@ async def get_alert_apartments(alert_id: str) -> List[Dict[str, Any]]:
     """
     Récupère les appartements filtrés et scorés selon une alerte
     """
-    alert = load_alert(alert_id)
-    if not alert:
-        raise HTTPException(status_code=404, detail=f"Alerte {alert_id} non trouvée")
-    
-    # Charger tous les appartements
-    all_apartments = load_apartments_data()
-    
-    # Filtrer selon les critères de l'alerte
-    filtered_apartments = filter_apartments_by_alert(all_apartments, alert)
-    
-    # Scorer chaque appartement selon les critères de l'alerte
-    scored_apartments = []
-    for apartment in filtered_apartments:
+    try:
+        alert = load_alert(alert_id)
+        if not alert:
+            raise HTTPException(status_code=404, detail=f"Alerte {alert_id} non trouvée")
+        
+        # Charger tous les appartements
         try:
-            score_result = score_apartment_for_alert(apartment, alert)
-            
-            # Ajouter le score personnalisé à l'appartement
-            apartment_with_score = apartment.copy()
-            apartment_with_score['alert_score'] = score_result['score']
-            apartment_with_score['alert_tier'] = score_result['tier']
-            apartment_with_score['alert_criteria_scores'] = score_result['criteria_scores']
-            
-            scored_apartments.append(apartment_with_score)
+            all_apartments = load_apartments_data()
         except Exception as e:
-            # En cas d'erreur, continuer avec les autres appartements
-            print(f"⚠️ Erreur scoring appartement {apartment.get('id')} pour alerte {alert_id}: {e}")
-            continue
-    
-    # Trier par score décroissant
-    scored_apartments.sort(key=lambda x: x.get('alert_score', 0), reverse=True)
-    
-    return scored_apartments
+            raise HTTPException(status_code=500, detail=f"Erreur lors du chargement des appartements: {str(e)}")
+        
+        # Filtrer selon les critères de l'alerte
+        try:
+            filtered_apartments = filter_apartments_by_alert(all_apartments, alert)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erreur lors du filtrage des appartements: {str(e)}")
+        
+        # Scorer chaque appartement selon les critères de l'alerte
+        scored_apartments = []
+        for apartment in filtered_apartments:
+            try:
+                score_result = score_apartment_for_alert(apartment, alert)
+                
+                # Ajouter le score personnalisé à l'appartement
+                apartment_with_score = apartment.copy()
+                apartment_with_score['alert_score'] = score_result['score']
+                apartment_with_score['alert_tier'] = score_result['tier']
+                apartment_with_score['alert_criteria_scores'] = score_result['criteria_scores']
+                
+                scored_apartments.append(apartment_with_score)
+            except Exception as e:
+                # En cas d'erreur, continuer avec les autres appartements
+                print(f"⚠️ Erreur scoring appartement {apartment.get('id')} pour alerte {alert_id}: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+        
+        # Trier par score décroissant
+        scored_apartments.sort(key=lambda x: x.get('alert_score', 0), reverse=True)
+        
+        return scored_apartments
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur serveur: {str(e)}")
 
 
 

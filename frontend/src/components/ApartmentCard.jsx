@@ -195,7 +195,15 @@ function getStyleName(apartment) {
   return null
 }
 
-function ApartmentCard({ apartment }) {
+function ApartmentCard({ apartment, alertCriteria = null }) {
+  // Debug: vérifier que alertCriteria est bien passé
+  if (apartment?.alert_criteria_scores && !alertCriteria) {
+    console.warn('⚠️ ApartmentCard: alert_criteria_scores présent mais alertCriteria est null!', {
+      apartment_id: apartment.id,
+      has_alert_criteria_scores: !!apartment.alert_criteria_scores,
+      alertCriteria
+    })
+  }
   const apartmentInfo = useMemo(() => {
     const prix = apartment.prix || ''
     const prixK = formatPrixK(prix)
@@ -274,6 +282,40 @@ function ApartmentCard({ apartment }) {
     return calculateMegaScore(apartment)
   }, [apartment])
   
+  // Calculer le score d'alerte en additionnant les 4 critères affichés
+  const calculatedAlertScore = useMemo(() => {
+    if (apartment.alert_criteria_scores && alertCriteria) {
+      const alertCriteriaScores = apartment.alert_criteria_scores
+      const primaryCriteria = alertCriteria.primary || []
+      const secondaryCriteria = alertCriteria.secondary || []
+      const allCriteriaNames = [...primaryCriteria, ...secondaryCriteria]
+      
+      // Additionner les scores des 4 critères
+      let total = 0
+      for (const criterionName of allCriteriaNames) {
+        const criterionScore = alertCriteriaScores[criterionName]
+        if (criterionScore && typeof criterionScore.score === 'number') {
+          total += criterionScore.score
+        }
+      }
+      return total
+    }
+    return null
+  }, [apartment.alert_criteria_scores, alertCriteria])
+  
+  // Utiliser le score calculé (somme des critères) si disponible, sinon alert_score du backend, sinon megaScore
+  const displayScore = useMemo(() => {
+    if (calculatedAlertScore !== null) {
+      return calculatedAlertScore
+    }
+    return apartment.alert_score !== undefined ? apartment.alert_score : megaScore
+  }, [calculatedAlertScore, apartment.alert_score, megaScore])
+  
+  // maxScore: 100 pour alert_score, 90 pour megaScore
+  const maxScore = useMemo(() => {
+    return apartment.alert_score !== undefined ? 100 : 90
+  }, [apartment.alert_score])
+  
   // Récupérer les photos
   const photos = useMemo(() => {
     const apartmentId = apartment.id
@@ -311,101 +353,308 @@ function ApartmentCard({ apartment }) {
   
   return (
     <div className="scorecard" onClick={handleClick}>
-      <Carousel photos={photos} carouselId={carouselId} score={megaScore} />
+      <Carousel photos={photos} carouselId={carouselId} score={displayScore} maxScore={maxScore} apartment={apartment} alertCriteria={alertCriteria} />
       <div className="apartment-info">
         <div className="apartment-title">{apartmentInfoWithEtage.title}</div>
         <div className="apartment-subtitle">{apartmentInfoWithEtage.subtitle}</div>
         
         {/* Critères */}
-        {apartment.scores_detaille && (
-          <>
-            {apartment.scores_detaille.localisation && (() => {
-              const locData = formatLocalisation(apartment)
-              return (
-                <Criterion 
-                  name="Localisation"
-                  score={apartment.scores_detaille.localisation.score || 0}
-                  tier={apartment.scores_detaille.localisation.tier || 'tier3'}
-                  customTitle={locData.title}
-                  customDescription={locData.description}
-                  descriptionClass={locData.descriptionClass}
-                />
-              )
-            })()}
-            {apartment.scores_detaille.prix && (() => {
-              const prixData = formatPrixCriterion(apartment)
-              return (
-                <Criterion 
-                  name="Prix"
-                  score={apartment.scores_detaille.prix.score || 0}
-                  tier={apartment.scores_detaille.prix.tier || 'tier3'}
-                  customTitle={prixData.title}
-                  customDescription={prixData.description}
-                />
-              )
-            })()}
-            {apartment.scores_detaille.style && (() => {
-              const styleData = formatStyleCriterion(apartment)
-              return (
-                <Criterion 
-                  name="Style"
-                  score={apartment.scores_detaille.style.score || 0}
-                  tier={apartment.scores_detaille.style.tier || 'tier3'}
-                  customTitle={styleData.title}
-                  customDescription={styleData.description}
-                  confidence={apartment.style_analysis?.style?.confidence}
-                />
-              )
-            })()}
-            {apartment.scores_detaille.ensoleillement && (() => {
-              const expoData = formatExpositionCriterion(apartment, etage)
-              let tier = apartment.scores_detaille.ensoleillement.tier || 'tier3'
+        {(() => {
+          // Si c'est un résultat d'alerte, afficher d'abord les critères de l'alerte
+          if (apartment.alert_criteria_scores && alertCriteria) {
+            const alertCriteriaScores = apartment.alert_criteria_scores
+            // Utiliser l'ordre depuis alertCriteria (primary puis secondary)
+            const primaryCriteria = alertCriteria.primary || []
+            const secondaryCriteria = alertCriteria.secondary || []
+            const orderedAlertCriteriaNames = [...primaryCriteria, ...secondaryCriteria]
+            // Filtrer pour ne garder que ceux qui ont des scores
+            const alertCriteriaNames = orderedAlertCriteriaNames.filter(name => alertCriteriaScores[name])
+            
+            // Séparer les critères de l'alerte (top 4) et les autres
+            const alertCriteriaSet = new Set(alertCriteriaNames)
+            const otherCriteria = []
+            
+            // Récupérer les critères standards qui ne sont pas dans l'alerte
+            if (apartment.scores_detaille) {
+              const standardCriteria = {
+                'localisation': { key: 'localisation', name: 'Localisation', alertKeys: ['quartier'] },
+                'prix': { key: 'prix', name: 'Prix', alertKeys: ['prix'] },
+                'style': { key: 'style', name: 'Style', alertKeys: ['haussmanien', 'neuf'] },
+                'ensoleillement': { key: 'ensoleillement', name: 'Exposition', alertKeys: ['luminosite'] },
+                'cuisine': { key: 'cuisine', name: 'Cuisine', alertKeys: ['cuisine_ouverte'] },
+                'baignoire': { key: 'baignoire', name: 'Baignoire', alertKeys: ['baignoire'] }
+              }
               
-              // Calculer le score selon le tier pour garantir la cohérence
-              // tier1 (Lumineux) = 20 pts, tier2 (Luminosité moyenne) = 10 pts, tier3 (Sombre) = 0 pts
-              const scoreFromTier = tier === 'tier1' ? 20 : tier === 'tier2' ? 10 : 0
-              return (
-                <Criterion 
-                  name="Exposition"
-                  score={scoreFromTier}
-                  tier={tier}
-                  customTitle={expoData.title}
-                  customDescription={expoData.description}
-                  confidence={expoData.confidence}
-                />
-              )
-            })()}
-            {apartment.scores_detaille.cuisine && (() => {
-              const cuisineData = formatCuisineCriterion(apartment)
-              const cuisineScore = apartment.scores_detaille.cuisine || {}
-              const cuisineScoreValue = cuisineScore.score !== undefined ? cuisineScore.score : (cuisineData.tier === 'tier1' ? 10 : cuisineData.tier === 'tier2' ? 5 : 0)
-              
-              return (
-                <Criterion 
-                  name="Cuisine"
-                  score={cuisineScoreValue}
-                  tier={cuisineData.tier}
-                  customTitle={cuisineData.title}
-                  customDescription={cuisineData.description}
-                  confidence={cuisineData.confidence}
-                />
-              )
-            })()}
-            {apartment.scores_detaille?.baignoire && (() => {
-              const baignoireData = formatBaignoireCriterion(apartment)
-              return (
-                <Criterion 
-                  name="Baignoire"
-                  score={baignoireData.score}
-                  tier={baignoireData.tier}
-                  customTitle={baignoireData.title}
-                  customDescription={baignoireData.description}
-                  confidence={baignoireData.confidence}
-                />
-              )
-            })()}
-          </>
-        )}
+              // Vérifier quels critères standards ne sont pas dans l'alerte
+              for (const [key, info] of Object.entries(standardCriteria)) {
+                // Vérifier si un des critères d'alerte correspond à ce critère standard
+                const isInAlert = info.alertKeys.some(alertKey => alertCriteriaSet.has(alertKey))
+                
+                if (!isInAlert) {
+                  // Ce critère n'est pas dans l'alerte, l'ajouter aux autres
+                  if (apartment.scores_detaille[key]) {
+                    otherCriteria.push({ key, name: info.name })
+                  }
+                }
+              }
+            }
+            
+            return (
+              <>
+                {/* Afficher d'abord les critères de l'alerte (top 4) */}
+                {alertCriteriaNames.map((alertCriterionName, alertIndex) => {
+                  const criterionScore = alertCriteriaScores[alertCriterionName]
+                  const displayName = ALERT_CRITERIA_TO_DISPLAY[alertCriterionName] || alertCriterionName
+                  const tier = criterionScore?.tier || 'tier3'
+                  const justification = criterionScore?.justification || ''
+                  // Supprimer la bordure entre les critères de l'alerte (sauf le dernier s'il y a des autres critères)
+                  const isLastAlertCriterion = alertIndex === alertCriteriaNames.length - 1
+                  const noBorderBottom = !isLastAlertCriterion || otherCriteria.length === 0
+                  
+                  // Formater selon le type de critère
+                  let customTitle = displayName
+                  let customDescription = justification
+                  
+                  if (alertCriterionName === 'quartier' || alertCriterionName === 'localisation') {
+                    const locData = formatLocalisation(apartment)
+                    customTitle = locData.title || displayName
+                    customDescription = locData.description || justification
+                  } else if (alertCriterionName === 'prix') {
+                    const prixData = formatPrixCriterion(apartment)
+                    customTitle = prixData.title || displayName
+                    customDescription = prixData.description || justification
+                  } else if (alertCriterionName === 'haussmanien' || alertCriterionName === 'neuf') {
+                    const styleData = formatStyleCriterion(apartment)
+                    customTitle = styleData.title || displayName
+                    customDescription = styleData.description || justification
+                  } else if (alertCriterionName === 'luminosite') {
+                    const expoData = formatExpositionCriterion(apartment, etage)
+                    customTitle = expoData.title || displayName
+                    customDescription = expoData.description || justification
+                  } else if (alertCriterionName === 'cuisine_ouverte') {
+                    const cuisineData = formatCuisineCriterion(apartment)
+                    customTitle = cuisineData.title || displayName
+                    customDescription = cuisineData.description || justification
+                  } else if (alertCriterionName === 'baignoire') {
+                    const baignoireData = formatBaignoireCriterion(apartment)
+                    customTitle = baignoireData.title || displayName
+                    customDescription = baignoireData.description || justification
+                  } else {
+                    // Critères simples (ascenseur, large_piece_vie, renove)
+                    customTitle = displayName
+                    customDescription = justification || 'Non spécifié'
+                  }
+                  
+                  return (
+                    <Criterion
+                      key={alertCriterionName}
+                      name={displayName}
+                      score={criterionScore?.score || 0}
+                      tier={tier}
+                      customTitle={customTitle}
+                      customDescription={customDescription}
+                      alertCriterionName={alertCriterionName}
+                      noBorderBottom={noBorderBottom}
+                    />
+                  )
+                })}
+                
+                {/* Afficher ensuite les autres critères en gris */}
+                {otherCriteria.map(({ key, name }, otherIndex) => {
+                  const isLastOtherCriterion = otherIndex === otherCriteria.length - 1
+                  const noBorderBottom = !isLastOtherCriterion
+                  
+                  if (key === 'localisation') {
+                    const locData = formatLocalisation(apartment)
+                    return (
+                      <Criterion
+                        key={key}
+                        name={name}
+                        score={apartment.scores_detaille.localisation.score || 0}
+                        tier={apartment.scores_detaille.localisation.tier || 'tier3'}
+                        customTitle={locData.title}
+                        customDescription={locData.description}
+                        descriptionClass={locData.descriptionClass}
+                        isGray={true}
+                        noBorderBottom={noBorderBottom}
+                      />
+                    )
+                  } else if (key === 'prix') {
+                    const prixData = formatPrixCriterion(apartment)
+                    return (
+                      <Criterion
+                        key={key}
+                        name={name}
+                        score={apartment.scores_detaille.prix.score || 0}
+                        tier={apartment.scores_detaille.prix.tier || 'tier3'}
+                        customTitle={prixData.title}
+                        customDescription={prixData.description}
+                        isGray={true}
+                        noBorderBottom={noBorderBottom}
+                      />
+                    )
+                  } else if (key === 'style') {
+                    const styleData = formatStyleCriterion(apartment)
+                    return (
+                      <Criterion
+                        key={key}
+                        name={name}
+                        score={apartment.scores_detaille.style.score || 0}
+                        tier={apartment.scores_detaille.style.tier || 'tier3'}
+                        customTitle={styleData.title}
+                        customDescription={styleData.description}
+                        confidence={apartment.style_analysis?.style?.confidence}
+                        isGray={true}
+                        noBorderBottom={noBorderBottom}
+                      />
+                    )
+                  } else if (key === 'ensoleillement') {
+                    const expoData = formatExpositionCriterion(apartment, etage)
+                    let tier = apartment.scores_detaille.ensoleillement.tier || 'tier3'
+                    const scoreFromTier = tier === 'tier1' ? 20 : tier === 'tier2' ? 10 : 0
+                    return (
+                      <Criterion
+                        key={key}
+                        name={name}
+                        score={scoreFromTier}
+                        tier={tier}
+                        customTitle={expoData.title}
+                        customDescription={expoData.description}
+                        confidence={expoData.confidence}
+                        isGray={true}
+                        noBorderBottom={noBorderBottom}
+                      />
+                    )
+                  } else if (key === 'cuisine') {
+                    const cuisineData = formatCuisineCriterion(apartment)
+                    const cuisineScore = apartment.scores_detaille.cuisine || {}
+                    const cuisineScoreValue = cuisineScore.score !== undefined ? cuisineScore.score : (cuisineData.tier === 'tier1' ? 10 : cuisineData.tier === 'tier2' ? 5 : 0)
+                    return (
+                      <Criterion
+                        key={key}
+                        name={name}
+                        score={cuisineScoreValue}
+                        tier={cuisineData.tier}
+                        customTitle={cuisineData.title}
+                        customDescription={cuisineData.description}
+                        confidence={cuisineData.confidence}
+                        isGray={true}
+                        noBorderBottom={noBorderBottom}
+                      />
+                    )
+                  } else if (key === 'baignoire') {
+                    const baignoireData = formatBaignoireCriterion(apartment)
+                    return (
+                      <Criterion
+                        key={key}
+                        name={name}
+                        score={baignoireData.score}
+                        tier={baignoireData.tier}
+                        customTitle={baignoireData.title}
+                        customDescription={baignoireData.description}
+                        confidence={baignoireData.confidence}
+                        isGray={true}
+                        noBorderBottom={noBorderBottom}
+                      />
+                    )
+                  }
+                  return null
+                })}
+              </>
+            )
+          }
+          
+          // Sinon, afficher les critères standards (comportement normal)
+          return apartment.scores_detaille ? (
+            <>
+              {apartment.scores_detaille.localisation && (() => {
+                const locData = formatLocalisation(apartment)
+                return (
+                  <Criterion 
+                    name="Localisation"
+                    score={apartment.scores_detaille.localisation.score || 0}
+                    tier={apartment.scores_detaille.localisation.tier || 'tier3'}
+                    customTitle={locData.title}
+                    customDescription={locData.description}
+                    descriptionClass={locData.descriptionClass}
+                  />
+                )
+              })()}
+              {apartment.scores_detaille.prix && (() => {
+                const prixData = formatPrixCriterion(apartment)
+                return (
+                  <Criterion 
+                    name="Prix"
+                    score={apartment.scores_detaille.prix.score || 0}
+                    tier={apartment.scores_detaille.prix.tier || 'tier3'}
+                    customTitle={prixData.title}
+                    customDescription={prixData.description}
+                  />
+                )
+              })()}
+              {apartment.scores_detaille.style && (() => {
+                const styleData = formatStyleCriterion(apartment)
+                return (
+                  <Criterion 
+                    name="Style"
+                    score={apartment.scores_detaille.style.score || 0}
+                    tier={apartment.scores_detaille.style.tier || 'tier3'}
+                    customTitle={styleData.title}
+                    customDescription={styleData.description}
+                    confidence={apartment.style_analysis?.style?.confidence}
+                  />
+                )
+              })()}
+              {apartment.scores_detaille.ensoleillement && (() => {
+                const expoData = formatExpositionCriterion(apartment, etage)
+                let tier = apartment.scores_detaille.ensoleillement.tier || 'tier3'
+                
+                // Calculer le score selon le tier pour garantir la cohérence
+                // tier1 (Lumineux) = 20 pts, tier2 (Luminosité moyenne) = 10 pts, tier3 (Sombre) = 0 pts
+                const scoreFromTier = tier === 'tier1' ? 20 : tier === 'tier2' ? 10 : 0
+                return (
+                  <Criterion 
+                    name="Exposition"
+                    score={scoreFromTier}
+                    tier={tier}
+                    customTitle={expoData.title}
+                    customDescription={expoData.description}
+                    confidence={expoData.confidence}
+                  />
+                )
+              })()}
+              {apartment.scores_detaille.cuisine && (() => {
+                const cuisineData = formatCuisineCriterion(apartment)
+                const cuisineScore = apartment.scores_detaille.cuisine || {}
+                const cuisineScoreValue = cuisineScore.score !== undefined ? cuisineScore.score : (cuisineData.tier === 'tier1' ? 10 : cuisineData.tier === 'tier2' ? 5 : 0)
+                
+                return (
+                  <Criterion 
+                    name="Cuisine"
+                    score={cuisineScoreValue}
+                    tier={cuisineData.tier}
+                    customTitle={cuisineData.title}
+                    customDescription={cuisineData.description}
+                    confidence={cuisineData.confidence}
+                  />
+                )
+              })()}
+              {apartment.scores_detaille?.baignoire && (() => {
+                const baignoireData = formatBaignoireCriterion(apartment)
+                return (
+                  <Criterion 
+                    name="Baignoire"
+                    score={baignoireData.score}
+                    tier={baignoireData.tier}
+                    customTitle={baignoireData.title}
+                    customDescription={baignoireData.description}
+                    confidence={baignoireData.confidence}
+                  />
+                )
+              })()}
+            </>
+          ) : null
+        })()}
       </div>
     </div>
   )
@@ -570,6 +819,16 @@ function formatExpositionCriterion(apartment, etage) {
   if (apartment.formatted_data?.exposition) {
     mainValue = apartment.formatted_data.exposition.main_value || 'Sombre'
     indices = apartment.formatted_data.exposition.indices || null
+    // Nettoyer le préfixe "Exposition Indice:" ou "exposition indice:" si présent
+    if (indices && typeof indices === 'string') {
+      indices = indices
+        .replace(/^Exposition Indice:\s*/i, '')
+        .replace(/^Exposition indice:\s*/i, '')
+        .replace(/^exposition indice:\s*/i, '')
+        .replace(/^Expo Indice:\s*/i, '')
+        .replace(/^\n+/, '')
+        .trim()
+    }
     confidence = apartment.formatted_data.exposition.confidence || null
   } else {
     // Fallback: utiliser directement apartment.exposition si disponible
@@ -642,6 +901,16 @@ function formatExpositionCriterion(apartment, etage) {
 }
 
 function formatCuisineCriterion(apartment) {
+  // Vérifier que scores_detaille existe
+  if (!apartment.scores_detaille) {
+    return {
+      title: 'Cuisine',
+      description: 'Non analysée',
+      tier: 'tier3',
+      confidence: null
+    }
+  }
+  
   // PRIORITÉ: Utiliser le résultat final depuis scores_detaille (après validation croisée texte + photos)
   const cuisineScore = apartment.scores_detaille.cuisine || {}
   const cuisineDetails = cuisineScore.details || {}
@@ -858,9 +1127,40 @@ const CRITERION_EMOJIS = {
   'Baignoire': '🛁'
 }
 
-function Criterion({ name, score, tier, value, confidence, indices, tierLabel, tierClass, customTitle, customDescription, descriptionClass }) {
+// Mapping des critères d'alerte vers les critères affichés
+const ALERT_CRITERIA_TO_DISPLAY = {
+  'haussmanien': 'Style',
+  'neuf': 'Style',
+  'quartier': 'Localisation',
+  'prix': 'Prix',
+  'luminosite': 'Exposition',
+  'cuisine_ouverte': 'Cuisine',
+  'ascenseur': 'Ascenseur',
+  'large_piece_vie': 'Pièce de vie',
+  'renove': 'Rénové',
+  'baignoire': 'Baignoire'
+}
+
+// Mapping des emojis pour les critères d'alerte
+const ALERT_CRITERIA_EMOJIS = {
+  'haussmanien': '🔑',
+  'neuf': '✨',
+  'quartier': '📍',
+  'prix': '💰',
+  'luminosite': '☀️',
+  'cuisine_ouverte': '👨‍🍳',
+  'ascenseur': '🛗',
+  'large_piece_vie': '🛋️',
+  'renove': '🔨',
+  'baignoire': '🛁'
+}
+
+function Criterion({ name, score, tier, value, confidence, indices, tierLabel, tierClass, customTitle, customDescription, descriptionClass, isGray = false, alertCriterionName = null, noBorderBottom = false, noBorderTop = false }) {
   const badgeClass = tier === 'tier1' ? 'green' : tier === 'tier2' ? 'yellow' : 'red'
-  const emoji = CRITERION_EMOJIS[name] || '📋'
+  // Utiliser l'emoji du critère d'alerte si fourni, sinon l'emoji standard
+  const emoji = alertCriterionName && ALERT_CRITERIA_EMOJIS[alertCriterionName] 
+    ? ALERT_CRITERIA_EMOJIS[alertCriterionName] 
+    : CRITERION_EMOJIS[name] || '📋'
   
   // Si value est un objet (pour exposition), extraire mainValue et indices
   let displayValue = value
@@ -876,11 +1176,17 @@ function Criterion({ name, score, tier, value, confidence, indices, tierLabel, t
   // Utiliser customDescription si fourni, sinon utiliser displayValue
   const description = customDescription !== undefined ? customDescription : displayValue
   
+  // Construire les classes CSS
+  const criterionClasses = ['criterion']
+  if (isGray) criterionClasses.push('criterion-gray')
+  if (noBorderBottom) criterionClasses.push('criterion-no-border-bottom')
+  if (noBorderTop) criterionClasses.push('criterion-no-border-top')
+  
   return (
-    <div className="criterion">
+    <div className={criterionClasses.join(' ')}>
       <div className="criterion-content">
         <div className="criterion-header">
-          <span className={`criterion-emoji ${badgeClass}`}>{emoji}</span>
+          <span className={`criterion-emoji ${isGray ? 'gray' : badgeClass}`}>{emoji}</span>
           <div className="criterion-text-wrapper">
             <div className="criterion-name">{title}</div>
             {description && (
