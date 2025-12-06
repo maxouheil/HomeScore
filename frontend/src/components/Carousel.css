@@ -2,7 +2,7 @@
     position: relative;
     height: 280px;
     border-radius: 16px 16px 0 0;
-    background: #f0f0f0;
+    background: transparent;
     overflow: hidden;
     isolation: isolate;
     width: 100%;
@@ -11,8 +11,8 @@
 
 .apartment-image {
     width: 100%;
-    height: 286px;
-    background: #f0f0f0;
+    height: 280px;
+    background: transparent;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -21,13 +21,13 @@
     position: relative;
     background-size: cover;
     background-position: center;
-    border-radius: 8px 8px 0 0;
+    border-radius: 16px 16px 0 0;
     overflow: hidden;
 }
 
 .apartment-image-placeholder {
     width: 100%;
-    height: 286px;
+    height: 280px;
     background: #f0f0f0;
     display: flex;
     align-items: center;
@@ -40,9 +40,10 @@
 .carousel-container {
     position: relative;
     width: 100%;
-    height: 286px;
-    border-radius: 8px 8px 0 0;
+    height: 280px;
+    border-radius: 16px 16px 0 0;
     overflow: hidden;
+    background: transparent;
 }
 
 .carousel-track {
@@ -54,12 +55,14 @@
 .carousel-slide {
     min-width: 100%;
     height: 100%;
+    flex-shrink: 0;
 }
 
 .carousel-slide img {
     width: 100%;
-    height: 286px;
+    height: 100%;
     object-fit: cover;
+    display: block;
 }
 
 .carousel-nav {
@@ -124,19 +127,4 @@
     border-radius: 4px;
 }
 
-.score-badge-top {
-    position: absolute;
-    top: 15px;
-    right: 15px;
-    font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
-    font-size: 20px;
-    font-weight: 500;
-    color: white !important;
-    padding: 8px 16px;
-    border-radius: 12px;
-    display: inline-block;
-    z-index: 10;
-    white-space: nowrap;
-    min-width: fit-content;
-}
 

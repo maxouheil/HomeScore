@@ -11,7 +11,7 @@
 
 body {
     font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
-    background-color: #f8f9fa;
+    background-color: white;
     color: #212529;
     line-height: 1.5;
     font-size: 14px;
@@ -23,6 +23,8 @@ body {
     width: 100%;
     margin: 0 auto;
     padding: 30px;
+    background: white;
+    position: relative;
 }
 
 .apartments-grid {

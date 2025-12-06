@@ -66,6 +66,7 @@ const CRITERIA_DISPLAY_NAMES = {
   'prix': 'Prix',
   'ascenseur': 'Ascenseur',
   'large_piece_vie': 'Pièce de vie',
+  'hauteur_plafond': 'Hauteur plafond',
   'renove': 'Rénové',
   'baignoire': 'Baignoire'
 }
@@ -76,9 +77,8 @@ function calculateDetailedScores(apartment, alertCriteria = null) {
   // PRIORITÉ: Utiliser les scores d'alerte si disponibles
   if (apartment.alert_criteria_scores && alertCriteria) {
     const alertCriteriaScores = apartment.alert_criteria_scores
-    const primaryCriteria = alertCriteria.primary || []
-    const secondaryCriteria = alertCriteria.secondary || []
-    const allCriteriaNames = [...primaryCriteria, ...secondaryCriteria]
+    // Support nouveau format (all) et ancien format (primary/secondary) pour compatibilité
+    const allCriteriaNames = alertCriteria.all || [...(alertCriteria.primary || []), ...(alertCriteria.secondary || [])]
     
     // Retourner les scores dans l'ordre de l'alerte avec leurs noms d'affichage
     const orderedScores = []
@@ -87,12 +87,11 @@ function calculateDetailedScores(apartment, alertCriteria = null) {
       const criterionScore = alertCriteriaScores[criterionName]
       if (criterionScore && typeof criterionScore.score === 'number') {
         const displayName = CRITERIA_DISPLAY_NAMES[criterionName] || criterionName
-        const isPrimary = primaryCriteria.includes(criterionName)
-        const maxScore = isPrimary ? 30 : 20 // 30 pts pour primary, 20 pts pour secondary
+        const maxScore = 1 // Tous les critères sont à 1 point max (good=1pt, moyen=0.5pt, bad=0pt)
         orderedScores.push({
           key: criterionName,
           displayName,
-          score: Math.round(criterionScore.score),
+          score: criterionScore.score, // Garder les décimales (0.5 pour moyen)
           tier: criterionScore.tier || 'tier3',
           maxScore
         })
@@ -218,7 +217,7 @@ function ScoreBadge({ score, maxScore = 90, apartment = null, alertCriteria = nu
               <div key={item.key || index} className="score-detail-item">
                 <span className="score-detail-label">{item.displayName}</span>
                 <span className={`score-detail-value ${scoreColor}`}>
-                  {item.score} pts
+                  {item.score === 1 ? '1 pt' : item.score === 0.5 ? '0.5 pt' : '0 pt'}
                 </span>
               </div>
             )

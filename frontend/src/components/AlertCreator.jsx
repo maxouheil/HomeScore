@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useCallback } from 'react'
+import { useState, useRef, useMemo, useCallback, useEffect } from 'react'
 import React from 'react'
 import './AlertCreator.css'
 
@@ -178,6 +178,12 @@ const CRITERIA_OPTIONS = [
     icon: '🛋️'
   },
   {
+    id: 'hauteur_plafond',
+    name: 'Hauteur sous plafond',
+    description: 'Des plafonds hauts pour respirer',
+    icon: '📏'
+  },
+  {
     id: 'renove',
     name: 'Rénové',
     description: 'Je ne touche pas une perceuse',
@@ -191,7 +197,7 @@ const CRITERIA_OPTIONS = [
   }
 ]
 
-function AlertCreator({ isOpen, onClose, onSuccess }) {
+function AlertCreator({ isOpen, onClose, onSuccess, editingAlert }) {
   const [step, setStep] = useState(1) // 1 = sélection critères, 2 = paramètres généraux
   const [selectedCriteria, setSelectedCriteria] = useState([])
   const [draggedCriterion, setDraggedCriterion] = useState(null)
@@ -211,6 +217,154 @@ function AlertCreator({ isOpen, onClose, onSuccess }) {
   const [quartierInput, setQuartierInput] = useState('')
   const [quartierSuggestions, setQuartierSuggestions] = useState([])
   const [showSuggestions, setShowSuggestions] = useState(false)
+
+  // Fonction pour obtenir le numéro de ligne d'une station de métro
+  const getMetroLine = useCallback((stationName) => {
+    const name = stationName.replace(/^Métro /, '')
+    
+    // Mapping des stations principales par ligne
+    const lineMapping = {
+      // Ligne 11
+      'Jourdain': 11, 'Pyrénées': 11, 'Goncourt': 11, 'Place des Fêtes': 11,
+      'Télégraphe': 11, 'Mairie des Lilas': 11, 'Rambuteau': 11,
+      // Ligne 2
+      'Belleville': 2, 'Ménilmontant': 2, 'Alexandre Dumas': 2, 'Philippe Auguste': 2, 'Avron': 2,
+      'Couronnes': 2, 'Père Lachaise': 2, 'Porte Dauphine': 2, 'Nation': 2,
+      // Ligne 4
+      'Montparnasse - Bienvenüe': 4, 'Porte de Clignancourt': 4, 'Mairie de Montrouge': 4,
+      // Ligne 6
+      'Trocadéro': 6,
+      // Ligne 12
+      'Montparnasse - Bienvenüe': 12, 'Abbesses': 12, 'Pigalle': 12, 'Mairie d\'Issy': 12,
+      // Ligne 13
+      'Montparnasse - Bienvenüe': 13, 'Châtillon - Montrouge': 13,
+      // Ligne 1
+      'Châtelet': 1, 'Hôtel de Ville': 1, 'Bastille': 1,
+      // Ligne 3
+      'République': 3, 'Arts et Métiers': 3, 'Gambetta': 3,
+      // Ligne 5
+      'Oberkampf': 5, 'Place d\'Italie': 5,
+      // Ligne 7
+      'Jussieu': 7,
+      // Ligne 8
+      'Invalides': 8, 'Madeleine': 8,
+      // Ligne 9
+      'Charonne': 9, 'Rue des Boulets': 9, 'Mairie de Montreuil': 9,
+      // Ligne 10
+      'Gare d\'Austerlitz': 10,
+      // Ligne 14
+      'Gare de Lyon': 14, 'Bibliothèque François Mitterrand': 14
+    }
+    
+    // Chercher dans le mapping
+    if (lineMapping[name]) {
+      return lineMapping[name]
+    }
+    
+    // Si pas trouvé, chercher dans PARIS_LOCATIONS en parcourant les sections
+    let currentLine = null
+    for (const loc of PARIS_LOCATIONS) {
+      if (loc.startsWith('// Métros - Ligne')) {
+        if (loc.includes('Ligne 1')) currentLine = 1
+        else if (loc.includes('Ligne 2')) currentLine = 2
+        else if (loc.includes('Ligne 3') && loc.includes('3bis')) currentLine = '3bis'
+        else if (loc.includes('Ligne 3')) currentLine = 3
+        else if (loc.includes('Ligne 4')) currentLine = 4
+        else if (loc.includes('Ligne 5')) currentLine = 5
+        else if (loc.includes('Ligne 6')) currentLine = 6
+        else if (loc.includes('Ligne 7') && loc.includes('7bis')) currentLine = '7bis'
+        else if (loc.includes('Ligne 7')) currentLine = 7
+        else if (loc.includes('Ligne 8')) currentLine = 8
+        else if (loc.includes('Ligne 9')) currentLine = 9
+        else if (loc.includes('Ligne 10')) currentLine = 10
+        else if (loc.includes('Ligne 11')) currentLine = 11
+        else if (loc.includes('Ligne 12')) currentLine = 12
+        else if (loc.includes('Ligne 13')) currentLine = 13
+        else if (loc.includes('Ligne 14')) currentLine = 14
+      } else if (loc.startsWith('Métro ') && currentLine) {
+        const stationNameInList = loc.replace(/^Métro /, '')
+        if (stationNameInList === name) {
+          return currentLine
+        }
+      }
+    }
+    
+    return null
+  }, [])
+
+  // Initialiser les valeurs si on est en mode édition
+  useEffect(() => {
+    if (isOpen && editingAlert) {
+      // Initialiser le nom
+      setAlertName(editingAlert.name || '')
+      
+      // Initialiser les filtres
+      const filters = editingAlert.filters || {}
+      setPrixMin(filters.budget_min || 500000)
+      setPrixMax(filters.budget_max || 800000)
+      setSurfaceMin(filters.surface_min || 60)
+      setSurfaceMax(filters.surface_max || 100)
+      
+      // Initialiser les pièces
+      if (filters.pieces_min && filters.pieces_max) {
+        const pieces = []
+        for (let i = filters.pieces_min; i <= Math.min(filters.pieces_max, 5); i++) {
+          pieces.push(i)
+        }
+        if (filters.pieces_max >= 5) {
+          pieces.push('5+')
+        }
+        setSelectedPieces(pieces)
+      }
+      
+      // Initialiser les quartiers
+      if (filters.localisation) {
+        const quartiers = filters.localisation.split(',').map(q => {
+          const trimmed = q.trim()
+          if (trimmed.startsWith('Métro ')) {
+            const stationName = trimmed.replace(/^Métro /, '')
+            const line = getMetroLine(trimmed)
+            return {
+              value: trimmed,
+              display: line ? `${stationName} (${line})` : stationName
+            }
+          }
+          return {
+            value: trimmed,
+            display: trimmed
+          }
+        })
+        setSelectedQuartiers(quartiers)
+      }
+      
+      // Initialiser les critères
+      const criteria = editingAlert.criteria || {}
+      // Support ancien format (primary/secondary) et nouveau format (all)
+      const allCriteriaIds = criteria.all || [...(criteria.primary || []), ...(criteria.secondary || [])]
+      
+      // Convertir les IDs en objets de critères complets
+      const criteriaObjects = allCriteriaIds
+        .map(id => CRITERIA_OPTIONS.find(opt => opt.id === id))
+        .filter(Boolean) // Enlever les undefined
+      
+      setSelectedCriteria(criteriaObjects)
+      
+      // Passer directement à l'étape 2 en mode édition
+      setStep(2)
+    } else if (isOpen && !editingAlert) {
+      // Réinitialiser pour une nouvelle alerte
+      setStep(1)
+      setSelectedCriteria([])
+      setAlertName('')
+      setPrixMin(500000)
+      setPrixMax(800000)
+      setSurfaceMin(60)
+      setSurfaceMax(100)
+      setSelectedPieces([])
+      setSelectedQuartiers([])
+      setQuartierInput('')
+    }
+  }, [isOpen, editingAlert, getMetroLine])
 
   // Calculer les critères disponibles (non sélectionnés) - mémorisé pour éviter les re-renders
   const availableCriteria = useMemo(() => {
@@ -290,8 +444,8 @@ function AlertCreator({ isOpen, onClose, onSuccess }) {
       
       setSelectedCriteria(newSelected)
     } else {
-      // Nouveau critère: vérifier la limite de 4
-      if (selectedCriteria.length < 4) {
+      // Nouveau critère: vérifier la limite de 5
+      if (selectedCriteria.length < 5) {
         const newSelected = [...selectedCriteria]
         // Insérer à la position spécifiée si valide, sinon à la fin
         if (dragOverIndex !== null && dragOverIndex >= 0 && dragOverIndex <= newSelected.length) {
@@ -403,7 +557,7 @@ function AlertCreator({ isOpen, onClose, onSuccess }) {
 
   // Gérer le bouton Continuer
   const handleContinue = () => {
-    if (selectedCriteria.length === 0) {
+    if (selectedCriteria.length !== 5) {
       return
     }
     
@@ -414,80 +568,6 @@ function AlertCreator({ isOpen, onClose, onSuccess }) {
   // Gérer le retour à l'étape 1
   const handleBack = () => {
     setStep(1)
-  }
-
-  // Fonction pour obtenir le numéro de ligne d'une station de métro
-  const getMetroLine = (stationName) => {
-    const name = stationName.replace(/^Métro /, '')
-    
-    // Mapping des stations principales par ligne
-    const lineMapping = {
-      // Ligne 11
-      'Jourdain': 11, 'Pyrénées': 11, 'Goncourt': 11, 'Place des Fêtes': 11,
-      'Télégraphe': 11, 'Mairie des Lilas': 11, 'Rambuteau': 11,
-      // Ligne 2
-      'Belleville': 2, 'Ménilmontant': 2, 'Alexandre Dumas': 2, 'Philippe Auguste': 2, 'Avron': 2,
-      'Couronnes': 2, 'Père Lachaise': 2, 'Porte Dauphine': 2, 'Nation': 2,
-      // Ligne 4
-      'Montparnasse - Bienvenüe': 4, 'Porte de Clignancourt': 4, 'Mairie de Montrouge': 4,
-      // Ligne 6
-      'Trocadéro': 6,
-      // Ligne 12
-      'Montparnasse - Bienvenüe': 12, 'Abbesses': 12, 'Pigalle': 12, 'Mairie d\'Issy': 12,
-      // Ligne 13
-      'Montparnasse - Bienvenüe': 13, 'Châtillon - Montrouge': 13,
-      // Ligne 1
-      'Châtelet': 1, 'Hôtel de Ville': 1, 'Bastille': 1,
-      // Ligne 3
-      'République': 3, 'Arts et Métiers': 3, 'Gambetta': 3,
-      // Ligne 5
-      'Oberkampf': 5, 'Place d\'Italie': 5,
-      // Ligne 7
-      'Jussieu': 7,
-      // Ligne 8
-      'Invalides': 8, 'Madeleine': 8,
-      // Ligne 9
-      'Charonne': 9, 'Rue des Boulets': 9, 'Mairie de Montreuil': 9,
-      // Ligne 10
-      'Gare d\'Austerlitz': 10,
-      // Ligne 14
-      'Gare de Lyon': 14, 'Bibliothèque François Mitterrand': 14
-    }
-    
-    // Chercher dans le mapping
-    if (lineMapping[name]) {
-      return lineMapping[name]
-    }
-    
-    // Si pas trouvé, chercher dans PARIS_LOCATIONS en parcourant les sections
-    let currentLine = null
-    for (const loc of PARIS_LOCATIONS) {
-      if (loc.startsWith('// Métros - Ligne')) {
-        if (loc.includes('Ligne 1')) currentLine = 1
-        else if (loc.includes('Ligne 2')) currentLine = 2
-        else if (loc.includes('Ligne 3') && loc.includes('3bis')) currentLine = '3bis'
-        else if (loc.includes('Ligne 3')) currentLine = 3
-        else if (loc.includes('Ligne 4')) currentLine = 4
-        else if (loc.includes('Ligne 5')) currentLine = 5
-        else if (loc.includes('Ligne 6')) currentLine = 6
-        else if (loc.includes('Ligne 7') && loc.includes('7bis')) currentLine = '7bis'
-        else if (loc.includes('Ligne 7')) currentLine = 7
-        else if (loc.includes('Ligne 8')) currentLine = 8
-        else if (loc.includes('Ligne 9')) currentLine = 9
-        else if (loc.includes('Ligne 10')) currentLine = 10
-        else if (loc.includes('Ligne 11')) currentLine = 11
-        else if (loc.includes('Ligne 12')) currentLine = 12
-        else if (loc.includes('Ligne 13')) currentLine = 13
-        else if (loc.includes('Ligne 14')) currentLine = 14
-      } else if (loc.startsWith('Métro ') && currentLine) {
-        const stationNameInList = loc.replace(/^Métro /, '')
-        if (stationNameInList === name) {
-          return currentLine
-        }
-      }
-    }
-    
-    return null
   }
 
   // Gérer l'ajout d'un quartier
@@ -630,10 +710,73 @@ function AlertCreator({ isOpen, onClose, onSuccess }) {
 
   // Gérer l'enregistrement
   const handleSave = async () => {
-    // TODO: Implémenter la création de l'alerte
-    if (onSuccess) {
-      // Pour l'instant, on ferme juste
-      onClose()
+    if (!alertName.trim()) {
+      alert('Veuillez entrer un nom pour l\'alerte')
+      return
+    }
+
+    if (selectedCriteria.length !== 5) {
+      alert('Veuillez sélectionner exactement 5 critères')
+      return
+    }
+
+    // Tous les critères sont traités de la même manière (20pts chacun)
+    const allCriteria = selectedCriteria.map(c => c.id)
+
+    // Préparer les filtres
+    const piecesNumbers = selectedPieces.filter(p => typeof p === 'number')
+    const piecesMin = piecesNumbers.length > 0 ? Math.min(...piecesNumbers) : 0
+    const piecesMax = selectedPieces.length > 0 
+      ? Math.max(...selectedPieces.map(p => p === '5+' ? 20 : (typeof p === 'number' ? p : 0)))
+      : 20
+
+    const filters = {
+      budget_min: prixMin,
+      budget_max: prixMax,
+      surface_min: surfaceMin,
+      surface_max: surfaceMax,
+      pieces_min: piecesMin,
+      pieces_max: piecesMax,
+      localisation: selectedQuartiers.length > 0 ? selectedQuartiers.map(q => typeof q === 'object' ? q.value : q).join(', ') : null
+    }
+
+    // Préparer les données de l'alerte
+    const alertData = {
+      name: alertName.trim(),
+      filters: filters,
+      criteria: {
+        all: allCriteria
+      }
+    }
+
+    const isEditing = !!editingAlert
+    const url = isEditing ? `/api/alerts/${editingAlert.id}` : '/api/alerts'
+    const method = isEditing ? 'PUT' : 'POST'
+
+    try {
+      const response = await fetch(url, {
+        method: method,
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(alertData)
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: isEditing ? 'Erreur lors de la modification de l\'alerte' : 'Erreur lors de la création de l\'alerte' }))
+        throw new Error(errorData.detail || (isEditing ? 'Erreur lors de la modification de l\'alerte' : 'Erreur lors de la création de l\'alerte'))
+      }
+
+      const savedAlert = await response.json()
+      
+      if (onSuccess) {
+        onSuccess(savedAlert)
+      }
+      
+      handleClose()
+    } catch (err) {
+      console.error(isEditing ? 'Erreur lors de la modification de l\'alerte:' : 'Erreur lors de la création de l\'alerte:', err)
+      alert((isEditing ? 'Erreur lors de la modification de l\'alerte: ' : 'Erreur lors de la création de l\'alerte: ') + err.message)
     }
   }
 
@@ -660,7 +803,7 @@ function AlertCreator({ isOpen, onClose, onSuccess }) {
 
   // Vérifier si on doit afficher le placeholder
   const shouldShowPlaceholder = selectedCriteria.length === 0
-  const showPlaceholderBelow = selectedCriteria.length > 0 && selectedCriteria.length < 4
+  const showPlaceholderBelow = selectedCriteria.length > 0 && selectedCriteria.length < 5
 
   // Obtenir la couleur du badge selon le ranking
   const getBadgeColor = (index) => {
@@ -687,7 +830,7 @@ function AlertCreator({ isOpen, onClose, onSuccess }) {
           {/* Header */}
           <div className="alert-creator-header">
             <div className="alert-creator-header-content">
-              <h2>Créer une alerte</h2>
+              <h2>{editingAlert ? 'Modifier une alerte' : 'Créer une alerte'}</h2>
               <p className="alert-creator-subtitle">
                 Complétez vos critères
               </p>
@@ -714,7 +857,7 @@ function AlertCreator({ isOpen, onClose, onSuccess }) {
                 </div>
               </div>
             ))}
-            {selectedCriteria.length < 4 && (
+            {selectedCriteria.length < 5 && (
               <div className="criterion-summary-placeholder">
                 <span>+</span>
               </div>
@@ -766,7 +909,7 @@ function AlertCreator({ isOpen, onClose, onSuccess }) {
                     type="range"
                     min="0"
                     max="2000000"
-                    step="10000"
+                    step="50000"
                     value={prixMin}
                     onChange={(e) => {
                       const newMin = parseInt(e.target.value)
@@ -780,7 +923,7 @@ function AlertCreator({ isOpen, onClose, onSuccess }) {
                     type="range"
                     min="0"
                     max="2000000"
-                    step="10000"
+                    step="50000"
                     value={prixMax}
                     onChange={(e) => {
                       const newMax = parseInt(e.target.value)
@@ -962,13 +1105,13 @@ function AlertCreator({ isOpen, onClose, onSuccess }) {
       {/* Sidebar */}
       <div className="alert-creator-sidebar">
         {/* Header */}
-        <div className="alert-creator-header">
-          <div className="alert-creator-header-content">
-            <h2>Créer une alerte</h2>
-            <p className="alert-creator-subtitle">
-              Classez vos critères par ordre d'importance
-            </p>
-          </div>
+          <div className="alert-creator-header">
+            <div className="alert-creator-header-content">
+              <h2>{editingAlert ? 'Modifier une alerte' : 'Créer une alerte'}</h2>
+              <p className="alert-creator-subtitle">
+                Classez vos critères par ordre d'importance
+              </p>
+            </div>
           <button className="btn-close" onClick={handleClose} aria-label="Fermer">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -1042,13 +1185,13 @@ function AlertCreator({ isOpen, onClose, onSuccess }) {
             {showPlaceholderBelow && (
               <div className="drop-zone-placeholder-below">
                 <p className="drop-zone-title">Placez vos critères ici</p>
-                <p className="drop-zone-subtitle">Jusqu'à 4 critères</p>
+                <p className="drop-zone-subtitle">Jusqu'à 5 critères</p>
               </div>
             )}
             {shouldShowPlaceholder && selectedCriteria.length === 0 && (
               <div className="drop-zone-placeholder">
                 <p className="drop-zone-title">Placez vos critères ici</p>
-                <p className="drop-zone-subtitle">Jusqu'à 4 critères</p>
+                <p className="drop-zone-subtitle">Jusqu'à 5 critères</p>
               </div>
             )}
           </div>
@@ -1114,7 +1257,7 @@ function AlertCreator({ isOpen, onClose, onSuccess }) {
           <button
             className="btn-continue"
             onClick={handleContinue}
-            disabled={selectedCriteria.length === 0}
+            disabled={selectedCriteria.length !== 5}
           >
             Continuer
           </button>

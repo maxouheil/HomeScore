@@ -54,6 +54,18 @@
     margin-bottom: 0;
 }
 
+.criterion-no-border-bottom {
+    border-bottom: none !important;
+    padding-bottom: 0 !important;
+    margin-bottom: 20px !important;
+}
+
+.criterion-no-border-top {
+    border-top: none !important;
+    padding-top: 0 !important;
+    margin-top: 0 !important;
+}
+
 .criterion-content {
     display: flex;
     flex-direction: column;
@@ -62,7 +74,7 @@
 
 .criterion-header {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 12px;
 }
 
@@ -90,6 +102,10 @@
     background: rgba(248, 84, 87, 0.12);
 }
 
+.criterion-emoji.gray {
+    background: rgba(123, 127, 135, 0.12);
+}
+
 .criterion-text-wrapper {
     flex: 1;
     display: flex;
@@ -115,13 +131,11 @@
     font-weight: 400;
     color: #6c757d;
     line-height: 1.4;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: nowrap;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
     max-width: 100%;
 }
 
@@ -215,5 +229,14 @@
     white-space: pre-line;
     display: block;
     word-wrap: break-word;
+}
+
+/* Style pour les critères en gris (non prioritaires) */
+.criterion-gray .criterion-name {
+    color: #7B7F87 !important;
+}
+
+.criterion-gray .criterion-description {
+    color: #7B7F87 !important;
 }
 

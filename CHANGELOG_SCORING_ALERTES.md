@@ -100,3 +100,4 @@ Pour un appartement avec :
 - Le frontend utilise les scores d'alerte quand disponibles, sinon fallback sur les scores standards
 - L'ordre des critères dans le popup suit exactement l'ordre défini dans l'alerte (primary puis secondary)
 
+

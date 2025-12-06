@@ -11,19 +11,39 @@ import re
 import json
 from typing import Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
-from analyze_photos import PhotoAnalyzer
-from analyze_text_ai import TextAIAnalyzer
-from cache_api import get_cache
 import requests
+
+# Imports conditionnels pour éviter les crashes
+try:
+    from analyze_photos import PhotoAnalyzer
+except Exception as e:
+    print(f"⚠️ Erreur lors de l'import de PhotoAnalyzer: {e}")
+    PhotoAnalyzer = None
+
+try:
+    from analyze_text_ai import TextAIAnalyzer
+except Exception as e:
+    print(f"⚠️ Erreur lors de l'import de TextAIAnalyzer: {e}")
+    TextAIAnalyzer = None
+
+try:
+    from cache_api import get_cache
+except Exception as e:
+    print(f"⚠️ Erreur lors de l'import de cache_api: {e}")
+    def get_cache():
+        return {}
 
 class BaignoireExtractor:
     """Extracteur de baignoire pour les appartements"""
     
     def __init__(self):
-        self.photo_analyzer = PhotoAnalyzer()
-        self.text_ai_analyzer = TextAIAnalyzer()
+        self.photo_analyzer = PhotoAnalyzer() if PhotoAnalyzer else None
+        self.text_ai_analyzer = TextAIAnalyzer() if TextAIAnalyzer else None
         self.use_ai_analysis = True  # Activer l'analyse IA pour éviter faux positifs
-        self.cache = get_cache()  # Cache partagé (photo_analyzer a déjà son propre cache)
+        try:
+            self.cache = get_cache()  # Cache partagé (photo_analyzer a déjà son propre cache)
+        except:
+            self.cache = {}
         
         # Mots-clés baignoire
         self.baignoire_keywords = [
@@ -41,7 +61,7 @@ class BaignoireExtractor:
         """Extrait la présence de baignoire depuis le texte avec analyse IA intelligente"""
         try:
             # Essayer d'abord l'analyse IA si disponible
-            if self.use_ai_analysis and self.text_ai_analyzer.openai_api_key:
+            if self.use_ai_analysis and self.text_ai_analyzer and hasattr(self.text_ai_analyzer, 'openai_api_key') and self.text_ai_analyzer.openai_api_key:
                 ai_result = self.text_ai_analyzer.analyze_baignoire(description, caracteristiques)
                 
                 if ai_result.get('available', False):
@@ -167,8 +187,36 @@ class BaignoireExtractor:
                 'needs_photo_verification': True
             }
     
-    def extract_baignoire_photos(self, photos_urls: List[str]) -> Dict:
-        """Extrait la présence de baignoire depuis les photos avec analyse d'images"""
+    def extract_baignoire_photos(self, photos_urls: List[str], style_analysis: Dict = None) -> Dict:
+        """Extrait la présence de baignoire depuis les photos avec analyse d'images
+        
+        Si style_analysis est fourni et contient des données baignoire, les utilise directement
+        pour éviter de refaire des appels API coûteux.
+        """
+        # PRIORITÉ 1: Vérifier si style_analysis contient déjà les données baignoire
+        if style_analysis:
+            baignoire_data = style_analysis.get('baignoire', {})
+            if baignoire_data and baignoire_data.get('has_baignoire') is not None:
+                print(f"   ✅ Utilisation des données baignoire depuis style_analysis (cache)")
+                has_baignoire = baignoire_data.get('has_baignoire', False)
+                has_douche = baignoire_data.get('has_douche', False)
+                confidence = baignoire_data.get('confidence', 0)
+                
+                # Convertir en format attendu
+                tier = 'tier1' if has_baignoire else ('tier3' if has_douche else 'tier2')
+                score = 10 if has_baignoire else (0 if has_douche else 5)
+                
+                return {
+                    'has_baignoire': has_baignoire,
+                    'has_douche': has_douche,
+                    'score': score,
+                    'tier': tier,
+                    'justification': baignoire_data.get('details', 'Baignoire détectée depuis style_analysis'),
+                    'photos_analyzed': style_analysis.get('photos_analyzed', 0),
+                    'confidence': int(confidence * 100),
+                    'method': 'style_analysis_cache'
+                }
+        
         if not photos_urls:
             return {
                 'has_baignoire': False,
@@ -181,6 +229,7 @@ class BaignoireExtractor:
             }
         
         try:
+            # PRIORITÉ 2: Analyser les photos (fallback si pas de style_analysis)
             # Analyser les premières photos (max 3 pour éviter les timeouts, limite stricte)
             photos_to_analyze = photos_urls[:3]
             analysis_results = []
@@ -225,6 +274,9 @@ class BaignoireExtractor:
             image_base64 = base64.b64encode(response.content).decode('utf-8')
             
             # Appel à OpenAI Vision
+            if not self.photo_analyzer:
+                return None
+                
             import os
             from dotenv import load_dotenv
             load_dotenv()
@@ -386,21 +438,38 @@ Réponds au format JSON STRICT:
             }
         }
     
-    def extract_baignoire_complete(self, description: str, caracteristiques: str = "", photos_urls: List[str] = None) -> Dict:
-        """Extrait la présence de baignoire avec validation croisée texte + photos"""
+    def extract_baignoire_complete(self, description: str, caracteristiques: str = "", photos_urls: List[str] = None, style_analysis: Dict = None) -> Dict:
+        """Extrait la présence de baignoire avec validation croisée texte + photos
+        
+        Args:
+            description: Description de l'appartement
+            caracteristiques: Caractéristiques de l'appartement
+            photos_urls: Liste des URLs des photos
+            style_analysis: Analyse de style existante (optionnel, pour éviter les appels API)
+        """
         # Phase 1: Analyse textuelle IA
         text_result = self.extract_baignoire_textuelle(description, caracteristiques)
         
         # Phase 2: Analyse photos si disponibles
         photo_result = None
         if photos_urls:
-            # Utiliser la nouvelle méthode unifiée du PhotoAnalyzer
-            photo_result = self.photo_analyzer.analyze_photos_baignoire(photos_urls)
+            # Utiliser extract_baignoire_photos qui vérifie d'abord style_analysis
+            try:
+                photo_result = self.extract_baignoire_photos(photos_urls, style_analysis=style_analysis)
+            except Exception as e:
+                print(f"⚠️ Erreur analyse photos baignoire: {e}")
+                photo_result = None
         
         # Phase 3: Validation croisée texte + photos
-        if photo_result and photo_result.get('photos_analyzed', 0) > 0:
-            validation = self.photo_analyzer.validate_text_with_photos(text_result, photo_result, 'baignoire')
-            
+        validation = None
+        if photo_result and photo_result.get('photos_analyzed', 0) > 0 and self.photo_analyzer:
+            try:
+                validation = self.photo_analyzer.validate_text_with_photos(text_result, photo_result, 'baignoire')
+            except Exception as e:
+                print(f"⚠️ Erreur validation croisée: {e}")
+                validation = {'validation_status': 'text_only', 'confidence_adjusted': text_result.get('confidence', 0) / 100}
+        
+        if validation:
             # Utiliser la confiance ajustée
             confiance_ajustee = validation.get('confidence_adjusted', text_result.get('confidence', 0) / 100)
             validation_status = validation.get('validation_status', 'text_only')
@@ -486,7 +555,7 @@ Réponds au format JSON STRICT:
             }
             
             final_result['details']['photo_validation'] = {
-                'cross_validation': validation.get('cross_validation'),
+                'cross_validation': validation.get('cross_validation') if validation else None,
                 'photo_result': photo_result_formatted
             }
             final_result['details']['validation_status'] = validation_status
@@ -512,6 +581,7 @@ Réponds au format JSON STRICT:
         description = apartment_data.get('description', '')
         caracteristiques = apartment_data.get('caracteristiques', '')
         photos = apartment_data.get('photos', [])
+        style_analysis = apartment_data.get('style_analysis')  # Utiliser style_analysis si disponible
         
         # Extraire les URLs des photos
         photos_urls = []
@@ -523,7 +593,7 @@ Réponds au format JSON STRICT:
         
         # Wrapper pour exécuter avec timeout
         def _extract_with_timeout():
-            return self.extract_baignoire_complete(description, caracteristiques, photos_urls)
+            return self.extract_baignoire_complete(description, caracteristiques, photos_urls, style_analysis=style_analysis)
         
         # Exécuter avec timeout global de 30 secondes
         try:

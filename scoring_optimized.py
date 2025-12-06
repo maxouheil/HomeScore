@@ -449,8 +449,8 @@ def score_apartment_optimized(apartment, config):
     scores_detaille['cuisine'] = score_cuisine_optimized(apartment, config, photo_analysis_cache)
     scores_detaille['baignoire'] = score_baignoire_optimized(apartment, config, photo_analysis_cache)
     
-    # 3. Calculer score total
-    scored_criteria = ['localisation', 'prix', 'style', 'ensoleillement', 'cuisine', 'baignoire']
+    # 3. Calculer score total (5 critères à 20pts chacun = 100pts total)
+    scored_criteria = ['localisation', 'prix', 'style', 'ensoleillement', 'cuisine']
     score_total = sum(scores_detaille.get(key, {}).get('score', 0) for key in scored_criteria)
     
     # Arrondir au multiple de 5 le plus proche

@@ -566,8 +566,8 @@ def generate_html(apartments):
         'localisation': {'name': 'LOCALISATION', 'max': 20, 'formatter': format_localisation},
         'prix': {'name': 'PRIX', 'max': 20, 'formatter': format_prix},
         'style': {'name': 'STYLE', 'max': 20, 'formatter': format_style},
-        'ensoleillement': {'name': 'EXPOSITION', 'max': 10, 'formatter': format_exposition},
-        'cuisine': {'name': 'CUISINE', 'max': 10, 'formatter': format_cuisine},
+        'ensoleillement': {'name': 'EXPOSITION', 'max': 20, 'formatter': format_exposition},
+        'cuisine': {'name': 'CUISINE', 'max': 20, 'formatter': format_cuisine},
         'baignoire': {'name': 'BAIGNOIRE', 'max': 10, 'formatter': format_baignoire}
     }
     

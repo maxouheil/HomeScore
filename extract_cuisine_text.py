@@ -90,15 +90,19 @@ class CuisineTextExtractor:
             'indices': []
         }
     
-    def extract_cuisine_complete(self, description: str, caracteristiques: str = "", photos_urls: List[str] = None) -> Dict:
-        """Extrait si la cuisine est ouverte avec validation croisée texte + photos"""
+    def extract_cuisine_complete(self, description: str, caracteristiques: str = "", photos_urls: List[str] = None, style_analysis: Dict = None) -> Dict:
+        """Extrait si la cuisine est ouverte avec validation croisée texte + photos
+        
+        Si style_analysis est fourni et contient des données cuisine, les utilise directement
+        pour éviter de refaire des appels API coûteux.
+        """
         # Phase 1: Analyse textuelle IA
         text_result = self.extract_cuisine_from_text(description, caracteristiques)
         
-        # Phase 2: Analyse photos si disponibles
+        # Phase 2: Analyse photos si disponibles (utiliser style_analysis si disponible)
         photo_result = None
         if photos_urls:
-            photo_result = self.photo_analyzer.analyze_photos_cuisine(photos_urls)
+            photo_result = self.photo_analyzer.analyze_photos_cuisine(photos_urls, style_analysis=style_analysis)
         
         # Phase 3: Validation croisée texte + photos
         if photo_result and photo_result.get('photos_analyzed', 0) > 0:

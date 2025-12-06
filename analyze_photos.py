@@ -512,8 +512,33 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
             'detected_photos': detected_photos
         }
     
-    def analyze_photos_cuisine(self, photos_urls: List[str]) -> Dict:
-        """Analyse les photos pour détecter si la cuisine est ouverte"""
+    def analyze_photos_cuisine(self, photos_urls: List[str], style_analysis: Dict = None) -> Dict:
+        """Analyse les photos pour détecter si la cuisine est ouverte
+        
+        Si style_analysis est fourni et contient des données cuisine, les utilise directement
+        pour éviter de refaire des appels API coûteux.
+        
+        OPTIMISATION: Les données cuisine sont déjà analysées dans le même appel Vision
+        qui analyse style, luminosité, baignoire, vis-à-vis, etc. (1 seul appel par photo).
+        """
+        # PRIORITÉ 1: Vérifier si style_analysis contient déjà les données cuisine
+        # (ces données viennent du même appel Vision unifié qui analyse tous les critères)
+        if style_analysis:
+            cuisine_data = style_analysis.get('cuisine', {})
+            if cuisine_data and cuisine_data.get('ouverte') is not None:
+                print(f"   ✅ Utilisation des données cuisine depuis style_analysis (déjà analysées dans l'appel Vision unifié)")
+                ouverte = cuisine_data.get('ouverte', False)
+                confidence = cuisine_data.get('confidence', 0)
+                
+                return {
+                    'ouverte': ouverte,
+                    'confidence': confidence,
+                    'justification': cuisine_data.get('details', 'Cuisine détectée depuis style_analysis'),
+                    'photos_analyzed': style_analysis.get('photos_analyzed', 0),
+                    'detected_photos': [],
+                    'method': 'style_analysis_cache'
+                }
+        
         if not photos_urls:
             return {
                 'ouverte': None,
@@ -524,6 +549,7 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
             }
         
         try:
+            # PRIORITÉ 2: Analyser les photos (fallback si pas de style_analysis)
             # Analyser les 5 premières photos
             photos_to_analyze = photos_urls[:5]
             analysis_results = []
@@ -702,13 +728,37 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
             'detected_photos': detected_photos
         }
     
-    def analyze_photos_visavis(self, photos_urls: List[str]) -> Dict:
+    def analyze_photos_visavis(self, photos_urls: List[str], style_analysis: Dict = None) -> Dict:
         """Analyse les photos pour déterminer la distance du vis-à-vis depuis les fenêtres de la pièce principale
+        
+        Si style_analysis est fourni et contient des données vis-à-vis, les utilise directement
+        pour éviter de refaire des appels API coûteux.
         
         Retourne:
         - visavis_distance: distance en mètres (int ou None)
         - visavis_category: "good" (>20m), "moyen" (10-20m), "bad" (<10m)
         """
+        # PRIORITÉ 1: Vérifier si style_analysis contient déjà les données vis-à-vis
+        if style_analysis:
+            visavis_data = style_analysis.get('visavis', {})
+            if visavis_data and visavis_data.get('distance') is not None:
+                print(f"   ✅ Utilisation des données vis-à-vis depuis style_analysis (cache)")
+                distance = visavis_data.get('distance')
+                category = visavis_data.get('category')
+                confidence = visavis_data.get('confidence', 0)
+                
+                return {
+                    'visavis_distance': distance,
+                    'visavis_category': category,
+                    'confidence': confidence,
+                    'justification': visavis_data.get('details', 'Vis-à-vis détecté depuis style_analysis'),
+                    'photos_analyzed': style_analysis.get('photos_analyzed', 0),
+                    'details': {
+                        'vue_par_fenetre': visavis_data.get('vue_par_fenetre'),
+                        'method': 'style_analysis_cache'
+                    }
+                }
+        
         if not photos_urls:
             return {
                 'visavis_distance': None,
@@ -720,6 +770,7 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
             }
         
         try:
+            # PRIORITÉ 2: Analyser les photos (fallback si pas de style_analysis)
             # Analyser les premières photos (max 5 pour trouver des vues par les fenêtres)
             photos_to_analyze = photos_urls[:5]
             analysis_results = []
@@ -1015,6 +1066,490 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
             return text_style_norm == photo_style_norm or not text_style_norm or not photo_style_norm
         
         return True  # Par défaut, considérer cohérent
+    
+    def analyze_photos_salon_size(self, photos_urls: List[str], style_analysis: Dict = None) -> Dict:
+        """Analyse les photos pour estimer la taille du salon/séjour en m²
+        
+        Si style_analysis est fourni et contient des données salon_size, les utilise directement
+        pour éviter de refaire des appels API coûteux.
+        
+        Retourne:
+        - salon_size_estimate: estimation en m² (int ou None)
+        - salon_category: "grand" (>25m²), "moyen" (15-25m²), "petit" (<15m²)
+        - confidence: confiance de l'estimation (0.0-1.0)
+        """
+        # PRIORITÉ 1: Vérifier si style_analysis contient déjà les données salon_size
+        if style_analysis:
+            salon_data = style_analysis.get('salon_size', {})
+            if salon_data and salon_data.get('estimate') is not None:
+                print(f"   ✅ Utilisation des données taille salon depuis style_analysis (cache)")
+                estimate = salon_data.get('estimate')
+                category = salon_data.get('category')
+                confidence = salon_data.get('confidence', 0)
+                
+                return {
+                    'salon_size_estimate': estimate,
+                    'salon_category': category,
+                    'confidence': confidence,
+                    'justification': salon_data.get('details', 'Taille salon détectée depuis style_analysis'),
+                    'photos_analyzed': style_analysis.get('photos_analyzed', 0),
+                    'details': {
+                        'method': 'style_analysis_cache'
+                    }
+                }
+        
+        if not photos_urls:
+            return {
+                'salon_size_estimate': None,
+                'salon_category': None,
+                'confidence': 0.0,
+                'justification': 'Aucune photo disponible',
+                'photos_analyzed': 0,
+                'details': {}
+            }
+        
+        try:
+            # PRIORITÉ 2: Analyser les photos (fallback si pas de style_analysis)
+            # Analyser les premières photos (max 5 pour trouver le salon)
+            photos_to_analyze = photos_urls[:5]
+            analysis_results = []
+            
+            for i, photo_url in enumerate(photos_to_analyze):
+                print(f"   📸 Analyse taille salon photo {i+1}/{len(photos_to_analyze)}: {photo_url[:50]}...")
+                result = self._analyze_single_photo_salon_size(photo_url)
+                if result:
+                    result['photo_number'] = i + 1
+                    analysis_results.append(result)
+            
+            # Agréger les résultats
+            return self._aggregate_salon_size_results(analysis_results)
+            
+        except Exception as e:
+            return {
+                'salon_size_estimate': None,
+                'salon_category': None,
+                'confidence': 0.0,
+                'justification': f'Erreur analyse photos: {e}',
+                'photos_analyzed': 0,
+                'details': {}
+            }
+    
+    def _analyze_single_photo_salon_size(self, photo_url: str) -> Optional[Dict]:
+        """Analyse une photo pour estimer la taille du salon avec cache"""
+        # Vérifier le cache d'abord
+        cached_result = self.cache.get('salon_size_photo', photo_url)
+        if cached_result:
+            return cached_result
+        
+        try:
+            response = requests.get(photo_url, timeout=5)
+            if response.status_code != 200:
+                return None
+            
+            image_base64 = base64.b64encode(response.content).decode('utf-8')
+            
+            headers = {
+                'Authorization': f'Bearer {self.openai_api_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            payload = {
+                'model': 'gpt-4o-mini',
+                'messages': [
+                    {
+                        'role': 'user',
+                        'content': [
+                            {
+                                'type': 'text',
+                                'text': """Analyse cette photo d'appartement et détermine si elle montre le SALON/SÉJOUR, puis estime sa taille en m².
+
+## TÂCHE : Identifier le salon et estimer sa taille
+
+### IMPORTANT :
+- Identifier si cette photo montre le salon/séjour (pièce principale avec canapé, table basse, espace de vie)
+- Si c'est le salon, estimer sa taille en m² en observant:
+  * La profondeur de la pièce (distance du mur au fond)
+  * La largeur visible de la pièce
+  * Les meubles comme référence (canapé standard ~2m, table basse ~1m, etc.)
+  * Les proportions générales de l'espace
+
+### INDICES À CHERCHER :
+- Canapé, table basse, espace de vie = salon/séjour
+- Profondeur estimée (distance mur avant → mur arrière)
+- Largeur estimée (distance mur gauche → mur droit)
+- Meubles comme références de taille
+- Fenêtres pour estimer la largeur de la pièce
+
+### ESTIMATION :
+- Salon très grand: >25m² (pièce très spacieuse, plusieurs zones visibles)
+- Salon moyen: 15-25m² (pièce confortable, espace bien aménagé)
+- Salon petit: <15m² (pièce compacte, espace limité)
+
+Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
+{
+    "is_salon": true|false,
+    "salon_size_estimate": nombre entier en m² (ou null si pas salon),
+    "salon_category": "grand|moyen|petit|null",
+    "confidence": 0.0-1.0,
+    "details": "description de ce que tu vois et comment tu estimes la taille"
+}"""
+                            },
+                            {
+                                'type': 'image_url',
+                                'image_url': {
+                                    'url': f'data:image/jpeg;base64,{image_base64}'
+                                }
+                            }
+                        ]
+                    }
+                ],
+                'max_tokens': 400
+            }
+            
+            response = requests.post(
+                f"{self.openai_base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=15
+            )
+            
+            if response.status_code != 200:
+                return None
+            
+            result = response.json()
+            content = result['choices'][0]['message']['content']
+            
+            # Parser le JSON
+            try:
+                if '```json' in content:
+                    content = content.split('```json')[1].split('```')[0].strip()
+                elif '```' in content:
+                    content = content.split('```')[1].split('```')[0].strip()
+                
+                analysis = json.loads(content)
+                
+                # Mettre en cache avant de retourner
+                self.cache.set('salon_size_photo', photo_url, analysis)
+                
+                return analysis
+            except json.JSONDecodeError:
+                return None
+                
+        except Exception as e:
+            return None
+    
+    def _aggregate_salon_size_results(self, results: List[Dict]) -> Dict:
+        """Agrège les résultats de plusieurs photos pour estimer la taille du salon
+        
+        Calcule la moyenne des estimations et catégorise selon:
+        - <15m² = petit
+        - 15-25m² = moyen
+        - >25m² = grand
+        """
+        if not results:
+            return {
+                'salon_size_estimate': None,
+                'salon_category': None,
+                'confidence': 0.0,
+                'justification': 'Aucune photo analysée avec succès',
+                'photos_analyzed': 0,
+                'details': {}
+            }
+        
+        # Extraire les estimations de taille depuis les photos de salon
+        salon_sizes = []
+        photos_salon = []
+        
+        for r in results:
+            photo_number = r.get('photo_number', 0)
+            is_salon = r.get('is_salon', False)
+            salon_size = r.get('salon_size_estimate')
+            
+            if is_salon and salon_size is not None:
+                try:
+                    # Convertir en int si c'est un nombre
+                    size_int = int(float(salon_size))
+                    if size_int > 0:  # Ignorer les tailles invalides
+                        salon_sizes.append(size_int)
+                        photos_salon.append(photo_number)
+                except (ValueError, TypeError):
+                    pass
+        
+        if not salon_sizes:
+            return {
+                'salon_size_estimate': None,
+                'salon_category': None,
+                'confidence': 0.0,
+                'justification': 'Aucune photo de salon identifiée sur les photos analysées',
+                'photos_analyzed': len(results),
+                'details': {}
+            }
+        
+        # Calculer la taille moyenne
+        avg_size = int(sum(salon_sizes) / len(salon_sizes))
+        
+        # Catégoriser selon les seuils
+        if avg_size < 15:
+            category = 'petit'
+        elif avg_size <= 25:
+            category = 'moyen'
+        else:
+            category = 'grand'
+        
+        # Confiance moyenne
+        confidences = [r.get('confidence', 0.5) for r in results if r.get('is_salon', False)]
+        avg_confidence = sum(confidences) / len(confidences) if confidences else 0.5
+        
+        justification = f"Salon estimé à {avg_size}m² (catégorie: {category}) depuis {len(photos_salon)} photo(s) de salon"
+        
+        return {
+            'salon_size_estimate': avg_size,
+            'salon_category': category,
+            'confidence': avg_confidence,
+            'justification': justification,
+            'photos_analyzed': len(results),
+            'details': {
+                'sizes': salon_sizes,
+                'photos_salon': photos_salon,
+                'min_size': min(salon_sizes),
+                'max_size': max(salon_sizes)
+            }
+        }
+    
+    def analyze_photos_hauteur_plafond(self, photos_urls: List[str]) -> Dict:
+        """Analyse les photos pour estimer la hauteur sous plafond en mètres
+        
+        Retourne:
+        - hauteur_estimate: estimation en mètres (float ou None)
+        - hauteur_category: "tres_haute" (>3m), "haute" (2.80-3m), "moyenne" (2.50-2.80m), "basse" (<2.50m)
+        - confidence: confiance de l'estimation (0.0-1.0)
+        """
+        if not photos_urls:
+            return {
+                'hauteur_estimate': None,
+                'hauteur_category': None,
+                'confidence': 0.0,
+                'justification': 'Aucune photo disponible',
+                'photos_analyzed': 0,
+                'details': {}
+            }
+        
+        try:
+            # Analyser les premières photos (max 5 pour trouver des pièces avec plafond visible)
+            photos_to_analyze = photos_urls[:5]
+            analysis_results = []
+            
+            for i, photo_url in enumerate(photos_to_analyze):
+                print(f"   📸 Analyse hauteur plafond photo {i+1}/{len(photos_to_analyze)}: {photo_url[:50]}...")
+                result = self._analyze_single_photo_hauteur_plafond(photo_url)
+                if result:
+                    result['photo_number'] = i + 1
+                    analysis_results.append(result)
+            
+            # Agréger les résultats
+            return self._aggregate_hauteur_plafond_results(analysis_results)
+            
+        except Exception as e:
+            return {
+                'hauteur_estimate': None,
+                'hauteur_category': None,
+                'confidence': 0.0,
+                'justification': f'Erreur analyse photos: {e}',
+                'photos_analyzed': 0,
+                'details': {}
+            }
+    
+    def _analyze_single_photo_hauteur_plafond(self, photo_url: str) -> Optional[Dict]:
+        """Analyse une photo pour estimer la hauteur sous plafond avec cache"""
+        # Vérifier le cache d'abord
+        cached_result = self.cache.get('hauteur_plafond_photo', photo_url)
+        if cached_result:
+            return cached_result
+        
+        try:
+            response = requests.get(photo_url, timeout=5)
+            if response.status_code != 200:
+                return None
+            
+            image_base64 = base64.b64encode(response.content).decode('utf-8')
+            
+            headers = {
+                'Authorization': f'Bearer {self.openai_api_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            payload = {
+                'model': 'gpt-4o-mini',
+                'messages': [
+                    {
+                        'role': 'user',
+                        'content': [
+                            {
+                                'type': 'text',
+                                'text': """Analyse cette photo d'appartement et estime la HAUTEUR SOUS PLAFOND en mètres.
+
+## TÂCHE : Estimer la hauteur sous plafond
+
+### IMPORTANT :
+- Observer le plafond visible dans la photo
+- Estimer la hauteur en utilisant des références visuelles :
+  * Portes standard (~2.10m de hauteur)
+  * Fenêtres standard (~1.5-2m de hauteur)
+  * Meubles comme référence (armoires ~2m, étagères, etc.)
+  * Proportions générales de la pièce
+  * Distance apparente entre le sol et le plafond
+
+### INDICES À CHERCHER :
+- Plafond visible dans la photo
+- Portes, fenêtres, meubles comme références de taille
+- Proportions verticales de la pièce
+- Impression générale d'espace vertical
+
+### ESTIMATION :
+- Très haute: >3m (plafonds très hauts, impression de grand volume)
+- Haute: 2.80-3m (plafonds hauts, espace aéré)
+- Moyenne: 2.50-2.80m (hauteur standard, confortable)
+- Basse: <2.50m (plafonds bas, espace un peu serré)
+
+### NOTES :
+- Si le plafond n'est pas visible ou difficile à estimer, utiliser null
+- Se concentrer sur les pièces principales (salon, séjour) si plusieurs pièces visibles
+- Prendre en compte les angles de vue qui peuvent déformer les proportions
+
+Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
+{
+    "plafond_visible": true|false,
+    "hauteur_estimate": nombre décimal en mètres (ou null si impossible à estimer),
+    "hauteur_category": "tres_haute|haute|moyenne|basse|null",
+    "confidence": 0.0-1.0,
+    "details": "description de ce que tu vois et comment tu estimes la hauteur"
+}"""
+                            },
+                            {
+                                'type': 'image_url',
+                                'image_url': {
+                                    'url': f'data:image/jpeg;base64,{image_base64}'
+                                }
+                            }
+                        ]
+                    }
+                ],
+                'max_tokens': 400
+            }
+            
+            response = requests.post(
+                f"{self.openai_base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=15
+            )
+            
+            if response.status_code != 200:
+                return None
+            
+            result = response.json()
+            content = result['choices'][0]['message']['content']
+            
+            # Parser le JSON
+            try:
+                if '```json' in content:
+                    content = content.split('```json')[1].split('```')[0].strip()
+                elif '```' in content:
+                    content = content.split('```')[1].split('```')[0].strip()
+                
+                analysis = json.loads(content)
+                
+                # Mettre en cache avant de retourner
+                self.cache.set('hauteur_plafond_photo', photo_url, analysis)
+                
+                return analysis
+            except json.JSONDecodeError:
+                return None
+                
+        except Exception as e:
+            return None
+    
+    def _aggregate_hauteur_plafond_results(self, results: List[Dict]) -> Dict:
+        """Agrège les résultats de plusieurs photos pour estimer la hauteur sous plafond
+        
+        Prend la hauteur MAXIMALE (pièce la plus haute) et catégorise selon:
+        - <2.50m = basse
+        - 2.50-2.80m = moyenne
+        - 2.80-3m = haute
+        - >3m = très haute
+        """
+        if not results:
+            return {
+                'hauteur_estimate': None,
+                'hauteur_category': None,
+                'confidence': 0.0,
+                'justification': 'Aucune photo analysée avec succès',
+                'photos_analyzed': 0,
+                'details': {}
+            }
+        
+        # Extraire les estimations de hauteur depuis les photos avec plafond visible
+        hauteurs = []
+        photos_plafond = []
+        
+        for r in results:
+            photo_number = r.get('photo_number', 0)
+            plafond_visible = r.get('plafond_visible', False)
+            hauteur = r.get('hauteur_estimate')
+            
+            if plafond_visible and hauteur is not None:
+                try:
+                    # Convertir en float
+                    hauteur_float = float(hauteur)
+                    if hauteur_float > 0:  # Ignorer les hauteurs invalides
+                        hauteurs.append(hauteur_float)
+                        photos_plafond.append(photo_number)
+                except (ValueError, TypeError):
+                    pass
+        
+        if not hauteurs:
+            return {
+                'hauteur_estimate': None,
+                'hauteur_category': None,
+                'confidence': 0.0,
+                'justification': 'Aucun plafond clairement visible sur les photos analysées',
+                'photos_analyzed': len(results),
+                'details': {}
+            }
+        
+        # Prendre la hauteur MAXIMALE (pièce la plus haute) au lieu de la moyenne
+        max_hauteur = max(hauteurs)
+        
+        # Catégoriser selon les seuils en utilisant la hauteur maximale
+        if max_hauteur > 3.0:
+            category = 'tres_haute'
+        elif max_hauteur >= 2.80:
+            category = 'haute'
+        elif max_hauteur >= 2.50:
+            category = 'moyenne'
+        else:
+            category = 'basse'
+        
+        # Confiance moyenne
+        confidences = [r.get('confidence', 0.5) for r in results if r.get('plafond_visible', False)]
+        avg_confidence = sum(confidences) / len(confidences) if confidences else 0.5
+        
+        justification = f"Hauteur sous plafond estimée à {max_hauteur:.2f}m (pièce la plus haute, catégorie: {category}) depuis {len(photos_plafond)} photo(s)"
+        
+        return {
+            'hauteur_estimate': round(max_hauteur, 2),
+            'hauteur_category': category,
+            'confidence': avg_confidence,
+            'justification': justification,
+            'photos_analyzed': len(results),
+            'details': {
+                'hauteurs': hauteurs,
+                'photos_plafond': photos_plafond,
+                'min_hauteur': min(hauteurs),
+                'max_hauteur': max(hauteurs),
+                'avg_hauteur': round(sum(hauteurs) / len(hauteurs), 2)  # Garder la moyenne pour référence
+            }
+        }
 
 def test_photo_analysis():
     """Test de l'analyse de photos"""

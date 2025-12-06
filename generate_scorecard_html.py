@@ -7,7 +7,27 @@ import json
 import os
 import re
 from datetime import datetime
-from extract_baignoire import BaignoireExtractor
+
+# Import lazy de BaignoireExtractor pour éviter les crashes au démarrage
+_BaignoireExtractor = None
+
+def _get_baignoire_extractor():
+    """Charge BaignoireExtractor de manière lazy"""
+    global _BaignoireExtractor
+    if _BaignoireExtractor is None:
+        try:
+            from extract_baignoire import BaignoireExtractor
+            _BaignoireExtractor = BaignoireExtractor
+        except Exception as e:
+            print(f"⚠️ Erreur lors de l'import de BaignoireExtractor: {e}")
+            # Créer une classe dummy si l'import échoue
+            class DummyBaignoireExtractor:
+                def __init__(self):
+                    pass
+                def extract_baignoire_ultimate(self, *args, **kwargs):
+                    return {'has_baignoire': False, 'has_douche': False, 'confidence': 0, 'justification': 'Non disponible'}
+            _BaignoireExtractor = DummyBaignoireExtractor
+    return _BaignoireExtractor
 
 def load_scored_apartments():
     """Charge les appartements scorés et fusionne avec les données scrapées"""
@@ -510,10 +530,19 @@ def get_criterion_confidence(apartment, criterion_key, baignoire_extractor=None)
     if criterion_key == 'baignoire':
         try:
             if baignoire_extractor is None:
-                baignoire_extractor = BaignoireExtractor()
-            baignoire_data = baignoire_extractor.extract_baignoire_ultimate(apartment)
-            confidence = baignoire_data.get('confidence', 0)
-        except:
+                try:
+                    BaignoireExtractor = _get_baignoire_extractor()
+                    baignoire_extractor = BaignoireExtractor()
+                except Exception as e:
+                    print(f"⚠️ Erreur création BaignoireExtractor: {e}")
+                    baignoire_extractor = None
+            if baignoire_extractor:
+                baignoire_data = baignoire_extractor.extract_baignoire_ultimate(apartment)
+                confidence = baignoire_data.get('confidence', 0)
+            else:
+                confidence = None
+        except Exception as e:
+            print(f"⚠️ Erreur extraction baignoire: {e}")
             confidence = None
     
     # Convertir en pourcentage si c'est un float entre 0 et 1
@@ -964,7 +993,18 @@ def format_baignoire_criterion(apartment, baignoire_extractor=None):
     
     try:
         if baignoire_extractor is None:
-            baignoire_extractor = BaignoireExtractor()
+            try:
+                BaignoireExtractor = _get_baignoire_extractor()
+                baignoire_extractor = BaignoireExtractor()
+            except Exception as e:
+                print(f"⚠️ Erreur création BaignoireExtractor: {e}")
+                baignoire_extractor = None
+        if not baignoire_extractor:
+            return {
+                'main_value': "Non spécifié",
+                'confidence': None,
+                'indices': "Baignoire Indice:\nNon spécifié"
+            }
         baignoire_data = baignoire_extractor.extract_baignoire_ultimate(apartment)
         
         has_baignoire = baignoire_data.get('has_baignoire', False)
@@ -1153,7 +1193,13 @@ def generate_scorecard_html(apartments):
     """Génère le HTML avec le design de scorecard EXACT"""
     
     # Créer une seule instance de BaignoireExtractor pour tous les appartements (évite réinitialisations lourdes)
-    baignoire_extractor = BaignoireExtractor()
+    baignoire_extractor = None
+    try:
+        BaignoireExtractor = _get_baignoire_extractor()
+        baignoire_extractor = BaignoireExtractor()
+    except Exception as e:
+        print(f"⚠️ Erreur création BaignoireExtractor: {e}")
+        baignoire_extractor = None
     
     html = f"""
 <!DOCTYPE html>
@@ -1687,8 +1733,8 @@ def generate_scorecard_html(apartments):
             'localisation': {'name': 'Localisation', 'max': 20, 'formatter': format_localisation_criterion},
             'prix': {'name': 'Prix', 'max': 20, 'formatter': format_prix_criterion},
             'style': {'name': 'Style', 'max': 20, 'formatter': format_style_criterion},
-            'ensoleillement': {'name': 'Exposition', 'max': 10, 'formatter': format_exposition_criterion},
-            'cuisine': {'name': 'Cuisine', 'max': 10, 'formatter': format_cuisine_criterion},
+            'ensoleillement': {'name': 'Exposition', 'max': 20, 'formatter': format_exposition_criterion},
+            'cuisine': {'name': 'Cuisine', 'max': 20, 'formatter': format_cuisine_criterion},
             'baignoire': {'name': 'Baignoire', 'max': 10, 'formatter': format_baignoire_criterion}
         }
         

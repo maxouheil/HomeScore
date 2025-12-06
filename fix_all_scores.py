@@ -47,7 +47,7 @@ def fix_all_scores():
     missing_data_count = 0
     errors = []
     
-    scored_criteria = ['localisation', 'prix', 'style', 'ensoleillement', 'cuisine', 'baignoire']
+    scored_criteria = ['localisation', 'prix', 'style', 'ensoleillement', 'cuisine']
     
     for i, apt_scored in enumerate(scored_apartments, 1):
         apt_id = apt_scored.get('id')
@@ -70,7 +70,7 @@ def fix_all_scores():
             # Mettre à jour les scores détaillés
             apt_scored['scores_detaille'] = new_score['scores_detaille']
             
-            # Recalculer le score total (seulement les 6 critères, pas de bonus/malus)
+            # Recalculer le score total (seulement les 5 critères à 20pts chacun, pas de bonus/malus)
             mega_score = sum(
                 new_score['scores_detaille'].get(key, {}).get('score', 0)
                 for key in scored_criteria

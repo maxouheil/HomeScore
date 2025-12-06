@@ -2,144 +2,137 @@ import { useState, useEffect } from 'react'
 import ApartmentCard from './ApartmentCard'
 import './AlertResults.css'
 
-function AlertResults({ alertId, alert, onBack }) {
+function AlertResults({ alertId, alert }) {
   const [apartments, setApartments] = useState([])
+  const [alertData, setAlertData] = useState(alert || null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [fadeOut, setFadeOut] = useState(false)
+  const [showContent, setShowContent] = useState(false)
 
   useEffect(() => {
     if (alertId || alert) {
-      loadResults()
+      setShowContent(false)
+      loadAlertAndResults()
     }
   }, [alertId, alert])
 
-  const loadResults = async () => {
+  const loadAlertAndResults = async () => {
     try {
+      // Fade out avant de charger
+      setFadeOut(true)
+      await new Promise(resolve => setTimeout(resolve, 150)) // Petit délai pour le fade-out
+      
       setLoading(true)
+      setError(null)
+      setFadeOut(false)
       const id = alertId || alert?.id
       if (!id) {
         throw new Error('ID d\'alerte manquant')
       }
 
+      // Charger l'alerte pour avoir les critères
+      let currentAlert = alert
+      if (!currentAlert) {
+        const alertResponse = await fetch(`/api/alerts/${id}`)
+        if (alertResponse.ok) {
+          currentAlert = await alertResponse.json()
+          setAlertData(currentAlert)
+        }
+      } else {
+        setAlertData(currentAlert)
+      }
+
+      // Charger les appartements
       const response = await fetch(`/api/alerts/${id}/apartments`)
       if (!response.ok) {
-        throw new Error('Erreur lors du chargement des résultats')
+        const errorData = await response.json().catch(() => ({ detail: 'Erreur lors du chargement des résultats' }))
+        throw new Error(errorData.detail || `Erreur HTTP ${response.status}`)
       }
       const data = await response.json()
-      setApartments(data)
+      // Trier par score décroissant (du plus haut au plus bas)
+      // S'assurer que les scores sont des nombres
+      const sorted = (data || []).sort((a, b) => {
+        const scoreA = Number(a.alert_score) || 0
+        const scoreB = Number(b.alert_score) || 0
+        // Si les scores sont égaux, garder l'ordre original (stable sort)
+        if (scoreB === scoreA) {
+          return 0
+        }
+        return scoreB - scoreA // Décroissant : plus grand score en premier
+      })
+      console.log('Appartements triés par alert_score:', sorted.map(apt => ({
+        id: apt.id,
+        prix: apt.prix,
+        alert_score: apt.alert_score,
+        alert_criteria_scores: apt.alert_criteria_scores,
+        // DEBUG: Vérifier les scores individuels
+        criteria_scores_debug: apt.alert_criteria_scores ? Object.keys(apt.alert_criteria_scores).map(k => ({
+          critere: k,
+          score: apt.alert_criteria_scores[k]?.score
+        })) : null
+      })))
+      setApartments(sorted)
       setError(null)
     } catch (err) {
-      setError(err.message)
+      console.error('Erreur lors du chargement des résultats:', err)
+      setError(err.message || 'Erreur lors du chargement des résultats')
     } finally {
+      // Fade out du loader avant d'afficher le contenu
       setLoading(false)
+      // Petit délai pour la transition fade-out du loader
+      setTimeout(() => {
+        setShowContent(true)
+      }, 200)
     }
-  }
-
-  const formatScore = (score) => {
-    return score ? score.toFixed(1) : '0'
-  }
-
-  const getScoreColor = (score) => {
-    if (score >= 80) return '#10b981' // Vert
-    if (score >= 60) return '#f59e0b' // Orange
-    return '#ef4444' // Rouge
   }
 
   if (loading) {
     return (
-      <div className="alert-results">
-        <div className="loading">Chargement des résultats...</div>
+      <div className="loading-container">
+        <div className="spinner"></div>
+      </div>
+    )
+  }
+
+  if (!showContent && !error && apartments.length > 0) {
+    return (
+      <div className="loading-container loading-fade-out">
+        <div className="spinner"></div>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="alert-results">
-        <div className="error">Erreur: {error}</div>
-        {onBack && (
-          <button className="btn-back" onClick={onBack}>
-            ← Retour
-          </button>
-        )}
+      <div className="error">
+        <p>Erreur: {error}</p>
+        <p style={{ fontSize: '12px', marginTop: '10px' }}>
+          Assurez-vous que le serveur backend est démarré sur le port 8000
+        </p>
       </div>
     )
   }
 
-  const alertData = alert || {}
+  if (apartments.length === 0) {
+    return (
+      <div className="empty-results" style={{ opacity: fadeOut ? 0 : 1, transition: 'opacity 0.3s ease-in-out' }}>
+        <p>Aucun appartement ne correspond aux critères de cette alerte.</p>
+      </div>
+    )
+  }
 
   return (
-    <div className="alert-results">
-      <div className="alert-results-header">
-        <div>
-          <h2>{alertData.name || 'Résultats de l\'alerte'}</h2>
-          <p className="results-count">
-            {apartments.length} appartement{apartments.length !== 1 ? 's' : ''} trouvé{apartments.length !== 1 ? 's' : ''}
-          </p>
+    <div className={`apartments-grid ${fadeOut ? 'fade-out' : ''}`}>
+      {apartments.map((apartment, index) => (
+        <div 
+          key={apartment.id} 
+          className="apartment-card-wrapper"
+          style={{ animationDelay: `${index * 0.1}s` }}
+        >
+          <ApartmentCard apartment={apartment} alertCriteria={alertData?.criteria} />
         </div>
-        {onBack && (
-          <button className="btn-back" onClick={onBack}>
-            ← Retour
-          </button>
-        )}
-      </div>
-
-      {apartments.length === 0 ? (
-        <div className="empty-results">
-          <p>Aucun appartement ne correspond aux critères de cette alerte.</p>
-          <p className="empty-hint">
-            Essayez d'élargir vos filtres (budget, surface, pièces) ou modifiez les critères de l'alerte.
-          </p>
-        </div>
-      ) : (
-        <>
-          <div className="alert-summary">
-            <div className="summary-item">
-              <strong>Budget:</strong> {alertData.filters?.budget_min?.toLocaleString('fr-FR')}€ - {alertData.filters?.budget_max?.toLocaleString('fr-FR')}€
-            </div>
-            <div className="summary-item">
-              <strong>Surface:</strong> {alertData.filters?.surface_min}m² - {alertData.filters?.surface_max}m²
-            </div>
-            <div className="summary-item">
-              <strong>Pièces:</strong> {alertData.filters?.pieces_min} - {alertData.filters?.pieces_max}
-            </div>
-            {alertData.filters?.localisation && (
-              <div className="summary-item">
-                <strong>Localisation:</strong> {alertData.filters.localisation}
-              </div>
-            )}
-          </div>
-
-          <div className="apartments-grid">
-            {apartments.map((apartment) => {
-              const alertScore = apartment.alert_score || 0
-              const scoreColor = getScoreColor(alertScore)
-              
-              return (
-                <div key={apartment.id} className="apartment-wrapper">
-                  <div className="alert-score-badge" style={{ backgroundColor: scoreColor }}>
-                    Score alerte: {formatScore(alertScore)}/100
-                  </div>
-                  <ApartmentCard apartment={apartment} />
-                  {apartment.alert_criteria_scores && (
-                    <div className="criteria-scores">
-                      <h4>Détail des critères:</h4>
-                      <div className="criteria-scores-grid">
-                        {Object.entries(apartment.alert_criteria_scores).map(([criterion, scoreData]) => (
-                          <div key={criterion} className="criterion-score-item">
-                            <span className="criterion-name">{criterion}:</span>
-                            <span className="criterion-score">{formatScore(scoreData.score)}pts</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </>
-      )}
+      ))}
     </div>
   )
 }

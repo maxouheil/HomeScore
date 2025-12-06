@@ -7,7 +7,7 @@ import json
 from scoring import (
     score_localisation, score_prix, score_style, score_ensoleillement,
     score_cuisine, score_surface, score_ascenseur, score_renove,
-    load_scoring_config
+    score_large_piece_vie, score_hauteur_plafond, score_calme, load_scoring_config
 )
 
 
@@ -39,8 +39,12 @@ CRITERIA_MAPPING = {
         'max_score': 10
     },
     'large_piece_vie': {
-        'function': score_surface,
-        'max_score': 5
+        'function': score_large_piece_vie,
+        'max_score': 10
+    },
+    'hauteur_plafond': {
+        'function': score_hauteur_plafond,
+        'max_score': 10
     },
     'renove': {
         'function': score_renove,
@@ -50,6 +54,10 @@ CRITERIA_MAPPING = {
         'function': score_style,
         'max_score': 20,
         'detect_neuf': True  # Flag spécial pour détecter uniquement neuf
+    },
+    'calme': {
+        'function': score_calme,
+        'max_score': 10
     }
 }
 
@@ -60,26 +68,27 @@ def get_score_from_tier(tier, target_max_score):
     
     Args:
         tier: Tier du critère ('tier1', 'tier2', 'tier3')
-        target_max_score: Score maximum pour ce critère (30pts pour critère principal, 20pts pour secondaire)
+        target_max_score: Score maximum pour ce critère (IGNORÉ - toujours 1pt par critère)
     
     Returns:
         Score selon le tier:
-        - tier1 (good) = 100% de target_max_score
-        - tier2 (moyen) = 50% de target_max_score
-        - tier3 (bad) = 0
+        - tier1 (good) = 1pt
+        - tier2 (moyen) = 0.5pt
+        - tier3 (bad) = 0pt
     """
+    # NOUVEAU SYSTÈME: Ignorer target_max_score, toujours retourner 1pt, 0.5pt ou 0pt
     if tier == 'tier1':
-        # Good = 100%
-        return target_max_score
+        # Good = 1pt
+        return 1.0
     elif tier == 'tier2':
-        # Moyen = 50%
-        return target_max_score * 0.5
+        # Moyen = 0.5pt
+        return 0.5
     else:
-        # Bad ou tier3 = 0
-        return 0
+        # Bad ou tier3 = 0pt
+        return 0.0
 
 
-def score_criterion_for_alert(apartment, criterion_name, config, target_max=30):
+def score_criterion_for_alert(apartment, criterion_name, config, target_max=1):
     """
     Score un critère spécifique pour une alerte
     
@@ -87,7 +96,7 @@ def score_criterion_for_alert(apartment, criterion_name, config, target_max=30):
         apartment: Dict avec données de l'appartement
         criterion_name: Nom du critère (ex: 'haussmanien', 'quartier')
         config: Config de scoring
-        target_max: Score maximum pour ce critère (30pts ou 20pts)
+        target_max: Score maximum pour ce critère (1pt par critère)
     
     Returns:
         Dict avec score normalisé et détails
@@ -155,13 +164,29 @@ def score_criterion_for_alert(apartment, criterion_name, config, target_max=30):
         original_score = 20 if is_neuf else 0
     else:
         # Cas normal: appeler la fonction de scoring
-        result = scoring_function(apartment, config)
-        original_score = result.get('score', 0)
-        style_result = result
+        try:
+            result = scoring_function(apartment, config)
+            original_score = result.get('score', 0)
+            style_result = result
+        except Exception as e:
+            # En cas d'erreur, retourner un score par défaut (tier3 = 0pt)
+            print(f"⚠️ Erreur scoring critère {criterion_name}: {e}")
+            import traceback
+            traceback.print_exc()
+            style_result = {
+                'tier': 'tier3',
+                'justification': f'Erreur lors du scoring: {str(e)}',
+                'score': 0
+            }
+            original_score = 0
     
     # Attribuer le score selon le tier (good/moyen/bad)
     tier = style_result.get('tier', 'tier3')
     score = get_score_from_tier(tier, target_max)
+    
+    # DEBUG: Vérifier que le score est bien sur 1pt max
+    if score > 1.0:
+        print(f"⚠️ ERREUR: Score {score} > 1.0 pour critère {criterion_name}, tier {tier}")
     
     return {
         'score': round(score, 2),
@@ -181,9 +206,11 @@ def score_apartment_for_alert(apartment, alert_config, scoring_config=None):
         alert_config: Dict avec configuration de l'alerte:
             {
                 'criteria': {
-                    'primary': ['critere1', 'critere2', 'critere3'],
-                    'secondary': ['critere4']
+                    'all': ['critere1', 'critere2', 'critere3', 'critere4', 'critere5']
                 }
+                # Support ancien format pour compatibilité:
+                # 'primary': ['critere1', 'critere2', 'critere3'],
+                # 'secondary': ['critere4']
             }
         scoring_config: Config de scoring (optionnel, chargé automatiquement si None)
     
@@ -201,39 +228,47 @@ def score_apartment_for_alert(apartment, alert_config, scoring_config=None):
             }
     
     criteria_config = alert_config.get('criteria', {})
-    primary_criteria = criteria_config.get('primary', [])
-    secondary_criteria = criteria_config.get('secondary', [])
     
-    # Répartition: 2 critères principaux à 30pts + 2 critères secondaires à 20pts = 100pts
-    # Les critères dans primary[] = 30pts chacun
-    # Les critères dans secondary[] = 20pts chacun
+    # Support nouveau format (all) et ancien format (primary/secondary) pour compatibilité
+    if 'all' in criteria_config:
+        all_criteria = criteria_config['all']
+    else:
+        # Ancien format: combiner primary et secondary
+        primary_criteria = criteria_config.get('primary', [])
+        secondary_criteria = criteria_config.get('secondary', [])
+        all_criteria = primary_criteria + secondary_criteria
     
+    # Tous les critères valent 1pt chacun (good=1pt, moyen=0.5pt, bad=0pt)
+    # Score total sur 5 (5 critères × 1pt max = 5pts)
     criteria_scores = {}
     total_score = 0
     
-    # Score des critères principaux (30pts chacun)
-    for criterion in primary_criteria:
+    # Score de tous les critères (1pt chacun max)
+    for criterion in all_criteria:
         criterion_result = score_criterion_for_alert(
-            apartment, criterion, scoring_config, target_max=30
+            apartment, criterion, scoring_config, target_max=1
         )
         criteria_scores[criterion] = criterion_result
-        total_score += criterion_result['score']
-    
-    # Score des critères secondaires (20pts chacun)
-    for criterion in secondary_criteria:
-        criterion_result = score_criterion_for_alert(
-            apartment, criterion, scoring_config, target_max=20
-        )
-        criteria_scores[criterion] = criterion_result
-        total_score += criterion_result['score']
+        crit_score = criterion_result['score']
+        
+        # DEBUG: Vérifier chaque score individuel
+        if crit_score > 1.0:
+            print(f"⚠️ ERREUR: Score critère {criterion} = {crit_score} > 1.0")
+        
+        total_score += crit_score
     
     # Arrondir le score total
     total_score = round(total_score, 2)
     
-    # Déterminer le tier global
-    if total_score >= 80:
+    # DEBUG: Vérifier le score total
+    if total_score > 5.0:
+        print(f"⚠️ ERREUR: Score total {total_score} > 5.0 pour appartement {apartment.get('id', 'unknown')}")
+        print(f"   Scores individuels: {[(k, v['score']) for k, v in criteria_scores.items()]}")
+    
+    # Déterminer le tier global (sur 5pts max)
+    if total_score >= 4:
         tier = 'tier1'
-    elif total_score >= 60:
+    elif total_score >= 2.5:
         tier = 'tier2'
     else:
         tier = 'tier3'
@@ -242,7 +277,7 @@ def score_apartment_for_alert(apartment, alert_config, scoring_config=None):
         'score': total_score,
         'tier': tier,
         'criteria_scores': criteria_scores,
-        'max_score': 100  # 2×30 + 2×20
+        'max_score': 5  # 5 critères × 1pt max
     }
 
 
@@ -271,6 +306,16 @@ def filter_apartments_by_alert(apartments, alert_config):
     filters = alert_config.get('filters', {})
     filtered = []
     
+    # DEBUG: Compter les raisons de filtrage
+    debug_stats = {
+        'total': len(apartments),
+        'filtered_by_budget': 0,
+        'filtered_by_surface': 0,
+        'filtered_by_pieces': 0,
+        'filtered_by_localisation': 0,
+        'passed_all_filters': 0
+    }
+    
     for apartment in apartments:
         # Filtre budget
         prix_str = apartment.get('prix', '')
@@ -282,9 +327,14 @@ def filter_apartments_by_alert(apartments, alert_config):
                 budget_min = filters.get('budget_min', 0)
                 budget_max = filters.get('budget_max', 10000000)
                 if prix < budget_min or prix > budget_max:
+                    debug_stats['filtered_by_budget'] += 1
                     continue
             except:
                 pass
+        elif filters.get('budget_min', 0) > 0 or filters.get('budget_max', 10000000) < 10000000:
+            # Si pas de prix mais qu'un budget est spécifié, filtrer (sauf si budget très large)
+            debug_stats['filtered_by_budget'] += 1
+            continue
         
         # Filtre surface
         surface_str = apartment.get('surface', '')
@@ -295,22 +345,34 @@ def filter_apartments_by_alert(apartments, alert_config):
                 surface_min = filters.get('surface_min', 0)
                 surface_max = filters.get('surface_max', 1000)
                 if surface < surface_min or surface > surface_max:
+                    debug_stats['filtered_by_surface'] += 1
                     continue
             except:
                 pass
+        elif filters.get('surface_min', 0) > 0 or filters.get('surface_max', 1000) < 1000:
+            # Si pas de surface mais qu'une surface est spécifiée, filtrer (sauf si très large)
+            debug_stats['filtered_by_surface'] += 1
+            continue
         
         # Filtre pièces
         pieces_str = apartment.get('pieces', '')
         pieces_match = re.search(r'(\d+)', pieces_str) if pieces_str else None
+        pieces_filtered = False
         if pieces_match:
             try:
                 pieces = int(pieces_match.group(1))
                 pieces_min = filters.get('pieces_min', 0)
                 pieces_max = filters.get('pieces_max', 20)
                 if pieces < pieces_min or pieces > pieces_max:
+                    debug_stats['filtered_by_pieces'] += 1
+                    pieces_filtered = True
                     continue
             except:
                 pass
+        elif filters.get('pieces_min', 0) > 0 or filters.get('pieces_max', 20) < 20:
+            # Si pas de pièces mais qu'un nombre de pièces est spécifié, ne pas filtrer (on ne sait pas)
+            # On laisse passer si pas d'info sur les pièces
+            pass
         
         # Filtre localisation (optionnel)
         localisation_filter = filters.get('localisation', '')
@@ -322,40 +384,82 @@ def filter_apartments_by_alert(apartments, alert_config):
             map_info = apartment.get('map_info', {}) or {}
             quartier = str(map_info.get('quartier') or '').lower()
             
-            # Vérifier si au moins un des quartiers correspond
+            # Vérifier si au moins un des quartiers correspond (LOGIQUE SIMPLE comme avant)
             matches = False
             for q_filter in quartier_filters:
                 if not q_filter:  # Ignorer les filtres vides
                     continue
-                q_filter_lower = q_filter.lower()
+                q_filter_lower = q_filter.lower().strip()
                 # Enlever "Métro " si présent pour la comparaison
-                q_filter_clean = q_filter_lower.replace('métro ', '').replace('metro ', '')
+                q_filter_clean = q_filter_lower.replace('métro ', '').replace('metro ', '').strip()
                 
-                # Vérifier dans la localisation
-                if localisation and (q_filter_lower in localisation or q_filter_clean in localisation):
-                    matches = True
-                    break
+                # Normaliser les tirets et espaces pour comparaison flexible
+                def normalize_simple(text):
+                    """Normalise simplement : enlève tirets et espaces multiples"""
+                    if not text:
+                        return ''
+                    import re
+                    # Remplacer tirets par espaces, puis espaces multiples par un seul espace
+                    text = text.replace('-', ' ').replace('_', ' ')
+                    text = re.sub(r'\s+', ' ', text)
+                    return text.lower().strip()
+                
+                q_filter_normalized = normalize_simple(q_filter_clean)
+                
+                # Vérifier dans la localisation (correspondance partielle simple)
+                if localisation:
+                    localisation_normalized = normalize_simple(localisation)
+                    # Chercher le filtre dans la localisation (ou l'inverse pour flexibilité)
+                    if (q_filter_lower in localisation or 
+                        q_filter_clean in localisation or
+                        q_filter_normalized in localisation_normalized or
+                        localisation_normalized in q_filter_normalized):
+                        matches = True
+                        break
                 
                 # Vérifier dans le quartier
-                if quartier and (q_filter_lower in quartier or q_filter_clean in quartier):
-                    matches = True
-                    break
+                if quartier:
+                    quartier_normalized = normalize_simple(quartier)
+                    if (q_filter_lower in quartier or 
+                        q_filter_clean in quartier or
+                        q_filter_normalized in quartier_normalized or
+                        quartier_normalized in q_filter_normalized):
+                        matches = True
+                        break
                 
-                # Vérifier dans les métros
+                # Vérifier dans les métros (liste de strings) - LOGIQUE SIMPLE
                 metros = map_info.get('metros', []) or []
                 if metros:
-                    metro_match = any(
-                        q_filter_lower in str(m).lower() or q_filter_clean in str(m).lower()
-                        for m in metros if m is not None
-                    )
-                    if metro_match:
-                        matches = True
+                    for metro in metros:
+                        if metro:
+                            metro_str = str(metro).lower().strip()
+                            metro_normalized = normalize_simple(metro_str)
+                            # Correspondance simple : filtre dans métro ou métro dans filtre
+                            if (q_filter_lower in metro_str or 
+                                q_filter_clean in metro_str or
+                                q_filter_normalized in metro_normalized or
+                                metro_normalized in q_filter_normalized or
+                                metro_str in q_filter_clean):
+                                matches = True
+                                break
+                    if matches:
                         break
             
             if not matches:
+                debug_stats['filtered_by_localisation'] += 1
                 continue
         
+        debug_stats['passed_all_filters'] += 1
         filtered.append(apartment)
+    
+    # DEBUG: Afficher les statistiques de filtrage
+    print(f"📊 Statistiques de filtrage:")
+    print(f"   Total: {debug_stats['total']}")
+    print(f"   Filtrés par budget: {debug_stats['filtered_by_budget']}")
+    print(f"   Filtrés par surface: {debug_stats['filtered_by_surface']}")
+    print(f"   Filtrés par pièces: {debug_stats['filtered_by_pieces']}")
+    print(f"   Filtrés par localisation: {debug_stats['filtered_by_localisation']}")
+    print(f"   Passent tous les filtres: {debug_stats['passed_all_filters']}")
     
     return filtered
 

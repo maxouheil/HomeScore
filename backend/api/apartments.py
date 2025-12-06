@@ -10,8 +10,32 @@ import sys
 # Ajouter le répertoire parent au path pour importer generate_scorecard_html
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from generate_scorecard_html import load_scored_apartments
-from criteria import format_cuisine, format_baignoire, format_style, format_exposition
+try:
+    from generate_scorecard_html import load_scored_apartments
+except Exception as e:
+    print(f"⚠️ Erreur lors de l'import de generate_scorecard_html: {e}")
+    import traceback
+    traceback.print_exc()
+    # Fallback: charger directement depuis les fichiers JSON
+    def load_scored_apartments():
+        """Fallback: charge directement depuis les fichiers JSON"""
+        try:
+            with open('data/scores/all_apartments_scores.json', 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erreur lors du chargement des données: {str(e)}")
+
+try:
+    from criteria import format_cuisine, format_baignoire, format_style, format_exposition
+except Exception as e:
+    print(f"⚠️ Erreur lors de l'import des critères: {e}")
+    import traceback
+    traceback.print_exc()
+    # Fallback: fonctions vides
+    def format_cuisine(apt): return {'indices': None}
+    def format_baignoire(apt): return {'main_value': 'Non', 'indices': None, 'confidence': None}
+    def format_style(apt): return {'indices': None}
+    def format_exposition(apt): return {'main_value': 'Non spécifié', 'indices': None, 'confidence': None}
 
 # Importer la fonction de scoring pour valider les scores style
 try:
@@ -105,9 +129,20 @@ def validate_ensoleillement_score(apartment: Dict[str, Any]) -> Dict[str, Any]:
 def enrich_apartment_with_indices(apartment: Dict[str, Any]) -> Dict[str, Any]:
     """Enrichit un appartement avec les indices formatés depuis le module criteria"""
     try:
-        # Valider les scores selon les règles strictes
-        apartment = validate_style_score(apartment)
-        apartment = validate_ensoleillement_score(apartment)
+        # Valider les scores selon les règles strictes (avec gestion d'erreur)
+        try:
+            apartment = validate_style_score(apartment)
+        except Exception as e:
+            print(f"⚠️ Erreur validate_style_score pour {apartment.get('id')}: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        try:
+            apartment = validate_ensoleillement_score(apartment)
+        except Exception as e:
+            print(f"⚠️ Erreur validate_ensoleillement_score pour {apartment.get('id')}: {e}")
+            import traceback
+            traceback.print_exc()
         
         # Enrichir avec les indices pour cuisine, baignoire et style
         if 'scores_detaille' in apartment:
@@ -215,17 +250,76 @@ def load_apartments_data() -> List[Dict[str, Any]]:
         if _cached_apartments is not None and max_mtime <= _cache_timestamp:
             return _cached_apartments
         
-        # Sinon, recharger les données
-        apartments = load_scored_apartments()
+        # Charger les appartements scorés (avec gestion d'erreur)
+        try:
+            scored_apartments = load_scored_apartments()
+        except Exception as e:
+            print(f"⚠️ Erreur lors du chargement des appartements scorés: {e}")
+            import traceback
+            traceback.print_exc()
+            # Retourner une liste vide ou utiliser le cache si disponible
+            if _cached_apartments is not None:
+                return _cached_apartments
+            scored_apartments = []
         
-        # Enrichir chaque appartement avec les indices formatés
-        enriched_apartments = [enrich_apartment_with_indices(apt) for apt in apartments]
+        # Créer un dictionnaire indexé par ID pour fusion rapide
+        scored_by_id = {str(apt.get('id')): apt for apt in scored_apartments}
+        
+        # Charger les appartements scrapés
+        scraped_apartments = []
+        if os.path.exists(scraped_file):
+            try:
+                with open(scraped_file, 'r', encoding='utf-8') as f:
+                    scraped_apartments = json.load(f)
+            except Exception as e:
+                print(f"⚠️ Erreur lors du chargement de {scraped_file}: {e}")
+        
+        # Fusionner : pour chaque appartement scrapé, utiliser les scores s'ils existent
+        merged_apartments = []
+        scraped_ids_processed = set()
+        
+        # D'abord, ajouter tous les appartements scorés
+        for apt in scored_apartments:
+            merged_apartments.append(apt)
+            scraped_ids_processed.add(str(apt.get('id')))
+        
+        # Ensuite, ajouter les appartements scrapés qui n'ont pas encore de scores
+        for apt in scraped_apartments:
+            apt_id = str(apt.get('id'))
+            if apt_id not in scraped_ids_processed:
+                # Utiliser les données scrapées sans scores (ils seront scorés à la volée si nécessaire)
+                merged_apartments.append(apt)
+        
+        print(f"📊 Fusion: {len(scored_apartments)} scorés + {len(scraped_apartments) - len(scored_by_id)} non scorés = {len(merged_apartments)} total")
+        
+        # Enrichir chaque appartement avec les indices formatés (avec gestion d'erreur)
+        enriched_apartments = []
+        for apt in merged_apartments:
+            try:
+                enriched_apt = enrich_apartment_with_indices(apt)
+                enriched_apartments.append(enriched_apt)
+            except Exception as e:
+                # En cas d'erreur sur un appartement, l'ajouter quand même sans enrichissement
+                print(f"⚠️ Erreur enrichissement appartement {apt.get('id')}: {e}")
+                import traceback
+                traceback.print_exc()
+                enriched_apartments.append(apt)  # Ajouter l'appartement sans enrichissement
         
         _cached_apartments = enriched_apartments
         _cache_timestamp = max_mtime
         
         return _cached_apartments
+    except HTTPException:
+        raise
     except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"❌ Erreur dans load_apartments_data: {e}")
+        print(f"   Traceback: {error_trace}")
+        # Retourner le cache si disponible, sinon liste vide
+        if _cached_apartments is not None:
+            print("   ⚠️ Utilisation du cache en cas d'erreur")
+            return _cached_apartments
         raise HTTPException(status_code=500, detail=f"Erreur lors du chargement des données: {str(e)}")
 
 @router.get("/apartments")

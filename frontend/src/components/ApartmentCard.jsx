@@ -195,6 +195,11 @@ function getStyleName(apartment) {
   return null
 }
 
+// Fonction helper pour arrondir
+function round(value, decimals) {
+  return Math.round(value * Math.pow(10, decimals)) / Math.pow(10, decimals)
+}
+
 function ApartmentCard({ apartment, alertCriteria = null }) {
   // Debug: vérifier que alertCriteria est bien passé
   if (apartment?.alert_criteria_scores && !alertCriteria) {
@@ -211,12 +216,12 @@ function ApartmentCard({ apartment, alertCriteria = null }) {
     const metro = getMetroName(apartment)
     const localisation = apartment.localisation || ''
     
-    // Formater le titre: "750k · Place de la Réunion" ou "750k · Ménilmontant"
+    // Formater le titre: "750k · Belleville" (métro en priorité) ou "750k · Combat" (quartier en fallback)
     let title = 'Appartement'
-    if (prixK && quartier) {
-      title = `${prixK} · ${quartier}`
-    } else if (prixK && metro) {
+    if (prixK && metro) {
       title = `${prixK} · ${metro}`
+    } else if (prixK && quartier) {
+      title = `${prixK} · ${quartier}`
     } else if (prixK) {
       // Extraire l'arrondissement de la localisation
       const arrMatch = localisation.match(/Paris (\d+e)/)
@@ -225,10 +230,10 @@ function ApartmentCard({ apartment, alertCriteria = null }) {
       } else {
         title = `${prixK} · ${localisation}`
       }
-    } else if (quartier) {
-      title = quartier
     } else if (metro) {
       title = metro
+    } else if (quartier) {
+      title = quartier
     } else {
       title = localisation || 'Appartement'
     }
@@ -259,38 +264,109 @@ function ApartmentCard({ apartment, alertCriteria = null }) {
   // Extraire l'étage (pour l'utiliser dans le subtitle et les critères)
   const etage = useMemo(() => getEtage(apartment), [apartment])
   
-  // Mettre à jour le subtitle pour inclure l'étage
-  const apartmentInfoWithEtage = useMemo(() => {
-    const baseInfo = apartmentInfo
-    if (etage) {
-      // Insérer l'étage après la surface dans le subtitle
-      const parts = baseInfo.subtitle.split(' · ')
-      if (parts.length > 0 && parts[0].includes('m²')) {
-        // Insérer l'étage après la surface
-        parts.splice(1, 0, etage)
-        return { ...baseInfo, subtitle: parts.join(' · ') }
+  // Extraire la distance vis-à-vis avec catégorie
+  const visavisDistance = useMemo(() => {
+    // Priorité 1: depuis exposition.details.visavis_distance et visavis_category
+    const exposition = apartment.exposition || {}
+    const visavisDist = exposition.details?.visavis_distance
+    const visavisCategory = exposition.details?.visavis_category
+    
+    // Fonction pour traduire la catégorie en français
+    const translateCategory = (cat) => {
+      if (cat === 'good') return 'bon'
+      if (cat === 'moyen') return 'moyen'
+      if (cat === 'bad') return 'mauvais'
+      return cat
+    }
+    
+    // Si on a distance ET catégorie, formater avec catégorie
+    if (visavisDist !== null && visavisDist !== undefined && visavisDist !== '') {
+      if (visavisCategory) {
+        const categoryFr = translateCategory(visavisCategory)
+        return `Vis a vis ${categoryFr} (${visavisDist}m)`
       } else {
-        // Ajouter l'étage au début si pas de surface
-        return { ...baseInfo, subtitle: `${etage} · ${baseInfo.subtitle}` }
+        // Pas de catégorie, juste la distance
+        return `Vis a vis ${visavisDist}m`
       }
     }
+    
+    // Priorité 2: extraire depuis formatted_data.exposition.indices si disponible
+    if (apartment.formatted_data?.exposition?.indices) {
+      const indices = apartment.formatted_data.exposition.indices
+      // Chercher différents formats: "vis a vis Xm", "vis-à-vis Xm", "Vis-à-vis Xm"
+      const visavisMatch = indices.match(/vis[-\sà]?[aà][-\sà]?vis\s+(\d+)\s*m/i)
+      if (visavisMatch) {
+        return `Vis a vis ${visavisMatch[1]}m`
+      }
+    }
+    
+    return null
+  }, [apartment])
+  
+  // Mettre à jour le subtitle pour inclure l'étage et le vis-à-vis
+  const apartmentInfoWithEtage = useMemo(() => {
+    const baseInfo = apartmentInfo
+    const subtitleParts = []
+    
+    // Extraire la surface depuis le subtitle original ou depuis apartment.surface
+    const parts = baseInfo.subtitle.split(' · ')
+    const surfacePart = parts.find(p => p.includes('m²'))
+    if (surfacePart) {
+      subtitleParts.push(surfacePart)
+    } else {
+      // Fallback: extraire depuis apartment.surface
+      const surface = apartment.surface || ''
+      const surfaceMatch = surface.match(/(\d+)\s*m²/)
+      if (surfaceMatch) {
+        subtitleParts.push(`${surfaceMatch[1]} m²`)
+      }
+    }
+    
+    // Ajouter l'étage si disponible (formater correctement: 1er au lieu de 1e)
+    if (etage) {
+      let etageFormatted = etage
+      // Convertir "1e étage" en "1er étage"
+      if (etage.match(/^1e\s*étage$/i)) {
+        etageFormatted = '1er étage'
+      }
+      subtitleParts.push(etageFormatted)
+    }
+    
+    // Ajouter le vis-à-vis après l'étage si disponible
+    if (visavisDistance) {
+      subtitleParts.push(visavisDistance)
+    }
+    
+    // Si on a des parties, les joindre, sinon utiliser le subtitle original
+    if (subtitleParts.length > 0) {
+      return { ...baseInfo, subtitle: subtitleParts.join(' · ') }
+    }
+    
     return baseInfo
-  }, [apartmentInfo, etage])
+  }, [apartmentInfo, etage, visavisDistance, apartment])
   
   // Calculer le mega score en utilisant la fonction utilitaire partagée
   const megaScore = useMemo(() => {
     return calculateMegaScore(apartment)
   }, [apartment])
   
-  // Calculer le score d'alerte en additionnant les 4 critères affichés
+  // Calculer le score d'alerte en additionnant les 5 critères affichés
   const calculatedAlertScore = useMemo(() => {
-    if (apartment.alert_criteria_scores && alertCriteria) {
+    if (apartment.alert_criteria_scores) {
       const alertCriteriaScores = apartment.alert_criteria_scores
-      const primaryCriteria = alertCriteria.primary || []
-      const secondaryCriteria = alertCriteria.secondary || []
-      const allCriteriaNames = [...primaryCriteria, ...secondaryCriteria]
       
-      // Additionner les scores des 4 critères
+      // Si alertCriteria est fourni, utiliser l'ordre des critères depuis l'alerte
+      // Sinon, utiliser toutes les clés de alert_criteria_scores
+      let allCriteriaNames = []
+      if (alertCriteria) {
+        // Support nouveau format (all) et ancien format (primary/secondary) pour compatibilité
+        allCriteriaNames = alertCriteria.all || [...(alertCriteria.primary || []), ...(alertCriteria.secondary || [])]
+      } else {
+        // Utiliser toutes les clés de alert_criteria_scores
+        allCriteriaNames = Object.keys(alertCriteriaScores)
+      }
+      
+      // Additionner les scores des critères (5 critères à 1pt chacun max = 5pts max)
       let total = 0
       for (const criterionName of allCriteriaNames) {
         const criterionScore = alertCriteriaScores[criterionName]
@@ -305,16 +381,68 @@ function ApartmentCard({ apartment, alertCriteria = null }) {
   
   // Utiliser le score calculé (somme des critères) si disponible, sinon alert_score du backend, sinon megaScore
   const displayScore = useMemo(() => {
+    // PRIORITÉ ABSOLUE: Si on a alert_criteria_scores, TOUJOURS utiliser le calcul local (sur 5)
+    // C'est la source de vérité car elle contient les scores individuels à jour (1pt, 0.5pt, 0pt)
     if (calculatedAlertScore !== null) {
+      // DEBUG: Vérifier que le score calculé est bien sur 5
+      if (calculatedAlertScore > 5) {
+        console.warn(`⚠️ ApartmentCard: calculatedAlertScore ${calculatedAlertScore} > 5 pour appartement ${apartment.id}`)
+      }
       return calculatedAlertScore
     }
-    return apartment.alert_score !== undefined ? apartment.alert_score : megaScore
-  }, [calculatedAlertScore, apartment.alert_score, megaScore])
+    
+    // Si on a alert_criteria_scores mais que calculatedAlertScore est null, 
+    // c'est qu'il y a un problème avec le calcul. On recalcule manuellement.
+    if (apartment.alert_criteria_scores) {
+      const alertCriteriaScores = apartment.alert_criteria_scores
+      let total = 0
+      for (const criterionName in alertCriteriaScores) {
+        const criterionScore = alertCriteriaScores[criterionName]
+        if (criterionScore && typeof criterionScore.score === 'number') {
+          total += criterionScore.score
+        }
+      }
+      if (total > 0) {
+        return round(total, 2)
+      }
+    }
+    
+    // Si on a alert_score mais pas alert_criteria_scores, utiliser directement alert_score du backend
+    // Le backend renvoie maintenant toujours sur 5
+    if (apartment.alert_score !== undefined && apartment.alert_tier) {
+      // Le backend renvoie maintenant toujours sur 5, donc utiliser directement
+      // DEBUG: Vérifier que le score est bien sur 5
+      if (apartment.alert_score > 5) {
+        console.warn(`⚠️ ApartmentCard: alert_score ${apartment.alert_score} > 5 pour appartement ${apartment.id}, conversion nécessaire`)
+        // Ancien système (sur 100), convertir en divisant par 20
+        return round(apartment.alert_score / 20, 2)
+      }
+      // Sinon, c'est déjà sur 5
+      return apartment.alert_score
+    }
+    
+    // Si on a alert_score sans alert_tier, c'est peut-être une alerte mais sans tier
+    // Utiliser directement le score (devrait être sur 5 maintenant)
+    if (apartment.alert_score !== undefined) {
+      return apartment.alert_score
+    }
+    
+    // Sinon, utiliser megaScore (score standard)
+    return megaScore
+  }, [calculatedAlertScore, apartment.alert_score, apartment.alert_criteria_scores, apartment.alert_tier, megaScore])
   
-  // maxScore: 100 pour alert_score, 90 pour megaScore
+  // maxScore: 5 pour alert_score (si alert_criteria_scores ou alert_tier présent), 90 pour megaScore
   const maxScore = useMemo(() => {
-    return apartment.alert_score !== undefined ? 100 : 90
-  }, [apartment.alert_score])
+    // Si on a des critères d'alerte ou un tier d'alerte, c'est une alerte (score sur 5)
+    if (apartment.alert_criteria_scores || apartment.alert_tier) {
+      // DEBUG: Vérifier que maxScore est bien 5
+      if (apartment.alert_score !== undefined && apartment.alert_score > 5) {
+        console.warn(`⚠️ ApartmentCard: alert_score ${apartment.alert_score} > 5 mais maxScore devrait être 5 pour appartement ${apartment.id}`)
+      }
+      return 5
+    }
+    return megaScore !== undefined ? 90 : 90
+  }, [apartment.alert_criteria_scores, apartment.alert_tier, apartment.alert_score, apartment.id, megaScore])
   
   // Récupérer les photos
   const photos = useMemo(() => {
@@ -363,14 +491,12 @@ function ApartmentCard({ apartment, alertCriteria = null }) {
           // Si c'est un résultat d'alerte, afficher d'abord les critères de l'alerte
           if (apartment.alert_criteria_scores && alertCriteria) {
             const alertCriteriaScores = apartment.alert_criteria_scores
-            // Utiliser l'ordre depuis alertCriteria (primary puis secondary)
-            const primaryCriteria = alertCriteria.primary || []
-            const secondaryCriteria = alertCriteria.secondary || []
-            const orderedAlertCriteriaNames = [...primaryCriteria, ...secondaryCriteria]
+            // Utiliser l'ordre depuis alertCriteria (nouveau format: all, ou ancien: primary/secondary)
+            const orderedAlertCriteriaNames = alertCriteria.all || [...(alertCriteria.primary || []), ...(alertCriteria.secondary || [])]
             // Filtrer pour ne garder que ceux qui ont des scores
             const alertCriteriaNames = orderedAlertCriteriaNames.filter(name => alertCriteriaScores[name])
             
-            // Séparer les critères de l'alerte (top 4) et les autres
+            // Séparer les critères de l'alerte (top 5) et les autres
             const alertCriteriaSet = new Set(alertCriteriaNames)
             const otherCriteria = []
             
@@ -401,7 +527,7 @@ function ApartmentCard({ apartment, alertCriteria = null }) {
             
             return (
               <>
-                {/* Afficher d'abord les critères de l'alerte (top 4) */}
+                {/* Afficher d'abord les critères de l'alerte (top 5) */}
                 {alertCriteriaNames.map((alertCriterionName, alertIndex) => {
                   const criterionScore = alertCriteriaScores[alertCriterionName]
                   const displayName = ALERT_CRITERIA_TO_DISPLAY[alertCriterionName] || alertCriterionName
@@ -440,7 +566,7 @@ function ApartmentCard({ apartment, alertCriteria = null }) {
                     customTitle = baignoireData.title || displayName
                     customDescription = baignoireData.description || justification
                   } else {
-                    // Critères simples (ascenseur, large_piece_vie, renove)
+                    // Critères simples (ascenseur, large_piece_vie, hauteur_plafond, renove)
                     customTitle = displayName
                     customDescription = justification || 'Non spécifié'
                   }
@@ -528,7 +654,7 @@ function ApartmentCard({ apartment, alertCriteria = null }) {
                   } else if (key === 'cuisine') {
                     const cuisineData = formatCuisineCriterion(apartment)
                     const cuisineScore = apartment.scores_detaille.cuisine || {}
-                    const cuisineScoreValue = cuisineScore.score !== undefined ? cuisineScore.score : (cuisineData.tier === 'tier1' ? 10 : cuisineData.tier === 'tier2' ? 5 : 0)
+                    const cuisineScoreValue = cuisineScore.score !== undefined ? cuisineScore.score : (cuisineData.tier === 'tier1' ? 20 : cuisineData.tier === 'tier2' ? 10 : 0)
                     return (
                       <Criterion
                         key={key}
@@ -626,7 +752,7 @@ function ApartmentCard({ apartment, alertCriteria = null }) {
               {apartment.scores_detaille.cuisine && (() => {
                 const cuisineData = formatCuisineCriterion(apartment)
                 const cuisineScore = apartment.scores_detaille.cuisine || {}
-                const cuisineScoreValue = cuisineScore.score !== undefined ? cuisineScore.score : (cuisineData.tier === 'tier1' ? 10 : cuisineData.tier === 'tier2' ? 5 : 0)
+                const cuisineScoreValue = cuisineScore.score !== undefined ? cuisineScore.score : (cuisineData.tier === 'tier1' ? 20 : cuisineData.tier === 'tier2' ? 10 : 0)
                 
                 return (
                   <Criterion 
@@ -662,13 +788,16 @@ function ApartmentCard({ apartment, alertCriteria = null }) {
 
 // Fonctions de formatage des critères
 function formatLocalisation(apartment) {
+  const metro = getMetroName(apartment)
   const quartier = getQuartierName(apartment)
   const mapInfo = apartment.map_info || {}
   const streets = mapInfo.streets || []
   
-  // Construire le titre: "Quartier Belleville · 166 rue Saint Maur"
+  // Construire le titre: "Metro Goncourt · 166 rue Saint Maur" (ou "Quartier Belleville · 166 rue Saint Maur" si pas de métro)
   const titleParts = []
-  if (quartier) {
+  if (metro) {
+    titleParts.push(`Metro ${metro}`)
+  } else if (quartier) {
     titleParts.push(`Quartier ${quartier}`)
   }
   
@@ -738,68 +867,122 @@ function formatStyleCriterion(apartment) {
   const styleData = styleAnalysis.style || {}
   const styleType = styleData.type || ''
   
-  // Titre: "Style haussmanien" (ou autre style)
-  let title = 'Style'
-  if (styleType && styleType !== 'autre' && styleType !== 'inconnu') {
-    let styleName = styleType.charAt(0).toUpperCase() + styleType.slice(1)
-    
-    // Gérer les cas spéciaux
-    if (styleType.includes('70') || styleType.toLowerCase().includes('seventies')) {
-      styleName = "70s"
-    } else if (styleType.toLowerCase().includes('haussmann')) {
-      styleName = "Haussmannien"
-    }
-    
-    title = `Style ${styleName}`
-  }
-  
-  // Description: "Construction X (si date dispo) + indices (moulures · parquet..)"
+  // Description: "Construit en X (si date dispo) + indices (moulures · parquet..)"
   const descriptionParts = []
   
   // Année de construction
+  let anneeConstruction = null
+  
+  // 1. Vérifier dans caracteristiques.annee_construction (si objet)
   const caracteristiques = apartment.caracteristiques || {}
-  const anneeConstruction = caracteristiques.annee_construction || apartment.annee_construction
+  if (typeof caracteristiques === 'object' && caracteristiques.annee_construction) {
+    anneeConstruction = caracteristiques.annee_construction
+  }
+  
+  // 2. Vérifier directement dans apartment.annee_construction
+  if (!anneeConstruction) {
+    anneeConstruction = apartment.annee_construction
+  }
+  
+  // 3. Extraire depuis caracteristiques si c'est une string (format "Année: 1880")
+  if (!anneeConstruction && typeof caracteristiques === 'string') {
+    const caracteristiquesStr = caracteristiques
+    // Pattern: "Année: 1880" ou "Année : 1880"
+    const yearMatch = caracteristiquesStr.match(/année\s*:?\s*(\d{4})/i)
+    if (yearMatch) {
+      anneeConstruction = yearMatch[1]
+    } else {
+      // Pattern: "Construit en 1909" ou "construction 1909"
+      const construitMatch = caracteristiquesStr.match(/(?:construit|construction)\s*(?:en|de)?\s*(\d{4})/i)
+      if (construitMatch) {
+        anneeConstruction = construitMatch[1]
+      }
+    }
+  }
+  
+  // 4. Vérifier dans _api_data.features.year
+  if (!anneeConstruction && apartment._api_data?.features?.year) {
+    const yearValue = apartment._api_data.features.year
+    if (yearValue && yearValue !== 'null' && yearValue !== null) {
+      anneeConstruction = String(yearValue)
+    }
+  }
+  
+  // Titre: déterminé selon l'année de construction si disponible, sinon selon le style détecté
+  let title = 'Style'
+  
+  // Si une année est trouvée, elle écrase le style initial
   if (anneeConstruction) {
-    descriptionParts.push(`Construction ${anneeConstruction}`)
+    const year = parseInt(anneeConstruction)
+    if (!isNaN(year)) {
+      if (year < 1910) {
+        title = 'Style Haussmannien'
+      } else if (year >= 1910 && year <= 1980) {
+        // Calculer la décennie (ex: 1976 -> années 70)
+        const decade = Math.floor(year / 10) * 10
+        title = `Style années ${decade.toString().slice(-2)}`
+      } else if (year > 1980) {
+        title = 'Style Moderne'
+      }
+    }
+    // Description: juste "Construit en XXXX" quand l'année est disponible
+    descriptionParts.push(`Construit en ${anneeConstruction}`)
+  } else {
+    // Pas d'année trouvée, utiliser le style détecté par l'IA
+    if (styleType && styleType !== 'autre' && styleType !== 'inconnu') {
+      let styleName = styleType.charAt(0).toUpperCase() + styleType.slice(1)
+      
+      // Gérer les cas spéciaux
+      if (styleType.includes('70') || styleType.toLowerCase().includes('seventies')) {
+        styleName = "70s"
+      } else if (styleType.toLowerCase().includes('haussmann')) {
+        styleName = "Haussmannien"
+      }
+      
+      title = `Style ${styleName}`
+    }
   }
   
   // Indices du style (moulures, cheminée, etc.)
-  const details = styleData.details || ''
-  const justification = styleData.justification || ''
-  const textToSearch = `${details} ${justification}`.toLowerCase()
-  
-  const keywords = []
-  if (textToSearch.includes('moulures') || textToSearch.includes('moldings')) {
-    keywords.push('Moulures')
-  }
-  if (textToSearch.includes('cheminée') || textToSearch.includes('fireplace')) {
-    keywords.push('Cheminée')
-  }
-  if (textToSearch.includes('parquet')) {
-    keywords.push('Parquet')
-  }
-  if (textToSearch.includes('hauteur sous plafond')) {
-    keywords.push('Hauteur sous plafond')
-  }
-  
-  // Utiliser les indices depuis formatted_data si disponibles
-  let styleIndices = apartment.formatted_data?.style?.indices
-  if (styleIndices && styleIndices !== 'Style expo cuisine et baignoire') {
-    // Extraire les détails depuis les indices
-    let indicesClean = styleIndices
-      .replace(/^Style Indice:\n?/i, '')
-      .replace(/^Style:\n?/i, '')
-      .replace(/Style\s+(?:haussmannien|neuf|atypique|70s|autre|inconnu)[\s·,]*/gi, '') // Retirer "Style haussmannien" ou similaire
-      .replace(/\([^)]*construction[^)]*\)/gi, '') // Retirer les parenthèses avec "construction"
-      .trim()
+  // Ne les ajouter QUE si aucune année n'a été trouvée
+  if (!anneeConstruction) {
+    const details = styleData.details || ''
+    const justification = styleData.justification || ''
+    const textToSearch = `${details} ${justification}`.toLowerCase()
     
-    if (indicesClean && !indicesClean.includes('Non spécifié') && indicesClean.length > 0) {
-      descriptionParts.push(indicesClean)
+    const keywords = []
+    if (textToSearch.includes('moulures') || textToSearch.includes('moldings')) {
+      keywords.push('Moulures')
+    }
+    if (textToSearch.includes('cheminée') || textToSearch.includes('fireplace')) {
+      keywords.push('Cheminée')
+    }
+    if (textToSearch.includes('parquet')) {
+      keywords.push('Parquet')
+    }
+    if (textToSearch.includes('hauteur sous plafond')) {
+      keywords.push('Hauteur sous plafond')
+    }
+    
+    // Utiliser les indices depuis formatted_data si disponibles
+    let styleIndices = apartment.formatted_data?.style?.indices
+    if (styleIndices && styleIndices !== 'Style expo cuisine et baignoire') {
+      // Extraire les détails depuis les indices
+      let indicesClean = styleIndices
+        .replace(/^Style Indice:\n?/i, '')
+        .replace(/^Style:\n?/i, '')
+        .replace(/Style\s+(?:haussmannien|neuf|atypique|70s|autre|inconnu)[\s·,]*/gi, '') // Retirer "Style haussmannien" ou similaire
+        .replace(/\([^)]*construction[^)]*\)/gi, '') // Retirer les parenthèses avec "construction"
+        .trim()
+      
+      if (indicesClean && !indicesClean.includes('Non spécifié') && indicesClean.length > 0) {
+        descriptionParts.push(indicesClean)
+      } else if (keywords.length > 0) {
+        descriptionParts.push(keywords.join(' · '))
+      }
     } else if (keywords.length > 0) {
       descriptionParts.push(keywords.join(' · '))
     }
-  } else if (keywords.length > 0) {
-    descriptionParts.push(keywords.join(' · '))
   }
   
   const description = descriptionParts.length > 0 ? descriptionParts.join(' · ') : null
@@ -816,6 +999,10 @@ function formatExpositionCriterion(apartment, etage) {
   let indices = null
   let confidence = null
   
+  // Récupérer le vis-à-vis depuis exposition.details.visavis_distance (priorité absolue)
+  const exposition = apartment.exposition || {}
+  const visavisDistance = exposition.details?.visavis_distance
+  
   if (apartment.formatted_data?.exposition) {
     mainValue = apartment.formatted_data.exposition.main_value || 'Sombre'
     indices = apartment.formatted_data.exposition.indices || null
@@ -830,9 +1017,53 @@ function formatExpositionCriterion(apartment, etage) {
         .trim()
     }
     confidence = apartment.formatted_data.exposition.confidence || null
+    
+    // Reconstruire systématiquement la description avec le format "1er étage · Vis a vis moyen (15m)"
+    // Même si formatted_data.exposition.indices existe, on le reconstruit pour garantir le format
+    const descriptionParts = []
+    
+    // Formater l'étage correctement (1er au lieu de 1e)
+    if (etage) {
+      let etageFormatted = etage
+      // Convertir "1e étage" en "1er étage"
+      if (etage.match(/^1e\s*étage$/i)) {
+        etageFormatted = '1er étage'
+      }
+      descriptionParts.push(etageFormatted)
+    }
+    
+    // Ajouter vis-à-vis si disponible (priorité: exposition.details.visavis_distance)
+    const visavisCategory = exposition.details?.visavis_category
+    const translateCategory = (cat) => {
+      if (cat === 'good') return 'bon'
+      if (cat === 'moyen') return 'moyen'
+      if (cat === 'bad') return 'mauvais'
+      return cat
+    }
+    
+    if (visavisDistance !== null && visavisDistance !== undefined && visavisDistance !== '') {
+      if (visavisCategory) {
+        const categoryFr = translateCategory(visavisCategory)
+        descriptionParts.push(`Vis a vis ${categoryFr} (${visavisDistance}m)`)
+      } else {
+        descriptionParts.push(`Vis a vis ${visavisDistance}m`)
+      }
+    } else {
+      // Fallback: essayer d'extraire depuis les indices existants
+      if (indices) {
+        const visavisMatch = indices.match(/vis[-\sà]?[aà][-\sà]?vis\s+(\d+)\s*m/i)
+        if (visavisMatch) {
+          descriptionParts.push(`Vis a vis ${visavisMatch[1]}m`)
+        }
+      }
+    }
+    
+    // Utiliser la description reconstruite si on a des éléments, sinon garder les indices originaux
+    if (descriptionParts.length > 0) {
+      indices = descriptionParts.join(' · ')
+    }
   } else {
     // Fallback: utiliser directement apartment.exposition si disponible
-    const exposition = apartment.exposition || {}
     const expositionDir = exposition.exposition || ''
     
     // Classifier l'orientation pour déterminer mainValue
@@ -864,19 +1095,38 @@ function formatExpositionCriterion(apartment, etage) {
       }
     }
     
-    // Construire les indices (ordre: étage, vis-à-vis)
-    const indicesArray = []
+    // Construire systématiquement les indices au format "1er étage · Vis a vis moyen (15m)"
+    const descriptionParts = []
+    
+    // Formater l'étage correctement (1er au lieu de 1e)
     if (etage) {
-      indicesArray.push(etage)
+      let etageFormatted = etage
+      // Convertir "1e étage" en "1er étage"
+      if (etage.match(/^1e\s*étage$/i)) {
+        etageFormatted = '1er étage'
+      }
+      descriptionParts.push(etageFormatted)
     }
     
-    // Ajouter vis-à-vis si disponible
-    const visavisDistance = exposition.details?.visavis_distance
-    if (visavisDistance !== null && visavisDistance !== undefined) {
-      indicesArray.push(`vis a vis ${visavisDistance} m`)
+    // Ajouter vis-à-vis si disponible (priorité: exposition.details.visavis_distance)
+    const visavisCategory = exposition.details?.visavis_category
+    const translateCategory = (cat) => {
+      if (cat === 'good') return 'bon'
+      if (cat === 'moyen') return 'moyen'
+      if (cat === 'bad') return 'mauvais'
+      return cat
     }
     
-    indices = indicesArray.length > 0 ? indicesArray.join(' · ') : null
+    if (visavisDistance !== null && visavisDistance !== undefined && visavisDistance !== '') {
+      if (visavisCategory) {
+        const categoryFr = translateCategory(visavisCategory)
+        descriptionParts.push(`Vis a vis ${categoryFr} (${visavisDistance}m)`)
+      } else {
+        descriptionParts.push(`Vis a vis ${visavisDistance}m`)
+      }
+    }
+    
+    indices = descriptionParts.length > 0 ? descriptionParts.join(' · ') : null
     confidence = exposition.confidence || null
   }
   
@@ -890,7 +1140,7 @@ function formatExpositionCriterion(apartment, etage) {
     title = 'Faible luminosité'
   }
   
-  // Description: "3e etage · vis a vis X m"
+  // Description: "1er étage · Vis a vis moyen (15m)" (format systématique)
   const description = indices
   
   return {
@@ -1137,6 +1387,7 @@ const ALERT_CRITERIA_TO_DISPLAY = {
   'cuisine_ouverte': 'Cuisine',
   'ascenseur': 'Ascenseur',
   'large_piece_vie': 'Pièce de vie',
+  'hauteur_plafond': 'Hauteur plafond',
   'renove': 'Rénové',
   'baignoire': 'Baignoire'
 }
@@ -1151,6 +1402,7 @@ const ALERT_CRITERIA_EMOJIS = {
   'cuisine_ouverte': '👨‍🍳',
   'ascenseur': '🛗',
   'large_piece_vie': '🛋️',
+  'hauteur_plafond': '📏',
   'renove': '🔨',
   'baignoire': '🛁'
 }

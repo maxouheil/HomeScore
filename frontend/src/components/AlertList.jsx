@@ -63,7 +63,8 @@ function AlertList({ onSelectAlert, onCreateNew }) {
   }
 
   const getCriteriaNames = (criteria) => {
-    const allCriteria = [...(criteria.primary || []), ...(criteria.secondary || [])]
+    // Support nouveau format (all) et ancien format (primary/secondary) pour compatibilité
+    const allCriteria = criteria.all || [...(criteria.primary || []), ...(criteria.secondary || [])]
     return allCriteria.join(', ')
   }
 

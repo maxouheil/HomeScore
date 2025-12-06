@@ -98,6 +98,10 @@ class ApartmentStyleAnalyzer:
                 'style': photo_analysis.get('style', {}),
                 'cuisine': photo_analysis.get('cuisine', {}),
                 'luminosite': photo_analysis.get('luminosite', {}),
+                'hauteur_plafond': photo_analysis.get('hauteur_plafond', {}),
+                'baignoire': photo_analysis.get('baignoire', {}),
+                'visavis': photo_analysis.get('visavis', {}),
+                'salon_size': photo_analysis.get('salon_size', {}),
                 'photos_analyzed': photo_analysis.get('photos_analyzed', 0),
                 'method': 'photo_analysis'
             }
@@ -427,75 +431,91 @@ class ApartmentStyleAnalyzer:
                         'content': [
                             {
                                 'type': 'text',
-                                'text': """Analyse cette photo d'appartement pour déterminer le STYLE ARCHITECTURAL.
+                                'text': """Analyse cette photo d'appartement pour déterminer MULTIPLES CRITÈRES en une seule fois.
 
-## TÂCHE PRINCIPALE : Classifier le style en Ancien / Neuf / Atypique
+## TÂCHES À EFFECTUER :
 
-### STYLE À DÉTERMINER :
+### 1. STYLE ARCHITECTURAL (Classifier en Ancien / Neuf / Atypique)
 
-1. **ANCIEN (Haussmannien)** :
-   - Caractéristiques OBLIGATOIRES : Moulures au plafond, cheminée, parquet pointe de Hongrie, balcon fer forgé, balcons en fer forgé, hauteur sous plafond importante (>2.80m), éléments architecturaux décoratifs
-   - **INDICES SUPPLÉMENTAIRES pour ANCIEN** :
-     * Poutres apparentes au plafond = Peut être ancien (combles aménagés, charpente visible)
-     * Charpente visible = Ancien immeuble
-     * Combles aménagés avec poutres = Ancien
-   - Contexte : Immeuble haussmannien, appartement rénové avec conservation des éléments d'origine, combles aménagés
-   - ⚠️ ATTENTION : Si tu vois seulement "parquet" ou "moulures" isolés SANS les autres éléments caractéristiques, ce n'est PAS forcément ancien
-   - ⚠️ IMPORTANT : Les poutres apparentes dans un contexte ancien (sans béton brut ni caractère industriel) = Ancien, pas Atypique
+**ANCIEN (Haussmannien)** :
+- Caractéristiques OBLIGATOIRES : Moulures au plafond, cheminée, parquet pointe de Hongrie, balcon fer forgé, hauteur sous plafond importante (>2.80m), éléments architecturaux décoratifs
+- Poutres apparentes au plafond = Peut être ancien (combles aménagés, charpente visible)
+- ⚠️ Les poutres apparentes dans un contexte ancien (sans béton brut ni caractère industriel) = Ancien, pas Atypique
 
-2. **NEUF (Moderne/Contemporain)** :
-   - Caractéristiques : Design épuré, sol moderne (carrelage/stratifié/parquet moderne), terrasse métal, fenêtres modernes, plafond bas/réduit (<2.60m), lignes minimalistes, mobilier moderne
-   - **INDICES FORTS pour NEUF** :
-     * Vue panoramique sur Paris depuis étage élevé (5ème étage et plus) = TRÈS caractéristique du Neuf
-     * Terrasse métallique moderne avec vue dégagée = Neuf
-     * Design épuré + fenêtres modernes + sol moderne = Neuf
-     * Absence totale d'éléments anciens (pas de moulures, pas de cheminée, pas de balcon fer forgé) = Neuf
-   - Contexte : Construction récente (années 2000+), rénovation complète sans éléments anciens, étages élevés avec vue panoramique
-   - ⚠️ IMPORTANT : Si tu vois une vue panoramique sur Paris depuis un étage élevé, c'est TRÈS PROBABLEMENT du Neuf, même si le design semble simple
+**NEUF (Moderne/Contemporain)** :
+- Design épuré, sol moderne, terrasse métal, fenêtres modernes, plafond bas/réduit (<2.60m)
+- Vue panoramique sur Paris depuis étage élevé = TRÈS caractéristique du Neuf
 
-3. **ATYPIQUE (Loft/Unique)** :
-   - Caractéristiques OBLIGATOIRES : Espaces ouverts, volumes généreux, béton brut, caractère industriel, conversion d'entrepôt/atelier
-   - **INDICES FORTS pour ATYPIQUE** :
-     * Béton brut ou briques apparentes = TRÈS caractéristique de l'atypique/loft
-     * Caractère industriel ou ancien entrepôt réhabilité = Atypique
-     * Espace ouvert avec volumes généreux + caractère industriel = Atypique
-     * Poutres apparentes + béton brut + caractère industriel = Atypique
-   - Contexte : Loft, ancien entrepôt réhabilité, espace atypique
-   - ⚠️ ATTENTION : Les poutres apparentes SEULES ne signifient pas atypique - elles peuvent être dans un ancien immeuble (combles aménagés)
-   - ⚠️ IMPORTANT : Pour être atypique, il faut aussi du béton brut, un caractère industriel, ou une conversion d'entrepôt
+**ATYPIQUE (Loft/Unique)** :
+- Espaces ouverts, volumes généreux, béton brut, caractère industriel, conversion d'entrepôt/atelier
+- ⚠️ Pour être atypique, il faut aussi du béton brut, un caractère industriel, ou une conversion d'entrepôt
 
-### CUISINE OUVERTE :
+### 2. CUISINE OUVERTE
 - Oui: cuisine visible depuis le salon, pas de séparation murale
 - Non: cuisine fermée, séparée du salon
 
-### LUMINOSITÉ :
+### 3. LUMINOSITÉ
 - Excellente/Bonne/Moyenne/Faible selon la lumière naturelle visible
 
-### FORMAT DE LA JUSTIFICATION :
-La justification doit être COURTE (4-5 tags de 1-3 mots chacun), format tags/adjectifs séparés par des virgules.
-Exemples :
-- Pour Ancien : "moulures, parquet pointe de Hongrie, cheminée, balcon fer forgé"
-- Pour Neuf : "design épuré, matériaux modernes, vue sur Paris, étage élevé"
-- Pour Atypique : "loft, ancien immeuble industriel, poutres apparentes"
+### 4. HAUTEUR SOUS PLAFOND (si visible)
+- Estimer en mètres si possible (ex: 2.80m, 2.50m, 3.00m)
+- Indices : proportions des portes/fenêtres, hauteur relative des murs
+
+### 5. BAIGNOIRE (si photo de salle de bain)
+- Détecter si une baignoire est visible (grand récipient pour se baigner, rectangulaire/ovale)
+- OU si seulement une douche est visible (cabine de douche, douche italienne)
+- Si ce n'est pas une photo de salle de bain, mettre null
+
+### 6. VIS-À-VIS (si fenêtres de pièce principale visibles)
+- Regarder par les fenêtres de la PIÈCE PRINCIPALE (salon/séjour) uniquement
+- Estimer la distance en mètres jusqu'aux bâtiments/immeubles visibles en face
+- Largeur de la rue pour aider à estimer (étroite <10m, moyenne 10-15m, large >15m)
+- Si pas de vis-à-vis visible ou très lointain (>50m), utiliser une grande distance (ex: 100m)
+
+### 7. TAILLE SALON (si photo montre le salon/séjour)
+- Identifier si cette photo montre le salon/séjour (canapé, table basse, espace de vie)
+- Si salon, estimer sa taille en m² en observant:
+  * Profondeur de la pièce (distance mur avant → mur arrière)
+  * Largeur visible de la pièce
+  * Meubles comme référence (canapé standard ~2m, table basse ~1m)
+- Catégories : grand (>25m²), moyen (15-25m²), petit (<15m²)
+
+### FORMAT DE LA JUSTIFICATION (Style) :
+Tags très courts séparés par virgules, max 15-20 mots.
+Exemples : "moulures, parquet pointe de Hongrie, cheminée" ou "design épuré, matériaux modernes"
 
 Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
 {
     "style": "haussmannien|atypique|moderne|autre",
     "style_confidence": 0.0-1.0,
-    "style_justification": "tags très courts séparés par virgules, max 15-20 mots (ex: 'moulures, parquet, cheminée' ou 'design épuré, matériaux modernes')",
+    "style_justification": "tags très courts séparés par virgules, max 15-20 mots",
     "cuisine_ouverte": true|false,
     "cuisine_confidence": 0.0-1.0,
-    "cuisine_details": "description de la cuisine",
+    "cuisine_details": "description courte de la cuisine",
     "luminosite": "excellente|bonne|moyenne|faible",
     "luminosite_confidence": 0.0-1.0,
-    "luminosite_details": "description de la luminosité"
+    "luminosite_details": "description courte de la luminosité",
+    "hauteur_plafond": nombre en mètres (ex: 2.80) ou null si non visible,
+    "hauteur_plafond_confidence": 0.0-1.0,
+    "has_baignoire": true|false|null (true=baignoire visible, false=douche seule, null=pas salle de bain),
+    "has_douche": true|false|null (true=douche visible, null=pas salle de bain),
+    "is_bathroom": true|false,
+    "baignoire_confidence": 0.0-1.0,
+    "visavis_distance": nombre entier en mètres (distance estimée) ou null si pas de fenêtres principales visibles,
+    "fenetres_principales_visibles": true|false,
+    "vue_par_fenetre": "degagee|moyenne|obstruee|null",
+    "visavis_confidence": 0.0-1.0,
+    "is_salon": true|false,
+    "salon_size_estimate": nombre entier en m² (ou null si pas salon),
+    "salon_category": "grand|moyen|petit|null",
+    "salon_confidence": 0.0-1.0
 }"""
                             },
                             image_content
                         ]
                     }
                 ],
-                'max_tokens': 300  # Réduit car les justifications sont maintenant très courtes (tags)
+                'max_tokens': 500  # Augmenté pour inclure tous les nouveaux champs
             }
             
             response = requests.post(
@@ -531,6 +551,19 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
                 
                 print(f"      Cuisine: {'Ouverte' if analysis.get('cuisine_ouverte') else 'Fermée'} (confiance: {analysis.get('cuisine_confidence', 0):.2f})")
                 print(f"      Luminosité: {analysis.get('luminosite', 'N/A')} (confiance: {analysis.get('luminosite_confidence', 0):.2f})")
+                
+                # Afficher les nouveaux champs si présents
+                if analysis.get('hauteur_plafond') is not None:
+                    print(f"      Hauteur plafond: {analysis.get('hauteur_plafond')}m (confiance: {analysis.get('hauteur_plafond_confidence', 0):.2f})")
+                if analysis.get('is_bathroom'):
+                    baignoire_status = 'Baignoire' if analysis.get('has_baignoire') else ('Douche' if analysis.get('has_douche') else 'Non détecté')
+                    print(f"      Salle de bain: {baignoire_status} (confiance: {analysis.get('baignoire_confidence', 0):.2f})")
+                if analysis.get('fenetres_principales_visibles'):
+                    visavis = analysis.get('visavis_distance')
+                    print(f"      Vis-à-vis: {visavis}m (confiance: {analysis.get('visavis_confidence', 0):.2f})" if visavis else "      Vis-à-vis: Non visible")
+                if analysis.get('is_salon'):
+                    salon_size = analysis.get('salon_size_estimate')
+                    print(f"      Salon: {salon_size}m² ({analysis.get('salon_category', 'N/A')}) (confiance: {analysis.get('salon_confidence', 0):.2f})" if salon_size else "      Salon: Taille non estimable")
                 
                 # Mettre en cache avant de retourner
                 self.cache.set('style_photo', cache_key, analysis)
@@ -573,6 +606,34 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
             luminosite_match = re.search(r'"luminosite":\s*"([^"]+)"', content)
             luminosite = luminosite_match.group(1) if luminosite_match else 'inconnue'
             
+            # Extraire les nouveaux champs
+            hauteur_match = re.search(r'"hauteur_plafond":\s*([0-9.]+|null)', content)
+            hauteur_plafond = float(hauteur_match.group(1)) if hauteur_match and hauteur_match.group(1) != 'null' else None
+            
+            baignoire_match = re.search(r'"has_baignoire":\s*(true|false|null)', content)
+            has_baignoire = baignoire_match.group(1) == 'true' if baignoire_match and baignoire_match.group(1) != 'null' else None
+            
+            douche_match = re.search(r'"has_douche":\s*(true|false|null)', content)
+            has_douche = douche_match.group(1) == 'true' if douche_match and douche_match.group(1) != 'null' else None
+            
+            is_bathroom_match = re.search(r'"is_bathroom":\s*(true|false)', content)
+            is_bathroom = is_bathroom_match.group(1) == 'true' if is_bathroom_match else False
+            
+            visavis_match = re.search(r'"visavis_distance":\s*([0-9]+|null)', content)
+            visavis_distance = int(visavis_match.group(1)) if visavis_match and visavis_match.group(1) != 'null' else None
+            
+            fenetres_match = re.search(r'"fenetres_principales_visibles":\s*(true|false)', content)
+            fenetres_principales_visibles = fenetres_match.group(1) == 'true' if fenetres_match else False
+            
+            is_salon_match = re.search(r'"is_salon":\s*(true|false)', content)
+            is_salon = is_salon_match.group(1) == 'true' if is_salon_match else False
+            
+            salon_size_match = re.search(r'"salon_size_estimate":\s*([0-9]+|null)', content)
+            salon_size_estimate = int(salon_size_match.group(1)) if salon_size_match and salon_size_match.group(1) != 'null' else None
+            
+            salon_category_match = re.search(r'"salon_category":\s*"([^"]+)"', content)
+            salon_category = salon_category_match.group(1) if salon_category_match else None
+            
             # Essayer d'extraire la justification aussi
             justification_match = re.search(r'"style_justification":\s*"([^"]+)"', content)
             style_justification = justification_match.group(1) if justification_match else f"Style {style} détecté"
@@ -584,7 +645,21 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
                 'cuisine_ouverte': cuisine_ouverte,
                 'cuisine_confidence': 0.7,
                 'luminosite': luminosite,
-                'luminosite_confidence': 0.7
+                'luminosite_confidence': 0.7,
+                'hauteur_plafond': hauteur_plafond,
+                'hauteur_plafond_confidence': 0.5 if hauteur_plafond else 0.0,
+                'has_baignoire': has_baignoire,
+                'has_douche': has_douche,
+                'is_bathroom': is_bathroom,
+                'baignoire_confidence': 0.5 if has_baignoire is not None or has_douche is not None else 0.0,
+                'visavis_distance': visavis_distance,
+                'fenetres_principales_visibles': fenetres_principales_visibles,
+                'vue_par_fenetre': 'moyenne' if visavis_distance else None,
+                'visavis_confidence': 0.5 if visavis_distance else 0.0,
+                'is_salon': is_salon,
+                'salon_size_estimate': salon_size_estimate,
+                'salon_category': salon_category,
+                'salon_confidence': 0.5 if salon_size_estimate else 0.0
             }
             
             print(f"   ✅ Analyse manuelle réussie")
@@ -645,8 +720,8 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
                 style_justifications_by_style[style_normalized] = []
             style_justifications_by_style[style_normalized].append(justification)
         
-        # Compter les cuisines ouvertes
-        cuisines_ouvertes = [a.get('cuisine_ouverte', False) for a in analyses if 'cuisine_ouverte' in a]
+        # Compter les cuisines ouvertes (ignorer None)
+        cuisines_ouvertes = [a.get('cuisine_ouverte') for a in analyses if 'cuisine_ouverte' in a and a.get('cuisine_ouverte') is not None]
         cuisine_ouverte_ratio = sum(cuisines_ouvertes) / len(cuisines_ouvertes) if cuisines_ouvertes else 0
         
         # Compter les luminosités
@@ -659,6 +734,45 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
         style_confidences = [a.get('style_confidence', 0) for a in analyses if a.get('style_confidence')]
         cuisine_confidences = [a.get('cuisine_confidence', 0) for a in analyses if a.get('cuisine_confidence')]
         luminosite_confidences = [a.get('luminosite_confidence', 0) for a in analyses if a.get('luminosite_confidence')]
+        
+        # Agréger hauteur plafond (moyenne des valeurs non-null)
+        hauteurs_plafond = [a.get('hauteur_plafond') for a in analyses if a.get('hauteur_plafond') is not None]
+        final_hauteur_plafond = sum(hauteurs_plafond) / len(hauteurs_plafond) if hauteurs_plafond else None
+        hauteur_confidences = [a.get('hauteur_plafond_confidence', 0) for a in analyses if a.get('hauteur_plafond') is not None]
+        
+        # Agréger baignoire (vote majoritaire sur les photos de salle de bain)
+        baignoires = [a.get('has_baignoire') for a in analyses if a.get('is_bathroom') and a.get('has_baignoire') is not None]
+        douches = [a.get('has_douche') for a in analyses if a.get('is_bathroom') and a.get('has_douche') is not None]
+        final_has_baignoire = None
+        final_has_douche = None
+        if baignoires:
+            final_has_baignoire = sum(baignoires) / len(baignoires) > 0.5
+        if douches and not final_has_baignoire:
+            final_has_douche = sum(douches) / len(douches) > 0.5
+        baignoire_confidences = [a.get('baignoire_confidence', 0) for a in analyses if a.get('is_bathroom')]
+        
+        # Agréger vis-à-vis (moyenne des distances, catégorie la plus fréquente)
+        visavis_distances = [a.get('visavis_distance') for a in analyses if a.get('fenetres_principales_visibles') and a.get('visavis_distance') is not None]
+        final_visavis_distance = int(sum(visavis_distances) / len(visavis_distances)) if visavis_distances else None
+        # Catégoriser vis-à-vis
+        final_visavis_category = None
+        if final_visavis_distance:
+            if final_visavis_distance > 20:
+                final_visavis_category = 'good'
+            elif final_visavis_distance >= 10:
+                final_visavis_category = 'moyen'
+            else:
+                final_visavis_category = 'bad'
+        vue_par_fenetre = [a.get('vue_par_fenetre') for a in analyses if a.get('vue_par_fenetre')]
+        final_vue_par_fenetre = max(set(vue_par_fenetre), key=vue_par_fenetre.count) if vue_par_fenetre else None
+        visavis_confidences = [a.get('visavis_confidence', 0) for a in analyses if a.get('fenetres_principales_visibles')]
+        
+        # Agréger taille salon (moyenne des estimations)
+        salon_sizes = [a.get('salon_size_estimate') for a in analyses if a.get('is_salon') and a.get('salon_size_estimate') is not None]
+        final_salon_size = int(sum(salon_sizes) / len(salon_sizes)) if salon_sizes else None
+        salon_categories = [a.get('salon_category') for a in analyses if a.get('is_salon') and a.get('salon_category')]
+        final_salon_category = max(set(salon_categories), key=salon_categories.count) if salon_categories else None
+        salon_confidences = [a.get('salon_confidence', 0) for a in analyses if a.get('is_salon')]
         
         # Déterminer le style final par vote majoritaire
         final_style = max(style_counts, key=style_counts.get) if style_counts else 'inconnu'
@@ -771,6 +885,30 @@ Réponds UNIQUEMENT au format JSON (pas de texte avant/après):
                 'confidence': sum(luminosite_confidences) / len(luminosite_confidences) if luminosite_confidences else 0,
                 'score': luminosite_score,
                 'details': f"Luminosité {final_luminosite} (apparaît {luminosite_counts.get(final_luminosite, 0)} fois)"
+            },
+            'hauteur_plafond': {
+                'value': round(final_hauteur_plafond, 2) if final_hauteur_plafond else None,
+                'confidence': sum(hauteur_confidences) / len(hauteur_confidences) if hauteur_confidences else 0,
+                'details': f"Hauteur sous plafond estimée: {round(final_hauteur_plafond, 2)}m" if final_hauteur_plafond else "Hauteur non mesurable"
+            },
+            'baignoire': {
+                'has_baignoire': final_has_baignoire,
+                'has_douche': final_has_douche,
+                'confidence': sum(baignoire_confidences) / len(baignoire_confidences) if baignoire_confidences else 0,
+                'details': f"{'Baignoire' if final_has_baignoire else ('Douche' if final_has_douche else 'Non détecté')} détecté(e) sur {len([a for a in analyses if a.get('is_bathroom')])} photo(s) de salle de bain"
+            },
+            'visavis': {
+                'distance': final_visavis_distance,
+                'category': final_visavis_category,
+                'vue_par_fenetre': final_vue_par_fenetre,
+                'confidence': sum(visavis_confidences) / len(visavis_confidences) if visavis_confidences else 0,
+                'details': f"Vis-à-vis estimé à {final_visavis_distance}m (catégorie: {final_visavis_category})" if final_visavis_distance else "Vis-à-vis non mesurable"
+            },
+            'salon_size': {
+                'estimate': final_salon_size,
+                'category': final_salon_category,
+                'confidence': sum(salon_confidences) / len(salon_confidences) if salon_confidences else 0,
+                'details': f"Salon estimé à {final_salon_size}m² (catégorie: {final_salon_category})" if final_salon_size else "Taille salon non estimable"
             },
             'photos_analyzed': len(analyses),
             'individual_analyses': analyses

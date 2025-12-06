@@ -84,7 +84,25 @@ class ExpositionExtractor:
             'faible': ['vis-à-vis', 'vue obstruée', 'pas de vue', 'vue sur mur']
         }
     
-    def _add_brightness_to_result(self, result: Dict, photos: List) -> Dict:
+    def _upgrade_tier_if_good_visavis(self, tier: str, visavis_category: Optional[str]) -> str:
+        """Upgrade le tier d'un niveau si vis-à-vis est 'good'
+        
+        Args:
+            tier: Tier actuel ('tier1', 'tier2', 'tier3')
+            visavis_category: Catégorie du vis-à-vis ('good', 'moyen', 'bad', ou None)
+        
+        Returns:
+            Nouveau tier (upgradé si visavis_category == 'good')
+        """
+        if visavis_category == 'good':
+            if tier == 'tier3':
+                return 'tier2'
+            elif tier == 'tier2':
+                return 'tier1'
+            # tier1 reste tier1
+        return tier
+    
+    def _add_brightness_to_result(self, result: Dict, photos: List, style_analysis: Dict = None) -> Dict:
         """Ajoute brightness_value et visavis aux détails d'un résultat, même si exposition déjà trouvée"""
         if not photos or not result:
             return result
@@ -114,8 +132,8 @@ class ExpositionExtractor:
                     result['details']['brightness_value'] = brightness_value
                     result['details']['image_brightness'] = brightness_value
             
-            # Analyser le vis-à-vis depuis les photos
-            visavis_result = self.photo_analyzer.analyze_photos_visavis(photo_urls)
+            # Analyser le vis-à-vis depuis les photos (utiliser style_analysis si disponible)
+            visavis_result = self.photo_analyzer.analyze_photos_visavis(photo_urls, style_analysis=style_analysis)
             if visavis_result and visavis_result.get('photos_analyzed', 0) > 0:
                 visavis_distance = visavis_result.get('visavis_distance')
                 visavis_category = visavis_result.get('visavis_category')
@@ -126,6 +144,16 @@ class ExpositionExtractor:
                     result['details']['visavis_category'] = visavis_category
                     result['details']['visavis_confidence'] = visavis_result.get('confidence', 0.0)
                     result['details']['visavis_justification'] = visavis_result.get('justification', '')
+                    
+                    # Upgrade le tier si vis-à-vis est 'good'
+                    if visavis_category == 'good' and 'tier' in result:
+                        old_tier = result['tier']
+                        new_tier = self._upgrade_tier_if_good_visavis(old_tier, visavis_category)
+                        if new_tier != old_tier:
+                            result['tier'] = new_tier
+                            # Mettre à jour la justification pour indiquer l'upgrade
+                            if 'justification' in result:
+                                result['justification'] += f" | ⬆️ Tier upgradé ({old_tier}→{new_tier}) grâce au vis-à-vis good"
         except Exception:
             # En cas d'erreur, continuer sans brightness_value ni visavis
             pass
@@ -523,10 +551,13 @@ class ExpositionExtractor:
         # Phase 1: Analyse textuelle (avec bonus étage)
         text_result = self.extract_exposition_textuelle(description, caracteristiques, etage)
         
+        # Récupérer style_analysis si disponible
+        style_analysis = apartment_data.get('style_analysis')
+        
         # Si exposition explicite trouvée → analyser quand même les photos pour brightness_value et visavis
         if text_result.get('exposition_explicite', False) and text_result.get('exposition'):
             # Toujours analyser les photos pour obtenir brightness_value et visavis
-            text_result = self._add_brightness_to_result(text_result, photos)
+            text_result = self._add_brightness_to_result(text_result, photos, style_analysis=style_analysis)
             return text_result
         
         # Phase 2: Analyse des photos (si pas d'exposition explicite)
@@ -545,9 +576,10 @@ class ExpositionExtractor:
             if photo_urls:
                 photo_result = self.extract_exposition_photos(photo_urls)
                 
-                # Ajouter l'analyse du vis-à-vis au résultat photo
+                # Ajouter l'analyse du vis-à-vis au résultat photo (utiliser style_analysis si disponible)
                 if photo_result:
-                    visavis_result = self.photo_analyzer.analyze_photos_visavis(photo_urls)
+                    style_analysis = apartment_data.get('style_analysis')
+                    visavis_result = self.photo_analyzer.analyze_photos_visavis(photo_urls, style_analysis=style_analysis)
                     if visavis_result and visavis_result.get('photos_analyzed', 0) > 0:
                         visavis_distance = visavis_result.get('visavis_distance')
                         visavis_category = visavis_result.get('visavis_category')
@@ -558,6 +590,16 @@ class ExpositionExtractor:
                             photo_result['details']['visavis_category'] = visavis_category
                             photo_result['details']['visavis_confidence'] = visavis_result.get('confidence', 0.0)
                             photo_result['details']['visavis_justification'] = visavis_result.get('justification', '')
+                            
+                            # Upgrade le tier si vis-à-vis est 'good'
+                            if visavis_category == 'good' and 'tier' in photo_result:
+                                old_tier = photo_result['tier']
+                                new_tier = self._upgrade_tier_if_good_visavis(old_tier, visavis_category)
+                                if new_tier != old_tier:
+                                    photo_result['tier'] = new_tier
+                                    # Mettre à jour la justification pour indiquer l'upgrade
+                                    if 'justification' in photo_result:
+                                        photo_result['justification'] += f" | ⬆️ Tier upgradé ({old_tier}→{new_tier}) grâce au vis-à-vis good"
         
         # Si photos analysées avec succès → utiliser résultat photos
         if photo_result and photo_result.get('photos_analyzed', 0) > 0:
@@ -570,13 +612,15 @@ class ExpositionExtractor:
         if contextual_result.get('confidence', 0) > 0.5:
             combined = self._combine_results(contextual_result, text_result)
             # Toujours ajouter brightness_value et visavis si photos disponibles
-            combined = self._add_brightness_to_result(combined, photos)
+            style_analysis = apartment_data.get('style_analysis')
+            combined = self._add_brightness_to_result(combined, photos, style_analysis=style_analysis)
             return combined
         
         # Sinon → retourner résultat textuel (peut être None si aucune info)
         # Toujours ajouter brightness_value et visavis si photos disponibles
         if text_result:
-            text_result = self._add_brightness_to_result(text_result, photos)
+            style_analysis = apartment_data.get('style_analysis')
+            text_result = self._add_brightness_to_result(text_result, photos, style_analysis=style_analysis)
         return text_result
     
     def _combine_all_results(self, text_result: Dict, photo_result: Optional[Dict], contextual_result: Dict) -> Dict:
@@ -621,11 +665,32 @@ class ExpositionExtractor:
         else:
             tier = 'tier3'
         
+        # Vérifier le visavis_category dans les détails et upgrade le tier si nécessaire
+        visavis_category = None
+        photo_details = photo_result.get('details', {})
+        text_details = text_result.get('details', {})
+        
+        # Chercher visavis_category dans photo_details ou text_details
+        if 'visavis_category' in photo_details:
+            visavis_category = photo_details['visavis_category']
+        elif 'visavis_category' in text_details:
+            visavis_category = text_details['visavis_category']
+        
+        # Upgrade le tier si vis-à-vis est 'good'
+        old_tier = tier
+        if visavis_category == 'good':
+            tier = self._upgrade_tier_if_good_visavis(tier, visavis_category)
+        
+        # Construire la justification
+        justification = f"Analyse combinée: {photo_result.get('justification', '')} + {text_result.get('justification', '')}"
+        if visavis_category == 'good' and tier != old_tier:
+            justification += f" | ⬆️ Tier upgradé ({old_tier}→{tier}) grâce au vis-à-vis good"
+        
         return {
             'exposition': exposition,
             'score': combined_score,
             'tier': tier,
-            'justification': f"Analyse combinée: {photo_result.get('justification', '')} + {text_result.get('justification', '')}",
+            'justification': justification,
             'luminosite': photo_result.get('luminosite', text_result.get('luminosite', 'inconnue')),
             'vue': photo_result.get('vue', text_result.get('vue', 'inconnue')),
             'photos_analyzed': photo_result.get('photos_analyzed', 0),
@@ -633,8 +698,8 @@ class ExpositionExtractor:
                 'photo_score': photo_score,
                 'text_score': text_score,
                 'combined_score': combined_score,
-                'photo_details': photo_result.get('details', {}),
-                'text_details': text_result.get('details', {})
+                'photo_details': photo_details,
+                'text_details': text_details
             }
         }
     

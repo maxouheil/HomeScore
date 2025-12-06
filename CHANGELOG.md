@@ -2,6 +2,112 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [3.4.0] - 2025-12-06
+
+### 🎯 Version 3.4 - Améliorations Majeures du Système de Scoring et Interface
+
+#### ✅ Améliorations Majeures
+
+**🎯 Système de Scoring des Alertes Amélioré**
+- ✅ **Nouveau système de scoring par tiers**: 2 critères principaux (30 pts max chacun) + 2 critères secondaires (20 pts max chacun) = 100 pts max
+- ✅ **Logique de scoring simplifiée**: tier1 (good) = 100%, tier2 (moyen) = 50%, tier3 (bad) = 0 pts
+- ✅ **Fonction `get_score_from_tier()`**: Attribution automatique des scores selon le tier détecté
+- ✅ **Validation backend**: Vérification que `primary` et `secondary` contiennent exactement 2 critères chacun
+- ✅ **Affichage dynamique**: Les scores suivent l'ordre défini dans l'alerte (primary puis secondary)
+- ✅ **Couleurs cohérentes**: Vert pour "good", orange pour "moyen", rouge pour "bad"
+
+**🎨 Améliorations Frontend Majeures**
+- ✅ **AlertResults.jsx**: Amélioration de la gestion des états avec fade-out/fade-in pour transitions fluides
+- ✅ **ApartmentCard.jsx**: Amélioration de l'affichage des quartiers avec priorité multi-sources (map_info, scores_detaille, exposition)
+- ✅ **AlertCreator.jsx**: Interface améliorée pour la création et édition d'alertes
+- ✅ **ScoreBadge.jsx**: Popup de breakdown des scores dans l'ordre défini par l'utilisateur
+- ✅ **Carousel.jsx**: Passage des critères d'alerte pour affichage personnalisé
+- ✅ **App.css**: Améliorations visuelles et responsive design
+
+**🔧 Améliorations Backend**
+- ✅ **backend/api/alerts.py**: Validation renforcée des critères d'alerte (2 primary + 2 secondary)
+- ✅ **backend/api/apartments.py**: Amélioration de la gestion des données d'appartements
+- ✅ **Calcul des scores d'alerte**: Calcul à la volée lors de l'appel API `/api/alerts/{id}/apartments`
+
+**📊 Améliorations des Analyses**
+- ✅ **analyze_photos.py**: Améliorations majeures de l'analyse des photos (+541 lignes)
+- ✅ **analyze_apartment_style.py**: Améliorations de la détection de style (+230 lignes)
+- ✅ **extract_exposition.py**: Améliorations de l'extraction d'exposition (+87 lignes)
+- ✅ **extract_baignoire.py**: Améliorations de l'extraction de baignoire (+106 lignes)
+- ✅ **extract_cuisine_text.py**: Améliorations de l'extraction de cuisine (+12 lignes)
+
+**🎯 Améliorations du Scoring**
+- ✅ **scoring.py**: Améliorations majeures du système de scoring (+450 lignes)
+  - Extraction améliorée des stations de métro depuis l'API uniquement
+  - Calcul amélioré du prix/m²
+  - Gestion améliorée des fallbacks avec notes moyennes par défaut
+- ✅ **scoring_config.json**: Mise à jour de la configuration de scoring
+- ✅ **alert_scoring.py**: Refactorisation complète avec système basé sur les tiers (+220 lignes)
+
+**🛠️ Outils de Diagnostic**
+- ✅ **diagnostic_mega_score.py**: Améliorations du diagnostic des scores
+
+**📄 Génération HTML**
+- ✅ **generate_html.py**: Améliorations mineures
+- ✅ **generate_scorecard_html.py**: Améliorations de la génération des scorecards (+64 lignes)
+
+#### 🔧 Changements Techniques
+
+**Fichiers Modifiés (27 fichiers, +2946 lignes, -640 lignes)**:
+- `alert_scoring.py`: Refactorisation complète du système de scoring par tiers
+- `backend/api/alerts.py`: Validation et gestion améliorées des alertes
+- `backend/api/apartments.py`: Gestion améliorée des appartements
+- `frontend/src/App.jsx`: Améliorations de l'application principale
+- `frontend/src/App.css`: Améliorations visuelles
+- `frontend/src/components/AlertCreator.jsx`: Interface améliorée
+- `frontend/src/components/AlertResults.jsx`: Gestion d'état améliorée
+- `frontend/src/components/ApartmentCard.jsx`: Affichage amélioré des données
+- `frontend/src/components/ScoreBadge.jsx`: Affichage dynamique des scores
+- `frontend/src/components/Carousel.jsx`: Passage des critères d'alerte
+- `scoring.py`: Améliorations majeures du système de scoring
+- `analyze_photos.py`: Améliorations majeures de l'analyse des photos
+- `analyze_apartment_style.py`: Améliorations de la détection de style
+- `extract_exposition.py`: Améliorations de l'extraction d'exposition
+- `extract_baignoire.py`: Améliorations de l'extraction de baignoire
+- `extract_cuisine_text.py`: Améliorations de l'extraction de cuisine
+- `scoring_config.json`: Mise à jour de la configuration
+- Et 11 autres fichiers modifiés
+
+#### 📊 Résultats
+
+**Système de Scoring des Alertes**:
+- **Structure**: 2 critères principaux (30 pts) + 2 critères secondaires (20 pts) = 100 pts max
+- **Tiers**: tier1 = 100%, tier2 = 50%, tier3 = 0%
+- **Exemple**: haussmanien (30) + quartier (30) + luminosite (10) + cuisine_ouverte (20) = 90/100
+
+**Frontend**:
+- **Transitions fluides**: Fade-out/fade-in pour meilleure UX
+- **Affichage amélioré**: Priorité multi-sources pour quartiers et métros
+- **Personnalisation**: Scores affichés selon l'ordre défini dans l'alerte
+
+**Backend**:
+- **Validation renforcée**: Vérification stricte des critères d'alerte
+- **Performance**: Calcul des scores à la volée optimisé
+
+#### 🎯 Impact
+
+**Expérience Utilisateur**:
+- Interface plus fluide avec transitions
+- Affichage personnalisé des scores selon les critères de l'alerte
+- Meilleure visibilité des informations importantes
+
+**Maintenabilité**:
+- Code plus structuré et modulaire
+- Validation renforcée pour éviter les erreurs
+- Documentation améliorée dans CHANGELOG_SCORING_ALERTES.md
+
+**Performance**:
+- Calcul des scores optimisé
+- Gestion d'état améliorée dans le frontend
+- Extraction de données plus robuste
+
+---
+
 ## [3.3.0] - 2025-11-05
 
 ### 🎯 Version 3.3 - Exploration API Jinka et Préparation Migration

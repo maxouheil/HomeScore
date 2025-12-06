@@ -122,16 +122,16 @@
       }
     },
     "cuisine": {
-      "poids": 10,
+      "poids": 20,
       "description": "Type de cuisine et possibilités d'ouverture",
       "tiers": {
         "tier1": {
-          "score": 10,
+          "score": 20,
           "types": ["Ouverte", "Semi-ouverte sur salon"],
           "description": "Cuisine ouverte ou semi-ouverte"
         },
         "tier2": {
-          "score": 5,
+          "score": 10,
           "conditions": ["Cuisine non trouvée dans les photos"],
           "description": "Cuisine non trouvée - score neutre"
         },
@@ -185,6 +185,34 @@
           "score": 0,
           "description": "Pas de baignoire (seulement douche)"
         }
+      }
+    },
+    "calme": {
+      "poids": 10,
+      "description": "Calme du quartier basé sur type de rue (adresse exacte), bars/restos dans 100m, commerces agités dans 100m",
+      "tiers": {
+        "tier1": {
+          "score": 10,
+          "description": "Quartier très calme (rue piétonne, 0 bar/resto, 0 commerce agité)"
+        },
+        "tier2": {
+          "score": 5,
+          "description": "Quartier moyennement calme"
+        },
+        "tier3": {
+          "score": 0,
+          "description": "Quartier animé (axe routier, nombreux bars/restos ou commerces agités)"
+        }
+      },
+      "ponderation": {
+        "type_rue": 0.33,
+        "bars_restos": 0.33,
+        "commerces_agites": 0.33
+      },
+      "seuils": {
+        "tier1_min": 60,
+        "tier2_min": 40,
+        "tier3_max": 39
       }
     }
   },

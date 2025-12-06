@@ -324,43 +324,61 @@ def score_style(apartment, config):
             'details': style_data.get('details', {})
         }
     
-    # Si pas de style_analysis, essayer de le générer avec validation croisée
+    # Si pas de style_analysis, essayer de le générer UNIQUEMENT si les photos sont déjà en cache
+    # Ne pas déclencher de nouvelles analyses pour éviter les appels API coûteux
     try:
         from analyze_apartment_style import ApartmentStyleAnalyzer
-        style_analyzer = ApartmentStyleAnalyzer()
-        style_analysis = style_analyzer.analyze_apartment_photos_from_data(apartment)
+        from cache_api import get_cache
         
-        if style_analysis:
-            style_data = style_analysis.get('style', {})
-            style_type = style_data.get('type', '').lower()
+        cache = get_cache()
+        photos = apartment.get('photos', [])
+        
+        # Vérifier si au moins une photo est déjà en cache
+        photos_in_cache = False
+        if photos:
+            # Vérifier si la première photo a une analyse en cache
+            first_photo_url = photos[0] if isinstance(photos[0], str) else photos[0].get('url', '')
+            if first_photo_url:
+                cached_style = cache.get('style_photo', first_photo_url)
+                if cached_style:
+                    photos_in_cache = True
+        
+        # Seulement analyser si les photos sont déjà en cache (pour éviter les appels API)
+        if photos_in_cache or style_analysis:
+            style_analyzer = ApartmentStyleAnalyzer()
+            style_analysis = style_analyzer.analyze_apartment_photos_from_data(apartment)
             
-            if style_type:
-                # Tier1: Ancien (Haussmannien) = 20 pts
-                tier1_styles = [s.lower() for s in tier_config['tier1']['styles']]
-                if style_type in tier1_styles or 'haussmann' in style_type:
+            if style_analysis:
+                style_data = style_analysis.get('style', {})
+                style_type = style_data.get('type', '').lower()
+                
+                if style_type:
+                    # Tier1: Ancien (Haussmannien) = 20 pts
+                    tier1_styles = [s.lower() for s in tier_config['tier1']['styles']]
+                    if style_type in tier1_styles or 'haussmann' in style_type:
+                        return {
+                            'score': tier_config['tier1']['score'],
+                            'tier': 'tier1',
+                            'justification': style_data.get('justification', f"Style ancien: {style_type}"),
+                            'details': style_data.get('details', {})
+                        }
+                    
+                    # Tier2: Atypique = 10 pts
+                    if 'atypique' in style_type or 'loft' in style_type:
+                        return {
+                            'score': tier_config['tier2']['score'],
+                            'tier': 'tier2',
+                            'justification': style_data.get('justification', f"Style atypique: {style_type}"),
+                            'details': style_data.get('details', {})
+                        }
+                    
+                    # Tier3: Neuf = 0 pts
                     return {
-                        'score': tier_config['tier1']['score'],
-                        'tier': 'tier1',
-                        'justification': style_data.get('justification', f"Style ancien: {style_type}"),
+                        'score': tier_config['tier3']['score'],
+                        'tier': 'tier3',
+                        'justification': style_data.get('justification', f"Style neuf: {style_type}"),
                         'details': style_data.get('details', {})
                     }
-                
-                # Tier2: Atypique = 10 pts
-                if 'atypique' in style_type or 'loft' in style_type:
-                    return {
-                        'score': tier_config['tier2']['score'],
-                        'tier': 'tier2',
-                        'justification': style_data.get('justification', f"Style atypique: {style_type}"),
-                        'details': style_data.get('details', {})
-                    }
-                
-                # Tier3: Neuf = 0 pts
-                return {
-                    'score': tier_config['tier3']['score'],
-                    'tier': 'tier3',
-                    'justification': style_data.get('justification', f"Style neuf: {style_type}"),
-                    'details': style_data.get('details', {})
-                }
     except Exception as e:
         # Fallback sur méthode ancienne si erreur
         pass
@@ -555,6 +573,285 @@ def score_surface(apartment, config):
     }
 
 
+def score_large_piece_vie(apartment, config):
+    """Score pour 'large pièce de vie' basé sur le % salon/surface totale
+    
+    PRIORITÉ 1: Vérifier la description textuelle pour la taille du salon
+    PRIORITÉ 2: Analyser les photos pour estimer la taille du salon
+    
+    Puis compare à la surface totale pour obtenir un pourcentage.
+    
+    Tier1 (good): >35% de la surface totale
+    Tier2 (moyen): 25-35% de la surface totale
+    Tier3 (bad): <25% de la surface totale
+    """
+    # Extraire la surface totale de l'appartement
+    surface = apartment.get('surface', '')
+    surface_match = re.search(r'(\d+)', surface)
+    if not surface_match:
+        return {
+            'score': 0,
+            'tier': 'tier3',
+            'justification': 'Surface totale non disponible',
+            'details': {}
+        }
+    
+    surface_totale = int(surface_match.group(1))
+    
+    # PRIORITÉ 1: Chercher la taille du salon dans la description textuelle
+    description = apartment.get('description', '').lower()
+    caracteristiques = apartment.get('caracteristiques', '').lower()
+    text_combined = f"{description} {caracteristiques}"
+    
+    salon_size_from_text = None
+    # Chercher des patterns comme "salon de 30m²", "séjour de plus de 30m²", "salon 30 m²", etc.
+    patterns = [
+        r'salon[^\d]*(\d+)\s*m[²2]',
+        r'séjour[^\d]*(\d+)\s*m[²2]',
+        r'pièce[^\d]*vie[^\d]*(\d+)\s*m[²2]',
+        r'salon[^\d]*de\s*plus\s*de\s*(\d+)\s*m[²2]',
+        r'séjour[^\d]*de\s*plus\s*de\s*(\d+)\s*m[²2]',
+        r'salon[^\d]*(\d+)\s*mètres?\s*carrés?',
+        r'séjour[^\d]*(\d+)\s*mètres?\s*carrés?',
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, text_combined, re.IGNORECASE)
+        if match:
+            try:
+                salon_size_from_text = int(match.group(1))
+                break
+            except:
+                pass
+    
+    salon_size = salon_size_from_text
+    salon_category = None
+    confidence = 1.0  # Confiance élevée si trouvé dans le texte
+    method_used = 'text_description'
+    salon_analysis = None
+    
+    # PRIORITÉ 2: Si pas trouvé dans le texte, vérifier style_analysis puis analyser les photos
+    if salon_size is None:
+        # Vérifier d'abord si style_analysis contient déjà les données salon_size
+        style_analysis = apartment.get('style_analysis')
+        if style_analysis:
+            salon_data = style_analysis.get('salon_size', {})
+            if salon_data and salon_data.get('estimate') is not None:
+                salon_size = salon_data.get('estimate')
+                salon_category = salon_data.get('category')
+                confidence = salon_data.get('confidence', 0)
+                method_used = 'style_analysis_cache'
+        
+        # Si toujours pas trouvé, analyser les photos
+        if salon_size is None:
+            photos = apartment.get('photos', [])
+            photos_urls = []
+            if photos:
+                for photo in photos:
+                    if isinstance(photo, dict):
+                        photos_urls.append(photo.get('url', ''))
+                    elif isinstance(photo, str):
+                        photos_urls.append(photo)
+            
+            if not photos_urls:
+                return {
+                    'score': 0,
+                    'tier': 'tier3',
+                    'justification': 'Aucune photo disponible et taille salon non mentionnée dans la description',
+                    'details': {}
+                }
+            
+            try:
+                from analyze_photos import PhotoAnalyzer
+                analyzer = PhotoAnalyzer()
+                salon_analysis = analyzer.analyze_photos_salon_size(photos_urls, style_analysis=style_analysis)
+                
+                salon_size = salon_analysis.get('salon_size_estimate')
+                salon_category = salon_analysis.get('salon_category')
+                confidence = salon_analysis.get('confidence', 0)
+                method_used = 'photo_analysis'
+                
+                if salon_size is None:
+                    return {
+                        'score': 0,
+                        'tier': 'tier3',
+                        'justification': salon_analysis.get('justification', 'Salon non identifié sur les photos'),
+                        'details': {
+                            'salon_analysis': salon_analysis,
+                            'method': method_used
+                        }
+                    }
+            except Exception as e:
+                return {
+                    'score': 0,
+                    'tier': 'tier3',
+                    'justification': f'Erreur analyse salon: {str(e)}',
+                    'details': {}
+                }
+    
+    # Calculer le pourcentage salon/surface totale
+    pourcentage_salon = (salon_size / surface_totale) * 100 if surface_totale > 0 else 0
+    
+    # Déterminer le tier selon le pourcentage
+    # Tier1: >35% (salon très grand par rapport à l'appartement)
+    # Tier2: 25-35% (salon correct)
+    # Tier3: <25% (salon petit)
+    
+    if pourcentage_salon > 35:
+        tier = 'tier1'
+        score = 10  # Score max pour large pièce de vie
+        if method_used == 'text_description':
+            justification = f"Grand salon: {salon_size}m² mentionné ({pourcentage_salon:.1f}% de la surface totale)"
+        else:
+            justification = f"Grand salon: {salon_size}m² estimé ({pourcentage_salon:.1f}% de la surface totale)"
+    elif pourcentage_salon >= 25:
+        tier = 'tier2'
+        score = 5  # Score moyen
+        if method_used == 'text_description':
+            justification = f"Salon correct: {salon_size}m² mentionné ({pourcentage_salon:.1f}% de la surface totale)"
+        else:
+            justification = f"Salon correct: {salon_size}m² estimé ({pourcentage_salon:.1f}% de la surface totale)"
+    else:
+        tier = 'tier3'
+        score = 0  # Score faible
+        if method_used == 'text_description':
+            justification = f"Salon petit: {salon_size}m² mentionné ({pourcentage_salon:.1f}% de la surface totale)"
+        else:
+            justification = f"Salon petit: {salon_size}m² estimé ({pourcentage_salon:.1f}% de la surface totale)"
+    
+    return {
+        'score': score,
+        'tier': tier,
+        'justification': justification,
+        'details': {
+            'salon_size_estimate': salon_size,
+            'salon_category': salon_category,
+            'surface_totale': surface_totale,
+            'pourcentage_salon': round(pourcentage_salon, 1),
+            'confidence': confidence,
+            'method': method_used,
+            'salon_analysis': salon_analysis
+        }
+    }
+
+
+def score_hauteur_plafond(apartment, config):
+    """Score pour 'hauteur sous plafond' basé sur l'analyse des photos
+    
+    Analyse les photos pour estimer la hauteur sous plafond, puis catégorise selon:
+    - Tier1 (good): >2.80m (haute ou très haute)
+    - Tier2 (moyen): 2.50-2.80m (moyenne)
+    - Tier3 (bad): <2.50m (basse)
+    """
+    # Analyser les photos pour estimer la hauteur sous plafond
+    photos = apartment.get('photos', [])
+    photos_urls = []
+    if photos:
+        for photo in photos:
+            if isinstance(photo, dict):
+                photos_urls.append(photo.get('url', ''))
+            elif isinstance(photo, str):
+                photos_urls.append(photo)
+    
+    if not photos_urls:
+        return {
+            'score': 0,
+            'tier': 'tier3',
+            'justification': 'Aucune photo disponible pour analyser la hauteur sous plafond',
+            'details': {}
+        }
+    
+    try:
+        from analyze_photos import PhotoAnalyzer
+        analyzer = PhotoAnalyzer()
+        hauteur_analysis = analyzer.analyze_photos_hauteur_plafond(photos_urls)
+        
+        # Vérifier que l'analyse a retourné un résultat valide
+        if not hauteur_analysis or not isinstance(hauteur_analysis, dict):
+            return {
+                'score': 0,
+                'tier': 'tier3',
+                'justification': 'Erreur: analyse de hauteur plafond a retourné un résultat invalide',
+                'details': {}
+            }
+        
+        hauteur_estimate = hauteur_analysis.get('hauteur_estimate')
+        hauteur_category = hauteur_analysis.get('hauteur_category')
+        confidence = hauteur_analysis.get('confidence', 0)
+        
+        if hauteur_estimate is None:
+            return {
+                'score': 0,
+                'tier': 'tier3',
+                'justification': hauteur_analysis.get('justification', 'Hauteur sous plafond non estimable depuis les photos'),
+                'details': {
+                    'hauteur_analysis': hauteur_analysis
+                }
+            }
+        
+        # Vérifier que hauteur_estimate est un nombre valide
+        try:
+            hauteur_estimate = float(hauteur_estimate)
+        except (ValueError, TypeError):
+            return {
+                'score': 0,
+                'tier': 'tier3',
+                'justification': f'Erreur: hauteur invalide ({hauteur_estimate})',
+                'details': {
+                    'hauteur_analysis': hauteur_analysis
+                }
+            }
+        
+        # Déterminer le tier selon la hauteur
+        # Tier1: >2.80m (haute ou très haute) = 10 points
+        # Tier2: 2.50-2.80m (moyenne) = 5 points
+        # Tier3: <2.50m (basse) = 0 points
+        
+        if hauteur_estimate > 2.80:
+            tier = 'tier1'
+            score = 10  # Score max pour hauteur élevée
+            justification = f"Hauteur sous plafond élevée: {hauteur_estimate:.2f}m ({hauteur_category})"
+        elif hauteur_estimate >= 2.50:
+            tier = 'tier2'
+            score = 5  # Score moyen
+            justification = f"Hauteur sous plafond moyenne: {hauteur_estimate:.2f}m ({hauteur_category})"
+        else:
+            tier = 'tier3'
+            score = 0  # Score faible
+            justification = f"Hauteur sous plafond basse: {hauteur_estimate:.2f}m ({hauteur_category})"
+        
+        return {
+            'score': score,
+            'tier': tier,
+            'justification': justification,
+            'details': {
+                'hauteur_estimate': hauteur_estimate,
+                'hauteur_category': hauteur_category,
+                'confidence': confidence,
+                'hauteur_analysis': hauteur_analysis
+            }
+        }
+        
+    except ImportError as e:
+        return {
+            'score': 0,
+            'tier': 'tier3',
+            'justification': f'Erreur import PhotoAnalyzer: {str(e)}',
+            'details': {}
+        }
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"⚠️ Erreur dans score_hauteur_plafond: {e}")
+        print(f"   Traceback: {error_trace}")
+        return {
+            'score': 0,
+            'tier': 'tier3',
+            'justification': f'Erreur analyse hauteur plafond: {str(e)}',
+            'details': {}
+        }
+
+
 def score_cuisine(apartment, config):
     """Score cuisine avec validation croisée texte + photos"""
     tier_config = config['axes']['cuisine']['tiers']
@@ -610,8 +907,11 @@ def score_cuisine(apartment, config):
                 elif isinstance(photo, str):
                     photos_urls.append(photo)
         
+        # Vérifier si style_analysis existe et contient déjà les données cuisine
+        style_analysis = apartment.get('style_analysis')
+        
         cuisine_result = extractor.extract_cuisine_complete(
-            description, caracteristiques, photos_urls
+            description, caracteristiques, photos_urls, style_analysis=style_analysis
         )
         
         cuisine_ouverte = cuisine_result.get('ouverte')
@@ -766,8 +1066,11 @@ def score_baignoire(apartment, config):
                 elif isinstance(photo, str):
                     photos_urls.append(photo)
         
+        # Vérifier si style_analysis existe et contient déjà les données baignoire
+        style_analysis = apartment.get('style_analysis')
+        
         baignoire_result = extractor.extract_baignoire_complete(
-            description, caracteristiques, photos_urls
+            description, caracteristiques, photos_urls, style_analysis=style_analysis
         )
         
         has_baignoire = baignoire_result.get('has_baignoire')
@@ -906,6 +1209,86 @@ def score_renove(apartment, config):
     }
 
 
+def score_calme(apartment, config):
+    """Score calme du quartier basé sur données Overpass API
+    Utilise l'adresse exacte pour trouver le type de rue, plus bars/restos et commerces agités dans 100m
+    Pondération égale: 33% type de rue, 33% bars/restos, 33% commerces agités
+    Score: tier1 (10pts) si très calme, tier2 (5pts) si moyen, tier3 (0pts) si animé
+    """
+    tier_config = config['axes']['calme']['tiers']
+    
+    # Vérifier que l'appartement a les coordonnées nécessaires
+    coordinates = apartment.get('coordinates', {})
+    latitude = coordinates.get('latitude')
+    longitude = coordinates.get('longitude')
+    
+    if not latitude or not longitude:
+        # Fallback: tier2 (moyen) si pas de coordonnées
+        return {
+            'score': tier_config['tier2']['score'],
+            'tier': 'tier2',
+            'justification': 'Coordonnées non disponibles - note moyenne par défaut',
+            'details': {}
+        }
+    
+    try:
+        from criteria.calme import fetch_calme_data, calculate_calme_score
+        
+        # Récupérer les données depuis Overpass API (avec cache)
+        # fetch_calme_data prend maintenant apartment complet pour extraire l'adresse
+        calme_data = fetch_calme_data(apartment, radius=100)
+        
+        # Vérifier s'il y a une erreur
+        if calme_data.get('error'):
+            return {
+                'score': tier_config['tier2']['score'],
+                'tier': 'tier2',
+                'justification': calme_data.get('error', 'Erreur récupération données'),
+                'details': {}
+            }
+        
+        # Calculer le score pondéré
+        calme_score_result = calculate_calme_score(calme_data)
+        
+        # Convertir le score normalisé (0-100) en tier
+        normalized_score = calme_score_result.get('normalized_score', 50)
+        seuils = config['axes']['calme'].get('seuils', {})
+        tier1_min = seuils.get('tier1_min', 60)
+        tier2_min = seuils.get('tier2_min', 40)
+        
+        if normalized_score >= tier1_min:
+            tier = 'tier1'
+            score = tier_config['tier1']['score']
+        elif normalized_score >= tier2_min:
+            tier = 'tier2'
+            score = tier_config['tier2']['score']
+        else:
+            tier = 'tier3'
+            score = tier_config['tier3']['score']
+        
+        return {
+            'score': score,
+            'tier': tier,
+            'justification': calme_score_result.get('justification', 'Quartier analysé'),
+            'details': calme_score_result.get('details', {}),
+            'normalized_score': normalized_score,
+            'source': 'overpass_api'
+        }
+        
+    except Exception as e:
+        # En cas d'erreur, fallback sur tier2 (moyen)
+        import traceback
+        print(f"⚠️ Erreur dans score_calme: {e}")
+        traceback.print_exc()
+        
+        return {
+            'score': tier_config['tier2']['score'],
+            'tier': 'tier2',
+            'justification': f'Erreur analyse calme - note moyenne par défaut: {str(e)}',
+            'details': {}
+        }
+
+
 def score_apartment(apartment, config):
     """
     Score un appartement avec règles simples depuis config
@@ -928,9 +1311,10 @@ def score_apartment(apartment, config):
     scores_detaille['surface'] = score_surface(apartment, config)
     scores_detaille['cuisine'] = score_cuisine(apartment, config)
     scores_detaille['baignoire'] = score_baignoire(apartment, config)
+    scores_detaille['calme'] = score_calme(apartment, config)
     
-    # Calculer score total : SEULEMENT les 6 critères de scoring (exclure etage, surface qui sont des indices)
-    scored_criteria = ['localisation', 'prix', 'style', 'ensoleillement', 'cuisine', 'baignoire']
+    # Calculer score total : SEULEMENT les 5 critères de scoring (20pts chacun = 100pts total)
+    scored_criteria = ['localisation', 'prix', 'style', 'ensoleillement', 'cuisine']
     score_total = sum(scores_detaille.get(key, {}).get('score', 0) for key in scored_criteria)
     
     # Pas de bonus/malus (supprimés - jamais validés)

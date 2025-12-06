@@ -19,11 +19,11 @@ def load_scored_apartments():
 
 
 def calculate_mega_score_new(apartment):
-    """Calcule le mega score avec la nouvelle méthode (corrigée) - SEULEMENT 6 critères"""
+    """Calcule le mega score avec la nouvelle méthode (corrigée) - SEULEMENT 5 critères à 20pts chacun"""
     scores_detaille = apartment.get('scores_detaille', {})
     
-    # SEULEMENT les 6 critères de scoring (exclure etage, surface, vue qui sont des indices)
-    scored_criteria = ['localisation', 'prix', 'style', 'ensoleillement', 'cuisine', 'baignoire']
+    # SEULEMENT les 5 critères de scoring à 20pts chacun (exclure etage, surface, vue, baignoire qui sont des indices)
+    scored_criteria = ['localisation', 'prix', 'style', 'ensoleillement', 'cuisine']
     mega_score = 0
     
     # Calculer depuis scores_detaille uniquement pour les critères de scoring
@@ -107,9 +107,9 @@ def main():
                 'missing_criteria': []
             })
             
-            # Identifier les critères incorrectement inclus (etage, surface, vue ne doivent PAS être dans le score)
+            # Identifier les critères incorrectement inclus (etage, surface, vue, baignoire ne doivent PAS être dans le score)
             scores_detaille = apt.get('scores_detaille', {})
-            scored_criteria = ['localisation', 'prix', 'style', 'ensoleillement', 'cuisine', 'baignoire']
+            scored_criteria = ['localisation', 'prix', 'style', 'ensoleillement', 'cuisine']
             all_criteria = list(scores_detaille.keys())
             
             # Critères qui ne devraient PAS être comptés dans le score (mais sont des indices)
