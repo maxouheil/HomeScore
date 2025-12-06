@@ -4,25 +4,53 @@ Toutes les modifications notables de ce projet seront documentées dans ce fichi
 
 ## [3.4.0] - 2025-12-06
 
-### 🎯 Version 3.4 - Améliorations Majeures du Système de Scoring et Interface
+### 🎯 Version 3.4 - Nouveaux Critères de Scoring et Améliorations Interface
 
-#### ✅ Améliorations Majeures
+#### ✅ Changements Clés
 
-**🎯 Système de Scoring des Alertes Amélioré**
-- ✅ **Nouveau système de scoring par tiers**: 2 critères principaux (30 pts max chacun) + 2 critères secondaires (20 pts max chacun) = 100 pts max
-- ✅ **Logique de scoring simplifiée**: tier1 (good) = 100%, tier2 (moyen) = 50%, tier3 (bad) = 0 pts
-- ✅ **Fonction `get_score_from_tier()`**: Attribution automatique des scores selon le tier détecté
-- ✅ **Validation backend**: Vérification que `primary` et `secondary` contiennent exactement 2 critères chacun
-- ✅ **Affichage dynamique**: Les scores suivent l'ordre défini dans l'alerte (primary puis secondary)
-- ✅ **Couleurs cohérentes**: Vert pour "good", orange pour "moyen", rouge pour "bad"
+**🎯 Passage au Système 5 Points pour Tier2**
+- ✅ **Nouveau barème tier2**: Passage à 5 points pour les critères en tier2 (moyen) au lieu de notes proportionnelles
+- ✅ **Hauteur sous plafond**: tier1 (>2.80m) = 10 pts, tier2 (2.50-2.80m) = **5 pts**, tier3 (<2.50m) = 0 pts
+- ✅ **Calme**: tier1 (très calme) = 10 pts, tier2 (moyen) = **5 pts**, tier3 (animé) = 0 pts
+- ✅ **Cohérence**: Système uniformisé pour tous les critères avec tier2 = 5 pts
 
-**🎨 Améliorations Frontend Majeures**
-- ✅ **AlertResults.jsx**: Amélioration de la gestion des états avec fade-out/fade-in pour transitions fluides
-- ✅ **ApartmentCard.jsx**: Amélioration de l'affichage des quartiers avec priorité multi-sources (map_info, scores_detaille, exposition)
-- ✅ **AlertCreator.jsx**: Interface améliorée pour la création et édition d'alertes
+**🆕 Nouveaux Critères de Scoring**
+
+**📏 Hauteur sous Plafond (10 pts max)**
+- ✅ **Nouveau critère ajouté**: Analyse automatique de la hauteur sous plafond depuis les photos
+- ✅ **Analyse IA**: Utilisation de `PhotoAnalyzer.analyze_photos_hauteur_plafond()` pour estimer la hauteur
+- ✅ **Seuils de scoring**:
+  - Tier1 (>2.80m): 10 pts - Hauteur élevée
+  - Tier2 (2.50-2.80m): 5 pts - Hauteur moyenne
+  - Tier3 (<2.50m): 0 pts - Hauteur basse
+- ✅ **Fichiers**: `scoring.py` (fonction `score_hauteur_plafond()`), `analyze_photos.py`, `analyze_hauteur_appartement.py`
+
+**🔇 Calme du Quartier (10 pts max)**
+- ✅ **Nouveau critère ajouté**: Évaluation du calme basée sur OpenStreetMap Overpass API
+- ✅ **3 sous-critères avec pondération égale (33% chacun)**:
+  - Type de rue (adresse exacte): Rue piétonne (+100%), résidentielle (0%), axe routier (-100%)
+  - Bars/restos dans 100m: 0 bar/resto (+100%), 1-2 (0%), >2 (-100%)
+  - Commerces agités dans 100m: 0 commerce (+100%), 1 (0%), >1 (-100%)
+- ✅ **Scoring**:
+  - Tier1 (score normalisé ≥60): 10 pts - Quartier très calme
+  - Tier2 (score normalisé 40-59): 5 pts - Quartier moyennement calme
+  - Tier3 (score normalisé <40): 0 pts - Quartier animé
+- ✅ **Cache intelligent**: Système de cache 30 jours pour éviter requêtes répétées
+- ✅ **Fichiers**: `criteria/calme.py` (module complet), `scoring.py` (fonction `score_calme()`)
+
+**🏛️ Ajustements Détection Style**
+- ✅ **Amélioration détection date de construction**: Meilleure extraction des années de construction depuis la description
+- ✅ **Détection affinée**: Analyse améliorée des périodes architecturales (Haussmannien, années 60-70, etc.)
+- ✅ **Fichiers**: `analyze_apartment_style.py` (améliorations +230 lignes)
+
+**🎨 Corrections UI**
+- ✅ **AlertResults.jsx**: Transitions fluides avec fade-out/fade-in
+- ✅ **ApartmentCard.jsx**: Affichage amélioré des quartiers avec priorité multi-sources
+- ✅ **AlertCreator.jsx**: Interface améliorée pour création/édition d'alertes
 - ✅ **ScoreBadge.jsx**: Popup de breakdown des scores dans l'ordre défini par l'utilisateur
 - ✅ **Carousel.jsx**: Passage des critères d'alerte pour affichage personnalisé
 - ✅ **App.css**: Améliorations visuelles et responsive design
+- ✅ **AlertResults.css**: Améliorations du style des résultats
 
 **🔧 Améliorations Backend**
 - ✅ **backend/api/alerts.py**: Validation renforcée des critères d'alerte (2 primary + 2 secondary)
@@ -31,54 +59,81 @@ Toutes les modifications notables de ce projet seront documentées dans ce fichi
 
 **📊 Améliorations des Analyses**
 - ✅ **analyze_photos.py**: Améliorations majeures de l'analyse des photos (+541 lignes)
+  - Nouvelle fonction `analyze_photos_hauteur_plafond()` pour estimation hauteur
 - ✅ **analyze_apartment_style.py**: Améliorations de la détection de style (+230 lignes)
+  - Meilleure extraction des dates de construction
 - ✅ **extract_exposition.py**: Améliorations de l'extraction d'exposition (+87 lignes)
 - ✅ **extract_baignoire.py**: Améliorations de l'extraction de baignoire (+106 lignes)
 - ✅ **extract_cuisine_text.py**: Améliorations de l'extraction de cuisine (+12 lignes)
 
 **🎯 Améliorations du Scoring**
 - ✅ **scoring.py**: Améliorations majeures du système de scoring (+450 lignes)
+  - Nouvelle fonction `score_hauteur_plafond()` (10 pts max)
+  - Nouvelle fonction `score_calme()` (10 pts max)
   - Extraction améliorée des stations de métro depuis l'API uniquement
   - Calcul amélioré du prix/m²
   - Gestion améliorée des fallbacks avec notes moyennes par défaut
-- ✅ **scoring_config.json**: Mise à jour de la configuration de scoring
+- ✅ **scoring_config.json**: Mise à jour avec nouveaux critères (hauteur, calme)
 - ✅ **alert_scoring.py**: Refactorisation complète avec système basé sur les tiers (+220 lignes)
-
-**🛠️ Outils de Diagnostic**
-- ✅ **diagnostic_mega_score.py**: Améliorations du diagnostic des scores
-
-**📄 Génération HTML**
-- ✅ **generate_html.py**: Améliorations mineures
-- ✅ **generate_scorecard_html.py**: Améliorations de la génération des scorecards (+64 lignes)
 
 #### 🔧 Changements Techniques
 
+**Nouveaux Fichiers**:
+- `criteria/calme.py`: Module complet pour l'analyse du calme (594 lignes)
+  - Géocodage Nominatim pour adresses exactes
+  - Requêtes Overpass API pour type de rue, bars/restos, commerces
+  - Système de cache 30 jours
+  - Calcul de score pondéré (33% × 3 sous-critères)
+- `analyze_hauteur_appartement.py`: Script d'analyse de hauteur sous plafond
+- `test_hauteur_plafond.py`: Tests pour le critère hauteur
+- `test_alert_calme.py`: Tests pour le critère calme
+
 **Fichiers Modifiés (27 fichiers, +2946 lignes, -640 lignes)**:
+- `scoring.py`: 
+  - Nouvelle fonction `score_hauteur_plafond()` (10 pts max, tier2 = 5 pts)
+  - Nouvelle fonction `score_calme()` (10 pts max, tier2 = 5 pts)
+  - Extraction améliorée des stations de métro depuis l'API uniquement
+  - Calcul amélioré du prix/m²
+- `analyze_photos.py`: 
+  - Nouvelle fonction `analyze_photos_hauteur_plafond()` pour estimation hauteur
+  - Améliorations majeures (+541 lignes)
+- `analyze_apartment_style.py`: 
+  - Amélioration extraction dates de construction (+230 lignes)
+- `scoring_config.json`: 
+  - Ajout critère `calme` (10 pts, 3 sous-critères pondérés)
+  - Configuration des seuils pour hauteur sous plafond
 - `alert_scoring.py`: Refactorisation complète du système de scoring par tiers
 - `backend/api/alerts.py`: Validation et gestion améliorées des alertes
 - `backend/api/apartments.py`: Gestion améliorée des appartements
 - `frontend/src/App.jsx`: Améliorations de l'application principale
 - `frontend/src/App.css`: Améliorations visuelles
 - `frontend/src/components/AlertCreator.jsx`: Interface améliorée
-- `frontend/src/components/AlertResults.jsx`: Gestion d'état améliorée
+- `frontend/src/components/AlertResults.jsx`: Gestion d'état améliorée avec transitions
+- `frontend/src/components/AlertResults.css`: Améliorations du style
 - `frontend/src/components/ApartmentCard.jsx`: Affichage amélioré des données
 - `frontend/src/components/ScoreBadge.jsx`: Affichage dynamique des scores
 - `frontend/src/components/Carousel.jsx`: Passage des critères d'alerte
-- `scoring.py`: Améliorations majeures du système de scoring
-- `analyze_photos.py`: Améliorations majeures de l'analyse des photos
-- `analyze_apartment_style.py`: Améliorations de la détection de style
 - `extract_exposition.py`: Améliorations de l'extraction d'exposition
 - `extract_baignoire.py`: Améliorations de l'extraction de baignoire
 - `extract_cuisine_text.py`: Améliorations de l'extraction de cuisine
-- `scoring_config.json`: Mise à jour de la configuration
 - Et 11 autres fichiers modifiés
 
 #### 📊 Résultats
 
-**Système de Scoring des Alertes**:
-- **Structure**: 2 critères principaux (30 pts) + 2 critères secondaires (20 pts) = 100 pts max
-- **Tiers**: tier1 = 100%, tier2 = 50%, tier3 = 0%
-- **Exemple**: haussmanien (30) + quartier (30) + luminosite (10) + cuisine_ouverte (20) = 90/100
+**Nouveaux Critères**:
+- **Hauteur sous plafond**: 10 pts max (tier1: 10 pts, tier2: 5 pts, tier3: 0 pts)
+- **Calme**: 10 pts max (tier1: 10 pts, tier2: 5 pts, tier3: 0 pts)
+- **Score total possible**: 120 pts (100 pts base + 20 pts nouveaux critères)
+
+**Système de Scoring Uniformisé**:
+- **Tier2 = 5 pts**: Cohérence pour tous les critères avec tier moyen
+- **Exemples**:
+  - Hauteur 2.60m → tier2 → **5 pts**
+  - Calme moyen (score 45) → tier2 → **5 pts**
+
+**Détection Style**:
+- **Amélioration extraction dates**: Meilleure détection des périodes architecturales
+- **Précision accrue**: Analyse affinée des années de construction
 
 **Frontend**:
 - **Transitions fluides**: Fade-out/fade-in pour meilleure UX
@@ -88,23 +143,32 @@ Toutes les modifications notables de ce projet seront documentées dans ce fichi
 **Backend**:
 - **Validation renforcée**: Vérification stricte des critères d'alerte
 - **Performance**: Calcul des scores à la volée optimisé
+- **Cache calme**: Système de cache pour éviter requêtes répétées à Overpass API
 
 #### 🎯 Impact
+
+**Nouveaux Critères**:
+- **Hauteur sous plafond**: Permet d'évaluer le confort et la sensation d'espace
+- **Calme**: Évaluation objective du calme du quartier basée sur données OpenStreetMap
+- **Score total**: Augmentation du score max à 120 pts avec les nouveaux critères
 
 **Expérience Utilisateur**:
 - Interface plus fluide avec transitions
 - Affichage personnalisé des scores selon les critères de l'alerte
 - Meilleure visibilité des informations importantes
+- Critères plus pertinents pour l'évaluation des appartements
 
 **Maintenabilité**:
 - Code plus structuré et modulaire
 - Validation renforcée pour éviter les erreurs
+- Système de cache pour optimiser les performances API
 - Documentation améliorée dans CHANGELOG_SCORING_ALERTES.md
 
 **Performance**:
 - Calcul des scores optimisé
 - Gestion d'état améliorée dans le frontend
 - Extraction de données plus robuste
+- Cache intelligent pour requêtes Overpass API (30 jours)
 
 ---
 
