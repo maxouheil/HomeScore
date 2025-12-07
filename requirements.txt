@@ -1,0 +1,25 @@
+# Dépendances pour l'analyse visuelle avec Gemini
+
+# Google Generative AI (Gemini)
+google-generativeai>=0.3.0
+
+# Gestion des variables d'environnement
+python-dotenv>=1.0.0
+
+# Traitement d'images
+Pillow>=10.0.0
+
+# Requêtes HTTP (pour télécharger des images depuis URLs)
+requests>=2.31.0
+
+# Parsing HTML (pour scraping Jinka si nécessaire)
+beautifulsoup4>=4.12.0
+
+# Planification (optionnel si cron utilisé)
+schedule>=1.2.0
+
+# Optionnel: Selenium (seulement si scraping nécessaire, en fallback)
+# selenium>=4.15.0
+
+# Optionnel: OpenAI (si vous voulez garder le support OpenAI)
+# openai>=1.0.0
