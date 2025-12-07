@@ -18,8 +18,8 @@ beautifulsoup4>=4.12.0
 # Planification (optionnel si cron utilisé)
 schedule>=1.2.0
 
-# Optionnel: Selenium (seulement si scraping nécessaire, en fallback)
-# selenium>=4.15.0
+# Selenium pour scraping HTML (fallback si API ne retourne pas les appartements)
+selenium>=4.15.0
 
 # Optionnel: OpenAI (si vous voulez garder le support OpenAI)
 # openai>=1.0.0

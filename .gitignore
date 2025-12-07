@@ -1,0 +1,65 @@
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data files
+data/
+output/
+# Exclure les JSON de données mais garder package.json
+!frontend/package.json
+*.json
+# Exclure les HTML générés mais garder index.html frontend
+!frontend/index.html
+output/*.html
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Playwright
+playwright-report/
+test-results/
+
+# Watch cache
+.watch_scorecard_cache.txt
+frontend/node_modules/
+frontend/.vite/
+__pycache__/
+*.pyc
+.watch_scorecard_cache.txt

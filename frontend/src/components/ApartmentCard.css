@@ -1,0 +1,242 @@
+.scorecard {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.scorecard:hover {
+    box-shadow: 0 6px 16px rgba(0,0,0,0.15);
+    transform: translateY(-2px);
+}
+
+.apartment-info {
+    padding: 24px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.apartment-title {
+    font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 20px;
+    font-weight: 500;
+    color: #212529;
+    margin-bottom: 4px;
+    line-height: 1.2;
+}
+
+.apartment-subtitle {
+    font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 14px;
+    font-weight: 400;
+    color: #6c757d;
+    margin-bottom: 24px;
+}
+
+.criterion {
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.criterion:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+    margin-bottom: 0;
+}
+
+.criterion-no-border-bottom {
+    border-bottom: none !important;
+    padding-bottom: 0 !important;
+    margin-bottom: 20px !important;
+}
+
+.criterion-no-border-top {
+    border-top: none !important;
+    padding-top: 0 !important;
+    margin-top: 0 !important;
+}
+
+.criterion-content {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.criterion-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.criterion-emoji {
+    font-size: 20px;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    flex-shrink: 0;
+    line-height: 1;
+}
+
+.criterion-emoji.green {
+    background: rgba(0, 150, 109, 0.12);
+}
+
+.criterion-emoji.yellow {
+    background: rgba(245, 158, 11, 0.12);
+}
+
+.criterion-emoji.red {
+    background: rgba(248, 84, 87, 0.12);
+}
+
+.criterion-emoji.gray {
+    background: rgba(123, 127, 135, 0.12);
+}
+
+.criterion-text-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.criterion-name {
+    font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 14px;
+    font-weight: 400;
+    color: #000000 !important;
+    margin-bottom: 4px;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    text-transform: none !important;
+    line-height: 1.3;
+}
+
+.criterion-description {
+    font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 13px;
+    font-weight: 400;
+    color: #6c757d;
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+.criterion-description-orange {
+    color: #F59E0B !important;
+}
+
+
+.criterion-details .tier-label {
+    font-weight: 600;
+}
+
+.criterion-details .tier-label.good {
+    color: #00966D !important;
+}
+
+.criterion-details .tier-label.moyen {
+    color: #F59E0B !important;
+}
+
+.criterion-details .tier-label.bad {
+    color: #F85457 !important;
+}
+
+.criterion-score-badge {
+    display: none;
+}
+
+.criterion-score-badge.green {
+    color: #00966D;
+    background: rgba(0, 150, 109, 0.1);
+}
+
+.criterion-score-badge.yellow {
+    color: #F59E0B;
+    background: rgba(245, 158, 11, 0.1);
+}
+
+.criterion-score-badge.red {
+    color: #F85457;
+    background: rgba(248, 84, 87, 0.1);
+}
+
+.confidence-badge {
+    font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 10px;
+    font-weight: 500;
+    color: rgba(0, 0, 0, 0.3);
+    background: rgba(0, 0, 0, 0.06);
+    padding: 0 8px;
+    height: 18px;
+    line-height: 18px;
+    border-radius: 9999px;
+    margin-left: 4px;
+    display: inline-block;
+}
+
+.criterion-sub-details {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 6px;
+    margin-top: 8px;
+    flex-basis: 100%;
+    width: 100%;
+    font-family: 'Cera Pro', 'CeraPro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+.indices-icon-wrapper {
+    flex-shrink: 0;
+    display: flex;
+    align-items: flex-start;
+    padding-top: 2px;
+}
+
+.indices-icon {
+    opacity: 0.8;
+}
+
+.indices-text-wrapper {
+    flex: 1;
+    min-width: 0;
+}
+
+.indices-text {
+    color: #6c757d;
+    font-size: 13px;
+    line-height: 1.4;
+    white-space: pre-line;
+    display: block;
+    word-wrap: break-word;
+}
+
+/* Style pour les critères en gris (non prioritaires) */
+.criterion-gray .criterion-name {
+    color: #7B7F87 !important;
+}
+
+.criterion-gray .criterion-description {
+    color: #7B7F87 !important;
+}
+
