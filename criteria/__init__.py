@@ -9,6 +9,8 @@ from .style import format_style
 from .exposition import format_exposition
 from .cuisine import format_cuisine
 from .baignoire import format_baignoire
+from .hauteur import format_hauteur
+from .calme import format_calme
 
 __all__ = [
     'format_localisation',
@@ -17,6 +19,8 @@ __all__ = [
     'format_exposition',
     'format_cuisine',
     'format_baignoire',
+    'format_hauteur',
+    'format_calme',
     'get_metro_name',
     'get_quartier_name',
 ]

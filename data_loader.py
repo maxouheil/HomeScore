@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 from typing import List, Dict, Optional
+from project_config import DATA_DIR
 
 
 def load_apartments(prefer_api: bool = True) -> List[Dict]:
@@ -20,7 +21,7 @@ def load_apartments(prefer_api: bool = True) -> List[Dict]:
     Returns:
         Liste des appartements au format unifié
     """
-    data_dir = Path('data')
+    data_dir = DATA_DIR
     
     # Chercher les fichiers API récents
     if prefer_api:
@@ -89,7 +90,7 @@ def get_latest_data_source() -> str:
     Returns:
         'api', 'html', ou 'none'
     """
-    data_dir = Path('data')
+    data_dir = DATA_DIR
     
     # Vérifier API
     api_files = sorted(

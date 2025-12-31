@@ -94,7 +94,7 @@ def clean_apartment_data(apartment: Dict[str, Any]) -> Dict[str, Any]:
     optional_fields = [
         'prix_m2', 'pieces', 'date', 'transports', 'description',
         'caracteristiques', 'etage', 'agence', 'coordinates', 'map_info',
-        'photos', 'scraped_at', '_api_data', 'exposition'
+        'photos', 'scraped_at', 'date_creation_annonce', '_api_data', 'exposition'
     ]
     
     for field in optional_fields:

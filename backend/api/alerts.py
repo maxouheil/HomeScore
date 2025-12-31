@@ -375,4 +375,104 @@ async def get_alert_apartments(alert_id: str) -> List[Dict[str, Any]]:
         raise HTTPException(status_code=500, detail=f"Erreur serveur: {str(e)}")
 
 
+@router.post("/{alert_id}/refresh")
+async def refresh_alert_apartments(alert_id: str) -> Dict[str, Any]:
+    """
+    Rafraîchit les appartements d'une alerte depuis l'API Jinka
+    Réutilise la logique de fetch_all_apartments_api.py
+    Télécharge les photos et récupère toutes les données de l'API
+    """
+    try:
+        alert = load_alert(alert_id)
+        if not alert:
+            raise HTTPException(status_code=404, detail=f"Alerte {alert_id} non trouvée")
+        
+        # Token hardcodé pour l'instant (peut être stocké dans l'alerte plus tard)
+        alert_url = "https://www.jinka.fr/asrenter/alert/dashboard/cebed5288c18eafafadb04e048a4e776"
+        
+        # Importer les fonctions depuis fetch_all_apartments_api
+        from fetch_all_apartments_api import (
+            load_existing_apartments,
+            merge_apartment_data,
+            clean_apartment_data,
+            remove_duplicates,
+            validate_apartment
+        )
+        from scrape_jinka_api import JinkaAPIScraper
+        from photo_manager import PhotoManager
+        from pathlib import Path
+        
+        # 1. Initialiser le scraper
+        scraper = JinkaAPIScraper()
+        await scraper.setup()
+        if not await scraper.login():
+            raise HTTPException(status_code=500, detail="Échec de la connexion à Jinka")
+        
+        # 2. Récupérer tous les appartements (avec TOUTES les données via scrape_apartment)
+        print(f"🔄 Récupération des appartements depuis l'API Jinka...")
+        apartments = await scraper.scrape_alert_page(alert_url, filter_type="all", max_pages=50)
+        
+        if not apartments:
+            await scraper.cleanup()
+            raise HTTPException(status_code=500, detail="Aucun appartement récupéré depuis l'API")
+        
+        # 3. Charger les existants
+        print(f"📂 Chargement des appartements existants...")
+        existing = load_existing_apartments()
+        
+        # 4. Nettoyer et valider
+        print(f"🧹 Nettoyage et validation des données...")
+        cleaned = [clean_apartment_data(apt) for apt in apartments if validate_apartment(apt)]
+        cleaned = remove_duplicates(cleaned)
+        
+        # 5. Fusionner (identifie automatiquement les nouveaux)
+        print(f"🔀 Fusion avec les données existantes...")
+        merged = merge_apartment_data(existing, cleaned)
+        
+        # 6. Télécharger les photos pour tous les appartements
+        print(f"📸 Téléchargement des photos...")
+        photo_manager = PhotoManager()
+        photos_downloaded = 0
+        for i, apt in enumerate(merged, 1):
+            apt_id = apt.get('id', 'unknown')
+            photos_before = len(apt.get('photos', []))
+            
+            if photos_before > 0:
+                # Télécharger les photos
+                apt_with_photos = photo_manager.download_apartment_photos(apt, max_photos=10)
+                merged[i-1] = apt_with_photos
+                
+                downloaded_count = sum(1 for p in apt_with_photos.get('photos', []) if p.get('local_path'))
+                photos_downloaded += downloaded_count
+        
+        # 7. Sauvegarder
+        print(f"💾 Sauvegarde des données...")
+        output_file = Path('data/scraped_apartments.json')
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(merged, f, ensure_ascii=False, indent=2, default=str)
+        
+        # 8. Calculer les nouveaux
+        new_count = len(merged) - len(existing)
+        
+        await scraper.cleanup()
+        
+        print(f"✅ Refresh terminé: {new_count} nouveaux appartements, {photos_downloaded} photos téléchargées")
+        
+        return {
+            "new_count": new_count,
+            "total_count": len(merged),
+            "photos_downloaded": photos_downloaded,
+            "message": f"{new_count} nouveaux appartements ajoutés, {photos_downloaded} photos téléchargées"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"❌ Erreur dans refresh_alert_apartments: {e}")
+        print(f"   Traceback: {error_trace}")
+        raise HTTPException(status_code=500, detail=f"Erreur lors du rafraîchissement: {str(e)}")
+
+
 

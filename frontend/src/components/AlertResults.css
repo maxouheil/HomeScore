@@ -181,6 +181,15 @@
   color: #333;
 }
 
+.alert-results-count-title {
+  text-align: left;
+  font-size: 16px;
+  font-weight: 400;
+  color: #333;
+  margin: 0 0 2rem 0;
+  padding: 0;
+}
+
 .apartments-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));

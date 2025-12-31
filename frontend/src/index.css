@@ -21,8 +21,9 @@ body {
 
 .container {
     width: 100%;
+    max-width: 1400px;
     margin: 0 auto;
-    padding: 30px;
+    padding: 0 32px 32px 32px;
     background: white;
     position: relative;
 }
@@ -30,7 +31,7 @@ body {
 .apartments-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 30px;
+    gap: 24px;
     margin: 0;
     padding: 0;
     width: 100%;

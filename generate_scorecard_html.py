@@ -31,15 +31,19 @@ def _get_baignoire_extractor():
 
 def load_scored_apartments():
     """Charge les appartements scorés et fusionne avec les données scrapées"""
+    from project_config import SCORES_DIR, DATA_DIR
+    
     try:
         # Charger les scores
-        with open('data/scores/all_apartments_scores.json', 'r', encoding='utf-8') as f:
+        scores_file = SCORES_DIR / 'all_apartments_scores.json'
+        with open(scores_file, 'r', encoding='utf-8') as f:
             scored_apartments = json.load(f)
         
         # Charger les données scrapées pour fusionner style_analysis, baignoire, etc.
         scraped_data = {}
         try:
-            with open('data/scraped_apartments.json', 'r', encoding='utf-8') as f:
+            scraped_file = DATA_DIR / 'scraped_apartments.json'
+            with open(scraped_file, 'r', encoding='utf-8') as f:
                 scraped_list = json.load(f)
                 # Convertir en dict par ID pour faciliter la fusion
                 for apt in scraped_list:
@@ -51,7 +55,7 @@ def load_scored_apartments():
         
         # Charger aussi depuis les fichiers individuels si disponibles (pour les données les plus récentes)
         from pathlib import Path
-        appartements_dir = Path('data/appartements')
+        appartements_dir = DATA_DIR / 'appartements'
         if appartements_dir.exists():
             for apt_file in appartements_dir.glob('*.json'):
                 if apt_file.stem in ['test_001', 'test_no_photo', 'unknown']:
@@ -579,10 +583,8 @@ def format_localisation_criterion(apartment):
         }
 
 def format_prix_criterion(apartment):
-    """Formate le critère Prix: "X/m² · Moyen/Bad/Good" """
-    scores_detaille = apartment.get('scores_detaille', {})
-    prix_score = scores_detaille.get('prix', {})
-    tier = prix_score.get('tier', 'tier3')
+    """Formate le critère Prix: "9300€/m2 · 20e: 8500€/m2" """
+    from criteria.prix import get_arrondissement_median_price
     
     # Calculer prix/m²
     prix = apartment.get('prix', '')
@@ -614,23 +616,51 @@ def format_prix_criterion(apartment):
                 except:
                     pass
     
-    # Formater avec virgule comme séparateur de milliers et m² avec superscript
-    if prix_m2:
-        prix_formatted = f"{prix_m2:,}".replace(',', ' ')
-        main_value = f"{prix_formatted} / m<sup>2</sup>"
-    else:
-        main_value = "Prix/m<sup>2</sup> non disponible"
+    if not prix_m2:
+        return {
+            'main_value': "Prix/m<sup>2</sup> non disponible",
+            'confidence': None,
+            'indices': None
+        }
     
-    # Mapping tiers avec couleurs
-    tier_mapping = {
-        'tier1': ('Good', 'good'),
-        'tier2': ('Moyen', 'moyen'),
-        'tier3': ('Bad', 'bad')
-    }
-    tier_label, tier_class = tier_mapping.get(tier, ('Bad', 'bad'))
+    # Arrondir le prix/m² au 100€ près
+    prix_m2_rounded = round(prix_m2 / 100) * 100
+    
+    # Récupérer le code postal pour déterminer l'arrondissement
+    postal_code = apartment.get('_api_data', {}).get('postal_code', '')
+    if not postal_code:
+        # Essayer depuis localisation
+        localisation = apartment.get('localisation', '')
+        postal_match = re.search(r'75\d{3}', localisation)
+        if postal_match:
+            postal_code = postal_match.group(0)
+    
+    # Extraire le numéro d'arrondissement
+    arrondissement_num = None
+    if postal_code and postal_code.startswith('75'):
+        arrondissement_num = postal_code[-2:]  # Derniers 2 chiffres (ex: "75020" -> "20")
+        if arrondissement_num.isdigit() and int(arrondissement_num) <= 20:
+            arrondissement_num = int(arrondissement_num)
+        else:
+            arrondissement_num = None
+    
+    # Récupérer le prix médian de l'arrondissement
+    median_price = None
+    if postal_code:
+        median_price = get_arrondissement_median_price(postal_code)
+    
+    # Formater selon le format demandé: "9300€/m2 · 20e: 8500€/m2"
+    if median_price and arrondissement_num:
+        main_value = f"{prix_m2_rounded}€/m<sup>2</sup> · {arrondissement_num}e: {int(median_price)}€/m<sup>2</sup>"
+    elif arrondissement_num:
+        # Si pas de médian disponible, afficher juste le prix arrondi avec l'arrondissement
+        main_value = f"{prix_m2_rounded}€/m<sup>2</sup> · {arrondissement_num}e"
+    else:
+        # Fallback: juste le prix arrondi
+        main_value = f"{prix_m2_rounded}€/m<sup>2</sup>"
     
     return {
-        'main_value': f"{main_value} · <span class=\"tier-label {tier_class}\">{tier_label}</span>",
+        'main_value': main_value,
         'confidence': None,  # Données factuelles
         'indices': None
     }
@@ -2047,13 +2077,15 @@ def main():
     print(f"📋 {len(apartments)} appartements trouvés")
     
     # Créer le répertoire de sortie
-    os.makedirs("output", exist_ok=True)
+    from project_config import OUTPUT_DIR
+    
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     
     # Générer le HTML
     html_content = generate_scorecard_html(apartments)
     
     # Sauvegarder le fichier
-    output_file = "output/homepage.html"
+    output_file = OUTPUT_DIR / "homepage.html"
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(html_content)
     

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import json
+from project_config import APARTMENTS_FILE
 
-fichier_source = '/Users/sou/Desktop/CURSOR/HomeScore/data/scores/all_apartments_scores.json'
+fichier_source = str(APARTMENTS_FILE)
 with open(fichier_source, 'r', encoding='utf-8') as f:
     data = json.load(f)
 

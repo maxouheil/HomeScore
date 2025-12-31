@@ -8,31 +8,35 @@ import json
 import os
 from scoring import score_all_apartments
 from generate_html import generate_html, main as generate_html_main
+from project_config import DATA_DIR, SCORES_DIR, OUTPUT_DIR
 
 
 def load_scraped_apartments():
     """Charge les données scrapées depuis data/scraped_apartments.json"""
     try:
-        with open('data/scraped_apartments.json', 'r', encoding='utf-8') as f:
+        scraped_file = DATA_DIR / 'scraped_apartments.json'
+        with open(scraped_file, 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
-        print("❌ Fichier data/scraped_apartments.json non trouvé")
+        print(f"❌ Fichier {DATA_DIR / 'scraped_apartments.json'} non trouvé")
         return []
 
 
 def save_scores(scored_apartments):
     """Sauvegarde les scores dans data/scores.json ET all_apartments_scores.json"""
-    os.makedirs('data/scores', exist_ok=True)
+    SCORES_DIR.mkdir(parents=True, exist_ok=True)
     
     # Sauvegarder dans scores.json (nouveau format)
-    with open('data/scores.json', 'w', encoding='utf-8') as f:
+    scores_file = SCORES_DIR / 'scores.json'
+    with open(scores_file, 'w', encoding='utf-8') as f:
         json.dump(scored_apartments, f, indent=2, ensure_ascii=False)
-    print(f"✅ Scores sauvegardés: data/scores.json ({len(scored_apartments)} appartements)")
+    print(f"✅ Scores sauvegardés: {scores_file} ({len(scored_apartments)} appartements)")
     
     # AUSSI sauvegarder dans all_apartments_scores.json (format utilisé par generate_scorecard_html.py)
-    with open('data/scores/all_apartments_scores.json', 'w', encoding='utf-8') as f:
+    from project_config import APARTMENTS_FILE
+    with open(APARTMENTS_FILE, 'w', encoding='utf-8') as f:
         json.dump(scored_apartments, f, indent=2, ensure_ascii=False)
-    print(f"✅ Scores sauvegardés: data/scores/all_apartments_scores.json ({len(scored_apartments)} appartements)")
+    print(f"✅ Scores sauvegardés: {APARTMENTS_FILE} ({len(scored_apartments)} appartements)")
 
 
 def main():
@@ -66,8 +70,8 @@ def main():
     print("\n📄 Phase 4: Génération du HTML...")
     html = generate_html(scored_apartments)
     
-    os.makedirs('output', exist_ok=True)
-    output_file = 'output/homepage.html'
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_file = OUTPUT_DIR / 'homepage.html'
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(html)
     

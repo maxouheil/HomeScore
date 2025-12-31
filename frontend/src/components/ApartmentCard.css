@@ -233,7 +233,7 @@
 
 /* Style pour les critères en gris (non prioritaires) */
 .criterion-gray .criterion-name {
-    color: #7B7F87 !important;
+    color: #000000 !important;
 }
 
 .criterion-gray .criterion-description {

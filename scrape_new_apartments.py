@@ -255,6 +255,11 @@ async def scrape_new_apartments():
                 print(f"   ❌ Erreur: {e}")
                 continue
         
+        # Mettre à jour scraped_apartments.json après le scraping
+        if scraped_count > 0:
+            print(f"\n📝 Mise à jour de scraped_apartments.json...")
+            scraper.update_scraped_apartments_json()
+        
         # Résumé final
         print(f"\n📊 RÉSULTATS FINAUX")
         print("=" * 60)

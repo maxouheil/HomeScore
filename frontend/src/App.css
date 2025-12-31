@@ -5,7 +5,7 @@
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
-  padding: 0;
+  padding: 20px 0;
   background: white;
   border-bottom: none;
   margin-bottom: 0;
@@ -19,7 +19,7 @@
 
 .nav-right {
   display: flex;
-  gap: 1rem;
+  gap: 10px;
   align-items: center;
 }
 
@@ -31,13 +31,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #333;
-  border-radius: 4px;
-  transition: background 0.2s;
+  color: #374151;
+  border-radius: 8px;
+  transition: all 0.2s ease;
 }
 
 .nav-button-burger:hover {
-  background: #f5f5f5;
+  background: #f3f4f6;
+  color: #0D99FF;
 }
 
 .nav-alert-name {
@@ -45,6 +46,14 @@
   font-size: 1.25rem;
   font-weight: 400;
   color: #333;
+}
+
+.nav-title {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 500;
+  color: #111827;
+  letter-spacing: -0.02em;
 }
 
 .nav-button-modify {
@@ -77,18 +86,22 @@
 */
 
 .nav-button {
-  padding: 0.75rem 1.5rem;
+  padding: 0.625rem 1.25rem;
   background: transparent;
   border: none;
-  border-bottom: 2px solid transparent;
-  font-size: 1rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
   font-weight: 500;
-  color: #666;
+  color: #374151;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .nav-button:hover {
+  background: #f3f4f6;
   color: #0D99FF;
 }
 
@@ -97,17 +110,103 @@
   border-bottom-color: #0D99FF;
 }
 
+.sort-toggle {
+  display: flex;
+  gap: 0;
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 3px;
+  margin-right: 0.5rem;
+}
+
+.sort-toggle-button {
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: none;
+  color: #6b7280;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.sort-toggle-button:hover {
+  color: #0D99FF;
+  background: rgba(13, 153, 255, 0.08);
+}
+
+.sort-toggle-button.active {
+  background: white;
+  color: #0D99FF;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  font-weight: 600;
+}
+
 .nav-button-create-alert {
   margin-left: auto;
-  background: #f5f5f5;
-  color: #0D99FF;
-  border-radius: 6px;
+  background: #0D99FF;
+  color: white;
+  border-radius: 8px;
   border: none;
+  padding: 0.625rem 1.25rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
 }
 
 .nav-button-create-alert:hover {
-  background: #e5e5e5;
-  color: #0D99FF;
+  background: #0a7acc;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px rgba(13, 153, 255, 0.2);
+}
+
+.nav-button-enrich {
+  background: white !important;
+  color: #374151 !important;
+  border: 1px solid #e5e7eb !important;
+  margin-left: 0;
+}
+
+.nav-button-enrich:hover:not(:disabled) {
+  background: #f9fafb !important;
+  color: #111827 !important;
+  border-color: #d1d5db !important;
+}
+
+.nav-button-enrich:disabled {
+  background: #f3f4f6 !important;
+  color: #9ca3af !important;
+  border-color: #e5e7eb !important;
+  cursor: not-allowed !important;
+}
+
+.nav-button-refresh {
+  background: white !important;
+  color: #374151 !important;
+  border: 1px solid #e5e7eb !important;
+  margin-left: 0;
+  padding: 0.625rem 1rem !important;
+  min-width: 38px;
+  width: auto;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.nav-button-refresh:hover:not(:disabled) {
+  background: #f9fafb !important;
+  color: #111827 !important;
+  border-color: #d1d5db !important;
+}
+
+.nav-button-refresh:disabled {
+  background: #f3f4f6 !important;
+  color: #9ca3af !important;
+  border-color: #e5e7eb !important;
+  cursor: not-allowed !important;
 }
 
 .main-content-wrapper {
@@ -115,7 +214,58 @@
   display: flex;
   align-items: stretch;
   min-height: 100vh;
-  margin-top: 20px;
+  margin-top: 0;
+}
+
+/* Section de tri pour la vue "tous les appartements" */
+.all-apartments-view {
+  width: 100%;
+}
+
+.sort-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 16px 0;
+}
+
+.sort-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+.sort-toggle-standalone {
+  display: flex;
+  gap: 0;
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.sort-toggle-standalone .sort-toggle-button {
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: none;
+  color: #6b7280;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.sort-toggle-standalone .sort-toggle-button:hover {
+  color: #0D99FF;
+  background: rgba(13, 153, 255, 0.08);
+}
+
+.sort-toggle-standalone .sort-toggle-button.active {
+  background: white;
+  color: #0D99FF;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  font-weight: 600;
 }
 
 .main-content {
@@ -123,20 +273,111 @@
   transition: all 0.3s ease-out;
 }
 
+.stats-container {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  padding: 1rem;
+  background: #f9f9f9;
+  border-radius: 8px;
+}
+
+.stat-card {
+  flex: 1;
+  background: white;
+  padding: 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.stat-label {
+  font-size: 0.9rem;
+  color: #666;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+}
+
+.stat-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #0D99FF;
+  margin-bottom: 0.25rem;
+}
+
+.stat-total {
+  font-size: 0.85rem;
+  color: #999;
+}
+
 @media (max-width: 768px) {
   .main-navigation {
-    padding: 1rem;
+    padding: 16px 0;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 1rem;
+    align-items: flex-start;
+  }
+
+  .nav-left {
+    width: 100%;
+  }
+
+  .nav-title {
+    font-size: 1.5rem;
+  }
+
+  .nav-right {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 0.75rem;
   }
 
   .nav-button {
-    text-align: left;
     padding: 0.5rem 1rem;
+    font-size: 0.8125rem;
+  }
+
+  .nav-button-enrich,
+  .nav-button-refresh {
+    margin-left: 0 !important;
+    flex: 1;
+    min-width: 120px;
+  }
+
+  .nav-button-create-alert {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .sort-toggle {
+    margin-right: 0;
+    flex-shrink: 0;
+  }
+
+  .sort-toggle-button {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.8125rem;
+  }
+
+  .sort-section {
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
   .main-content.with-sidebar {
     margin-left: 0;
+  }
+
+  .stats-container {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .stat-card {
+    padding: 1rem;
+  }
+
+  .stat-value {
+    font-size: 1.5rem;
   }
 }
 

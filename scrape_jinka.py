@@ -628,6 +628,10 @@ class JinkaScraper:
                 # Pause entre les requêtes
                 await self.page.wait_for_timeout(1000)
             
+            # Mettre à jour scraped_apartments.json après le scraping
+            print("\n📝 Mise à jour de scraped_apartments.json...")
+            self.update_scraped_apartments_json()
+            
             return True
             
         except Exception as e:
@@ -2157,6 +2161,90 @@ class JinkaScraper:
         except Exception as e:
             print(f"❌ Erreur sauvegarde: {e}")
             return False
+    
+    def update_scraped_apartments_json(self):
+        """Met à jour scraped_apartments.json depuis data/appartements/"""
+        try:
+            appartements_dir = 'data/appartements'
+            scraped_file = 'data/scraped_apartments.json'
+            
+            if not os.path.exists(appartements_dir):
+                print(f"⚠️  Dossier {appartements_dir} n'existe pas")
+                return False
+            
+            # Charger tous les appartements depuis les fichiers individuels
+            all_apartments = []
+            for filename in os.listdir(appartements_dir):
+                if filename.endswith('.json') and filename not in ['test_001.json', 'test_no_photo.json', 'unknown.json']:
+                    filepath = os.path.join(appartements_dir, filename)
+                    try:
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            apt_data = json.load(f)
+                            if apt_data.get('id'):
+                                all_apartments.append(apt_data)
+                    except Exception as e:
+                        print(f"⚠️  Erreur lecture {filepath}: {e}")
+                        continue
+            
+            # Sauvegarder dans scraped_apartments.json
+            os.makedirs(os.path.dirname(scraped_file), exist_ok=True)
+            with open(scraped_file, 'w', encoding='utf-8') as f:
+                json.dump(all_apartments, f, ensure_ascii=False, indent=2)
+            
+            print(f"✅ scraped_apartments.json mis à jour avec {len(all_apartments)} appartements")
+            
+            # Invalider le cache du backend si possible
+            self.invalidate_backend_cache()
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Erreur mise à jour scraped_apartments.json: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def invalidate_backend_cache(self):
+        """Invalide le cache du backend en appelant l'endpoint ou en touchant le fichier"""
+        try:
+            # Méthode 1: Appeler l'endpoint du backend si disponible
+            import aiohttp
+            import asyncio
+            
+            async def invalidate_via_api():
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post('http://localhost:8000/api/apartments/invalidate-cache', timeout=aiohttp.ClientTimeout(total=2)) as response:
+                            if response.status == 200:
+                                print("✅ Cache backend invalidé via API")
+                                return True
+                except Exception as e:
+                    # Backend non disponible, utiliser méthode 2
+                    return False
+            
+            # Essayer d'invalider via API (non-bloquant)
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Si une boucle est déjà en cours, créer une tâche
+                    asyncio.create_task(invalidate_via_api())
+                else:
+                    loop.run_until_complete(invalidate_via_api())
+            except Exception:
+                # Si asyncio n'est pas disponible ou si le backend n'est pas démarré, utiliser méthode 2
+                pass
+            
+            # Méthode 2: Toucher le fichier pour forcer le rechargement du cache
+            scraped_file = 'data/scraped_apartments.json'
+            if os.path.exists(scraped_file):
+                # Modifier le timestamp du fichier pour forcer le rechargement
+                os.utime(scraped_file, None)
+                print("✅ Cache backend invalidé via touch du fichier")
+            
+        except Exception as e:
+            # En cas d'erreur, ne pas bloquer le processus
+            print(f"⚠️  Erreur invalidation cache backend: {e}")
+            pass
     
     async def download_apartment_photos(self, apartment_id, photos):
         """Télécharge les photos d'un appartement localement avec filtrage par taille"""

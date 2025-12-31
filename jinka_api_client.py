@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from functools import lru_cache
 from dotenv import load_dotenv
 from scrape_jinka import JinkaScraper
+from cookie_manager import CookieManager
 
 load_dotenv()
 
@@ -70,9 +71,31 @@ class JinkaAPIClient:
         """
         Se connecte à Jinka via email code et récupère le token API
         
-        Réutilise la logique de login de JinkaScraper pour obtenir le token
+        Essaie d'abord de charger les cookies sauvegardés pour éviter de demander email/mot de passe
         """
         print("🔐 Connexion à Jinka via API...")
+        
+        # 1. Essayer de charger les cookies sauvegardés
+        cookie_manager = CookieManager()
+        saved_cookies = cookie_manager.load_cookies()
+        
+        if saved_cookies:
+            print("🍪 Cookies sauvegardés trouvés, tentative d'utilisation...")
+            
+            # Extraire le token API depuis les cookies sauvegardés
+            self.api_token = self._extract_api_token(saved_cookies)
+            
+            if self.api_token:
+                # Utiliser directement le token trouvé dans les cookies
+                self.cookies = saved_cookies
+                print(f"✅ Token API trouvé dans les cookies sauvegardés")
+                print("✅ Connexion réussie sans authentification (utilisation des cookies sauvegardés)")
+                return True
+            else:
+                print("⚠️  Token API non trouvé dans les cookies sauvegardés")
+        
+        # 2. Si pas de cookies valides, faire un login complet
+        print("🔐 Connexion complète nécessaire...")
         
         try:
             # Utiliser le scraper existant pour le login
@@ -90,6 +113,9 @@ class JinkaAPIClient:
             browser_cookies = await self.scraper.context.cookies()
             self.cookies = browser_cookies
             
+            # Sauvegarder les nouveaux cookies
+            cookie_manager.save_cookies(browser_cookies, source='selenium')
+            
             # Extraire le token API depuis les cookies
             self.api_token = self._extract_api_token(browser_cookies)
             
@@ -97,7 +123,7 @@ class JinkaAPIClient:
                 print("❌ Token API non trouvé dans les cookies")
                 return False
             
-            print(f"✅ Connexion réussie - Token API récupéré")
+            print(f"✅ Connexion réussie - Token API récupéré et sauvegardé")
             return True
             
         except Exception as e:

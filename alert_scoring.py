@@ -114,8 +114,19 @@ def score_criterion_for_alert(apartment, criterion_name, config, target_max=1):
     
     # Cas spéciaux pour haussmanien et neuf qui utilisent score_style
     if criterion_name == 'haussmanien':
-        # Appeler score_style et vérifier si c'est Haussmannien
-        style_result = scoring_function(apartment, config)
+        # Utiliser uniquement les données existantes (ne pas déclencher d'analyses)
+        # Vérifier d'abord si style_analysis existe
+        style_analysis = apartment.get('style_analysis', {})
+        if style_analysis:
+            # Utiliser les données existantes
+            style_result = scoring_function(apartment, config)
+        else:
+            # Pas de style_analysis, utiliser un score par défaut (tier3 = 0pt)
+            style_result = {
+                'tier': 'tier3',
+                'justification': 'Style non analysé (données manquantes)',
+                'score': 0
+            }
         # Vérifier si c'est tier1 (Haussmannien)
         if style_result.get('tier') == 'tier1':
             # C'est haussmannien (good)
@@ -123,7 +134,8 @@ def score_criterion_for_alert(apartment, criterion_name, config, target_max=1):
         else:
             # Pas haussmannien (bad)
             style_result['tier'] = 'tier3'
-            style_result['justification'] = 'Style non haussmannien'
+            if not style_result.get('justification'):
+                style_result['justification'] = 'Style non haussmannien'
         original_score = style_result.get('score', 0)
     elif criterion_name == 'neuf':
         # Détecter si l'appartement est neuf
@@ -164,10 +176,32 @@ def score_criterion_for_alert(apartment, criterion_name, config, target_max=1):
         original_score = 20 if is_neuf else 0
     else:
         # Cas normal: appeler la fonction de scoring
+        # IMPORTANT: Utiliser uniquement les données existantes, ne pas déclencher d'analyses
+        # Pour éviter de bloquer le chargement, on vérifie d'abord si les données nécessaires existent
         try:
-            result = scoring_function(apartment, config)
-            original_score = result.get('score', 0)
-            style_result = result
+            # Pour les critères qui nécessitent des analyses (style, cuisine), vérifier si les données existent
+            needs_analysis = criterion_name in ['haussmanien', 'neuf', 'cuisine_ouverte']
+            if needs_analysis:
+                # Vérifier si les données d'analyse existent déjà
+                style_analysis = apartment.get('style_analysis', {})
+                if not style_analysis and criterion_name in ['haussmanien', 'neuf']:
+                    # Pas de style_analysis, retourner un score par défaut (tier3 = 0pt)
+                    style_result = {
+                        'tier': 'tier3',
+                        'justification': f'Données d\'analyse manquantes pour {criterion_name}',
+                        'score': 0
+                    }
+                    original_score = 0
+                else:
+                    # Données existantes, appeler la fonction de scoring
+                    result = scoring_function(apartment, config)
+                    original_score = result.get('score', 0)
+                    style_result = result
+            else:
+                # Critères qui n'ont pas besoin d'analyses (localisation, prix, etc.)
+                result = scoring_function(apartment, config)
+                original_score = result.get('score', 0)
+                style_result = result
         except Exception as e:
             # En cas d'erreur, retourner un score par défaut (tier3 = 0pt)
             print(f"⚠️ Erreur scoring critère {criterion_name}: {e}")
@@ -384,6 +418,23 @@ def filter_apartments_by_alert(apartments, alert_config):
             map_info = apartment.get('map_info', {}) or {}
             quartier = str(map_info.get('quartier') or '').lower()
             
+            # Mapping des stations proches géographiquement (même ligne ou zones proches)
+            # Format: {station_filtre: [stations_proches]}
+            nearby_stations = {
+                'alexandre dumas': ['rue des boulets', 'philippe auguste', 'avron', 'charonne', 'nation', 'place de la réunion'],
+                'philippe auguste': ['alexandre dumas', 'rue des boulets', 'avron', 'charonne', 'nation', 'place de la réunion'],
+                'rue des boulets': ['alexandre dumas', 'philippe auguste', 'avron', 'charonne', 'nation', 'place de la réunion'],
+                'avron': ['alexandre dumas', 'philippe auguste', 'rue des boulets', 'charonne', 'nation', 'place de la réunion'],
+                'charonne': ['alexandre dumas', 'philippe auguste', 'rue des boulets', 'avron', 'nation', 'place de la réunion'],
+                'place de la réunion': ['rue des boulets', 'philippe auguste', 'alexandre dumas', 'avron', 'charonne', 'nation'],
+                'belleville': ['ménilmontant', 'couronnes', 'père lachaise', 'goncourt', 'saint ambroise', 'pyrénées', 'jourdain'],
+                'ménilmontant': ['belleville', 'couronnes', 'père lachaise', 'goncourt', 'saint ambroise', 'pyrénées', 'jourdain'],
+                'saint ambroise': ['belleville', 'ménilmontant', 'couronnes', 'père lachaise', 'goncourt', 'pyrénées', 'jourdain'],
+                'goncourt': ['belleville', 'ménilmontant', 'couronnes', 'père lachaise', 'saint ambroise', 'pyrénées', 'jourdain'],
+                'pyrénées': ['belleville', 'ménilmontant', 'couronnes', 'père lachaise', 'goncourt', 'saint ambroise', 'jourdain'],
+                'jourdain': ['belleville', 'ménilmontant', 'couronnes', 'père lachaise', 'goncourt', 'saint ambroise', 'pyrénées'],
+            }
+            
             # Vérifier si au moins un des quartiers correspond (LOGIQUE SIMPLE comme avant)
             matches = False
             for q_filter in quartier_filters:
@@ -406,6 +457,9 @@ def filter_apartments_by_alert(apartments, alert_config):
                 
                 q_filter_normalized = normalize_simple(q_filter_clean)
                 
+                # Récupérer les stations proches pour ce filtre
+                nearby_for_filter = nearby_stations.get(q_filter_normalized, [])
+                
                 # Vérifier dans la localisation (correspondance partielle simple)
                 if localisation:
                     localisation_normalized = normalize_simple(localisation)
@@ -415,6 +469,13 @@ def filter_apartments_by_alert(apartments, alert_config):
                         q_filter_normalized in localisation_normalized or
                         localisation_normalized in q_filter_normalized):
                         matches = True
+                        break
+                    # Vérifier aussi les stations proches dans la localisation
+                    for nearby in nearby_for_filter:
+                        if nearby in localisation_normalized:
+                            matches = True
+                            break
+                    if matches:
                         break
                 
                 # Vérifier dans le quartier
@@ -426,11 +487,20 @@ def filter_apartments_by_alert(apartments, alert_config):
                         quartier_normalized in q_filter_normalized):
                         matches = True
                         break
+                    # Vérifier aussi les stations proches dans le quartier
+                    for nearby in nearby_for_filter:
+                        if nearby in quartier_normalized:
+                            matches = True
+                            break
+                    if matches:
+                        break
                 
-                # Vérifier dans les métros (liste de strings) - LOGIQUE SIMPLE
+                # Vérifier dans les métros (liste de strings) - LOGIQUE SIMPLE + stations proches
                 metros = map_info.get('metros', []) or []
-                if metros:
-                    for metro in metros:
+                transports = apartment.get('transports', []) or []
+                all_metros = metros + transports
+                if all_metros:
+                    for metro in all_metros:
                         if metro:
                             metro_str = str(metro).lower().strip()
                             metro_normalized = normalize_simple(metro_str)
@@ -441,6 +511,13 @@ def filter_apartments_by_alert(apartments, alert_config):
                                 metro_normalized in q_filter_normalized or
                                 metro_str in q_filter_clean):
                                 matches = True
+                                break
+                            # Vérifier aussi les stations proches
+                            for nearby in nearby_for_filter:
+                                if nearby in metro_normalized or metro_normalized in nearby:
+                                    matches = True
+                                    break
+                            if matches:
                                 break
                     if matches:
                         break

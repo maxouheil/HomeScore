@@ -88,15 +88,20 @@ class GeminiAnalyzer:
             return image_source
         
         if isinstance(image_source, (str, Path)):
+            # Convertir en string pour vérifier si c'est une URL
+            source_str = str(image_source)
+            
+            # Si c'est une URL, télécharger directement
+            if source_str.startswith(('http://', 'https://')):
+                try:
+                    response = requests.get(source_str, timeout=30)
+                    response.raise_for_status()
+                    return PIL.Image.open(BytesIO(response.content))
+                except Exception as e:
+                    raise FileNotFoundError(f"Erreur téléchargement URL {source_str[:50]}...: {e}")
+            
+            # Sinon, traiter comme un chemin local
             path = Path(image_source)
-            
-            # Si c'est une URL
-            if str(path).startswith(('http://', 'https://')):
-                response = requests.get(str(path))
-                response.raise_for_status()
-                return PIL.Image.open(BytesIO(response.content))
-            
-            # Si c'est un chemin local
             if path.exists():
                 return PIL.Image.open(path)
             

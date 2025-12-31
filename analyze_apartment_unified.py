@@ -1,81 +1,68 @@
 #!/usr/bin/env python3
 """
-Analyse unifiée d'appartement avec GPT-4o-mini Vision
+Analyse unifiée d'appartement avec Gemini Flash
 Analyse style, cuisine, salle de bain, luminosité en UNE SEULE requête
 """
 
 import json
 import os
-import base64
-import requests
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 from pathlib import Path
 from photo_manager import PhotoManager
 from cache_api import get_cache
 from dotenv import load_dotenv
+from gemini_analyzer import GeminiAnalyzer
 
 load_dotenv()
 
 
 class UnifiedApartmentAnalyzer:
-    """Analyseur unifié qui analyse tout en une seule requête"""
+    """Analyseur unifié qui analyse tout en une seule requête avec Gemini Flash"""
     
     def __init__(self):
-        self.openai_api_key = os.getenv('OPENAI_API_KEY')
-        self.openai_base_url = "https://api.openai.com/v1"
-        self.model = "gpt-4o-mini"  # GPT mini pour économiser
+        self.analyzer = GeminiAnalyzer('gemini-2.5-flash')
+        self.model = "gemini-2.5-flash"
         self.photo_manager = PhotoManager()
         self.cache = get_cache()
     
     def _get_cache_input_data(self, apartment_id: str, photos: List[Dict]) -> str:
         """Génère les données d'entrée pour le cache basées sur l'ID et les URLs des photos"""
-        photo_urls = [p.get('url', '') for p in photos[:3]]  # Optimisé: 3 photos au lieu de 5
+        photo_urls = [p.get('url', '') for p in photos[:2]]  # OPTIMISÉ: 2 photos pour réduire les coûts
         return f"{apartment_id}:{':'.join(photo_urls)}"
     
-    def _load_photos_for_analysis(self, photos: List[Dict], max_photos: int = 3) -> List[bytes]:
+    def _load_photos_for_analysis(self, photos: List[Dict], max_photos: int = 3) -> List:
         """
-        Charge les photos depuis les chemins locaux ou URLs
+        Charge les photos depuis les chemins locaux ou URLs pour Gemini
         
         Args:
             photos: Liste des photos avec local_path ou url
             max_photos: Nombre maximum de photos à analyser
         
         Returns:
-            Liste des contenus binaires des images
+            Liste des sources d'images (chemins ou URLs) pour GeminiAnalyzer
         """
-        image_contents = []
+        image_sources = []
         
         for photo in photos[:max_photos]:
-            # Charger depuis le chemin local si disponible, sinon depuis l'URL
+            # Priorité au chemin local si disponible
             local_path = photo.get('local_path')
             if local_path and os.path.exists(local_path):
-                try:
-                    with open(local_path, 'rb') as f:
-                        image_contents.append(f.read())
-                except Exception as e:
-                    print(f"   ⚠️  Erreur chargement {local_path}: {e}")
-                    continue
+                image_sources.append(local_path)
             else:
-                # Télécharger depuis l'URL
+                # Sinon utiliser l'URL (GeminiAnalyzer peut charger depuis URL)
                 photo_url = photo.get('url', '')
                 if photo_url:
-                    try:
-                        response = requests.get(photo_url, timeout=10)
-                        if response.status_code == 200:
-                            image_contents.append(response.content)
-                    except Exception as e:
-                        print(f"   ⚠️  Erreur téléchargement {photo_url[:50]}...: {e}")
-                        continue
+                    image_sources.append(photo_url)
         
-        return image_contents
+        return image_sources
     
     def analyze_apartment_unified(
         self, 
         apartment_data: Dict,
-        max_photos: int = 3  # Optimisé: 3 photos par défaut (au lieu de 5)
+        max_photos: int = 2  # OPTIMISÉ: 2 photos par défaut (réduction de 33% des coûts vs 3 photos)
     ) -> Optional[Dict]:
         """
-        Analyse un appartement en UNE SEULE requête GPT-4o-mini Vision
+        Analyse un appartement en UNE SEULE requête Gemini Flash
         
         Analyse simultanément :
         - Style (haussmannien, moderne, atypique, etc.)
@@ -85,7 +72,7 @@ class UnifiedApartmentAnalyzer:
         
         Args:
             apartment_data: Données de l'appartement
-            max_photos: Nombre maximum de photos à analyser (défaut: 3 pour optimiser les coûts)
+            max_photos: Nombre maximum de photos à analyser (défaut: 2 pour optimiser les coûts)
         
         Returns:
             Résultat unifié de l'analyse
@@ -95,14 +82,37 @@ class UnifiedApartmentAnalyzer:
         caracteristiques = apartment_data.get('caracteristiques', '')
         photos = apartment_data.get('photos', [])
         
-        # OPTIMISATION 1: Vérifier si l'appartement a déjà des données d'analyse
+        # OPTIMISATION 1: Vérifier si l'appartement a déjà TOUTES les données d'analyse
+        # Si certaines données manquent, on force l'analyse pour compléter
         existing_analysis = apartment_data.get('_analysis_data') or apartment_data.get('style_analysis')
-        if existing_analysis:
-            print(f"   💾 Données d'analyse déjà présentes pour {apartment_id}, skip")
+        style_analysis = apartment_data.get('style_analysis', {})
+        baignoire_data = apartment_data.get('baignoire_data', {})
+        
+        has_style = bool(style_analysis.get('style'))
+        has_cuisine = bool(style_analysis.get('cuisine'))
+        has_baignoire = (baignoire_data.get('has_baignoire') is not None)
+        has_luminosite = bool(style_analysis.get('luminosite'))
+        
+        has_all_data = has_style and has_cuisine and has_baignoire and has_luminosite
+        
+        if has_all_data:
+            print(f"   💾 Toutes les données d'analyse déjà présentes pour {apartment_id}, skip")
             # Convertir au format unifié si nécessaire
             if isinstance(existing_analysis, dict) and 'style' in existing_analysis:
                 return existing_analysis
             # Sinon, retourner None pour forcer une nouvelle analyse si format incompatible
+        else:
+            missing = []
+            if not has_style:
+                missing.append('style')
+            if not has_cuisine:
+                missing.append('cuisine')
+            if not has_baignoire:
+                missing.append('baignoire')
+            if not has_luminosite:
+                missing.append('luminosité')
+            missing_str = ', '.join(missing)
+            print(f"   📸 Données manquantes pour {apartment_id} ({missing_str}), analyse nécessaire")
         
         if not photos:
             print(f"   ⚠️  Aucune photo pour l'appartement {apartment_id}")
@@ -117,65 +127,26 @@ class UnifiedApartmentAnalyzer:
         
         print(f"   🤖 Analyse unifiée avec {self.model} ({len(photos[:max_photos])} photos)...")
         
-        # Charger les photos depuis les chemins locaux
-        image_contents = self._load_photos_for_analysis(photos, max_photos=max_photos)
+        # Charger les photos pour Gemini
+        image_sources = self._load_photos_for_analysis(photos, max_photos=max_photos)
         
-        if not image_contents:
+        if not image_sources:
             print(f"   ⚠️  Impossible de charger les photos")
             return None
         
         # Préparer le prompt unifié
         prompt = self._create_unified_prompt(description, caracteristiques)
         
-        # Préparer le contenu avec texte + toutes les images
-        content = [{"type": "text", "text": prompt}]
-        
-        # Ajouter toutes les images en base64
-        for i, image_content in enumerate(image_contents, 1):
-            image_base64 = base64.b64encode(image_content).decode('utf-8')
-            content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/jpeg;base64,{image_base64}"
-                }
-            })
-        
         try:
-            # UNE SEULE requête pour tout analyser
-            headers = {
-                'Authorization': f'Bearer {self.openai_api_key}',
-                'Content-Type': 'application/json'
-            }
-            
-            payload = {
-                'model': self.model,
-                'messages': [
-                    {
-                        'role': 'user',
-                        'content': content
-                    }
-                ],
-                'temperature': 0.3,
-                'max_tokens': 2000
-            }
-            
-            response = requests.post(
-                f'{self.openai_base_url}/chat/completions',
-                headers=headers,
-                json=payload,
-                timeout=60
+            # UNE SEULE requête Gemini pour tout analyser (multi-images)
+            response_data = self.analyzer.analyze_multiple_images(
+                image_sources,
+                prompt,
+                return_json=True
             )
             
-            if response.status_code != 200:
-                print(f"   ❌ Erreur API: {response.status_code}")
-                print(f"   {response.text[:200]}")
-                return None
-            
-            result = response.json()
-            response_text = result['choices'][0]['message']['content'].strip()
-            
-            # Parser la réponse JSON
-            analysis_result = self._parse_unified_response(response_text, apartment_id)
+            # Adapter la réponse au format attendu
+            analysis_result = self._parse_unified_response(response_data, apartment_id, len(image_sources))
             
             if analysis_result:
                 # Mettre en cache
@@ -193,88 +164,47 @@ class UnifiedApartmentAnalyzer:
             return None
     
     def _create_unified_prompt(self, description: str, caracteristiques: str) -> str:
-        """Crée le prompt unifié pour analyser tout en une fois"""
-        return f"""Analyse ces photos d'appartement et le texte pour déterminer TOUS les éléments suivants en UNE SEULE analyse :
+        """Crée le prompt unifié optimisé pour analyser tout en une fois (version courte pour vitesse)"""
+        # OPTIMISATION: Prompt plus court pour réduire les tokens et accélérer
+        return f"""Analyse ces photos et texte pour déterminer en UNE SEULE analyse:
 
-## TEXTE DISPONIBLE
-Description: {description[:500]}
-Caractéristiques: {caracteristiques[:200]}
+TEXTE: {description[:300]} {caracteristiques[:150]}
 
-## TÂCHES À EFFECTUER
+TÂCHES:
+1. STYLE: haussmannien|moderne|atypique|70s|autre (avec éléments détectés: moulures, parquet, etc.)
+2. CUISINE: ouverte|fermée|semi-ouverte (visible depuis salon?)
+3. BAIGNOIRE: présente|absente (dans salle de bain?)
+4. LUMINOSITÉ: tres_lumineux|lumineux|moyen|faible (selon lumière naturelle)
 
-### 1. STYLE ARCHITECTURAL
-Détermine le style de l'appartement :
-- haussmannien (moulures, parquet, cheminée, hauteur sous plafond)
-- moderne (lignes épurées, design contemporain)
-- atypique/loft (conversion, poutres apparentes)
-- 70s (carrelage, couleurs caractéristiques)
-- autre
-
-### 2. CUISINE
-Détermine si la cuisine est :
-- ouverte (visible depuis le salon, pas de séparation)
-- fermée (séparée par un mur ou porte)
-- semi-ouverte (bar, comptoir)
-
-### 3. SALLE DE BAIN
-Détermine la présence de :
-- baignoire (oui/non)
-- douche (oui/non)
-- les deux
-
-### 4. LUMINOSITÉ
-Évalue la luminosité globale :
-- très_lumineux (beaucoup de lumière naturelle)
-- lumineux (bonne luminosité)
-- moyen (luminosité modérée)
-- faible (peu de lumière)
-
-## FORMAT DE RÉPONSE (JSON UNIQUEMENT)
-
-Réponds UNIQUEMENT au format JSON suivant (pas de texte avant/après) :
-
+Réponds UNIQUEMENT en JSON (pas de texte avant/après):
 {{
-    "style": {{
-        "type": "haussmannien|moderne|atypique|70s|autre",
-        "confidence": 0.0-1.0,
-        "score": 0-20,
-        "justification": "description courte avec éléments détectés",
-        "elements_detectes": ["moulures", "parquet", ...]
-    }},
-    "cuisine": {{
-        "ouverte": true|false,
-        "confidence": 0.0-1.0,
-        "score": 0-10,
-        "justification": "description de ce qui est visible"
-    }},
-    "salle_de_bain": {{
-        "baignoire": true|false,
-        "douche": true|false,
-        "confidence": 0.0-1.0,
-        "score": 0-10,
-        "justification": "description"
-    }},
-    "luminosite": {{
-        "type": "tres_lumineux|lumineux|moyen|faible",
-        "confidence": 0.0-1.0,
-        "score": 0-10,
-        "justification": "description"
-    }},
+    "style": {{"type": "...", "confidence": 0.0-1.0, "justification": "éléments détectés", "elements_detectes": []}},
+    "cuisine": {{"ouverte": true|false, "confidence": 0.0-1.0, "justification": "..."}},
+    "baignoire": {{"presente": true|false, "confidence": 0.0-1.0, "justification": "..."}},
+    "luminosite": {{"type": "...", "confidence": 0.0-1.0, "justification": "..."}},
     "photos_analyzed": 0
 }}"""
     
-    def _parse_unified_response(self, response_text: str, apartment_id: str) -> Optional[Dict]:
+    def _parse_unified_response(self, response_data: Union[str, Dict], apartment_id: str, photos_analyzed: int = 0) -> Optional[Dict]:
         """Parse la réponse JSON de l'analyse unifiée"""
         try:
-            # Nettoyer la réponse (enlever markdown si présent)
-            text = response_text.strip()
-            if text.startswith('```json'):
-                text = text.replace('```json', '').replace('```', '').strip()
-            elif text.startswith('```'):
-                text = text.replace('```', '').strip()
-            
-            # Parser le JSON
-            data = json.loads(text)
+            # Si c'est déjà un dict (cas Gemini avec return_json=True)
+            if isinstance(response_data, dict):
+                data = response_data
+                # Si Gemini a retourné raw_response, essayer de parser
+                if 'raw_response' in data:
+                    try:
+                        data = json.loads(data['raw_response'])
+                    except:
+                        pass
+            else:
+                # Si c'est une string, parser le JSON
+                text = str(response_data).strip()
+                if text.startswith('```json'):
+                    text = text.replace('```json', '').replace('```', '').strip()
+                elif text.startswith('```'):
+                    text = text.replace('```', '').strip()
+                data = json.loads(text)
             
             # Adapter au format attendu par le système
             result = {
@@ -294,10 +224,15 @@ Réponds UNIQUEMENT au format JSON suivant (pas de texte avant/après) :
                     'justification': data.get('cuisine', {}).get('justification', '')
                 },
                 'baignoire': {
-                    'presente': data.get('salle_de_bain', {}).get('baignoire', False),
-                    'confidence': data.get('salle_de_bain', {}).get('confidence', 0.5),
-                    'score': data.get('salle_de_bain', {}).get('score', 0),
-                    'justification': data.get('salle_de_bain', {}).get('justification', '')
+                    # Support ancien format (salle_de_bain) et nouveau format (baignoire)
+                    'presente': data.get('baignoire', {}).get('presente', False) or 
+                               data.get('salle_de_bain', {}).get('baignoire', False),
+                    'confidence': data.get('baignoire', {}).get('confidence', 0.5) or 
+                                 data.get('salle_de_bain', {}).get('confidence', 0.5),
+                    'score': data.get('baignoire', {}).get('score', 0) or 
+                            data.get('salle_de_bain', {}).get('score', 0),
+                    'justification': data.get('baignoire', {}).get('justification', '') or 
+                                   data.get('salle_de_bain', {}).get('justification', '')
                 },
                 'luminosite': {
                     'type': data.get('luminosite', {}).get('type', 'moyen'),
@@ -305,7 +240,7 @@ Réponds UNIQUEMENT au format JSON suivant (pas de texte avant/après) :
                     'score': data.get('luminosite', {}).get('score', 0),
                     'justification': data.get('luminosite', {}).get('justification', '')
                 },
-                'photos_analyzed': data.get('photos_analyzed', 0),
+                'photos_analyzed': data.get('photos_analyzed', photos_analyzed),
                 'method': 'unified_analysis',
                 'model': self.model
             }
@@ -314,10 +249,12 @@ Réponds UNIQUEMENT au format JSON suivant (pas de texte avant/après) :
             
         except json.JSONDecodeError as e:
             print(f"   ⚠️  Erreur parsing JSON: {e}")
-            print(f"   Réponse reçue: {response_text[:500]}")
+            print(f"   Réponse reçue: {str(response_data)[:500]}")
             return None
         except Exception as e:
             print(f"   ⚠️  Erreur parsing: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
 

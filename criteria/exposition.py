@@ -286,7 +286,11 @@ def format_exposition(apartment):
         main_value = "Moyen"
         confidence = 50
     
-    # 3. Upgrade si Sud ou Ouest mentionné: faible → moyen, moyen → fort
+    # 3. Upgrade si Sud/Ouest mentionné OU vis-à-vis > 20m (NOUVEAU)
+    upgrade_applied = False
+    upgrade_by_visavis = False  # Track si upgrade appliqué grâce au vis-à-vis > 20m
+    
+    # Upgrade 1: Sud ou Ouest mentionné
     if exposition_dir:
         expo_normalized = normalize_exposition(exposition_dir)
         if expo_normalized:
@@ -298,8 +302,23 @@ def format_exposition(apartment):
                 # Appliquer l'upgrade
                 if main_value == 'Sombre':
                     main_value = 'Moyen'  # Faible → Moyen
+                    upgrade_applied = True
                 elif main_value == 'Moyen':
                     main_value = 'Lumineux'  # Moyen → Fort
+                    upgrade_applied = True
+    
+    # Upgrade 2: Vis-à-vis > 20m (NOUVEAU)
+    visavis_distance = expo_details.get('visavis_distance')
+    if visavis_distance is not None and isinstance(visavis_distance, (int, float)):
+        if visavis_distance > 20:
+            # Appliquer l'upgrade seulement si pas déjà upgradé par Sud/Ouest
+            if not upgrade_applied:
+                if main_value == 'Sombre':
+                    main_value = 'Moyen'  # Faible → Moyen
+                    upgrade_by_visavis = True
+                elif main_value == 'Moyen':
+                    main_value = 'Lumineux'  # Moyen → Fort
+                    upgrade_by_visavis = True
     
     # Normaliser main_value pour correspondre au format attendu
     if main_value == 'Lumineux':
@@ -326,7 +345,12 @@ def format_exposition(apartment):
     # Vis-à-vis (depuis analyse image) - juste après l'étage
     visavis_distance = expo_details.get('visavis_distance')
     if visavis_distance is not None:
-        indices_parts.append(f"Vis-à-vis {visavis_distance}m")
+        # Toujours afficher la distance
+        visavis_text = f"Vis-à-vis {visavis_distance}m"
+        # Si upgrade appliqué grâce au vis-à-vis > 20m, le préciser
+        if upgrade_by_visavis and visavis_distance > 20:
+            visavis_text += " (upgrade >20m)"
+        indices_parts.append(visavis_text)
     
     # Exposition - UNIQUEMENT si explicitement mentionnée dans le texte
     exposition_explicite = exposition.get('exposition_explicite', False)

@@ -1,15 +1,49 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import ScoreBadge from './ScoreBadge'
 import './Carousel.css'
+
+// Fonction pour formater la date au format "1er dec"
+function formatPublicationDate(dateString) {
+  if (!dateString) return null
+  
+  try {
+    const date = new Date(dateString)
+    if (isNaN(date.getTime())) return null
+    
+    const day = date.getDate()
+    const month = date.getMonth() // 0-11
+    
+    // Noms des mois en abrégé
+    const monthNames = ['jan', 'fév', 'mar', 'avr', 'mai', 'jun', 'jul', 'aoû', 'sep', 'oct', 'nov', 'dec']
+    const monthName = monthNames[month]
+    
+    // Formater le jour: "1er" pour le 1, sinon le nombre
+    const dayFormatted = day === 1 ? '1er' : day.toString()
+    
+    return `${dayFormatted} ${monthName}`
+  } catch (e) {
+    return null
+  }
+}
 
 function Carousel({ photos, carouselId, score, maxScore = 90, apartment = null, alertCriteria = null }) {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [failedImages, setFailedImages] = useState(new Set())
   
+  // Formater la date de publication
+  const publicationDate = useMemo(() => {
+    if (!apartment) return null
+    const dateStr = apartment.date_creation_annonce || apartment.scraped_at || null
+    return formatPublicationDate(dateStr)
+  }, [apartment])
+  
   if (!photos || photos.length === 0) {
     return (
       <div className="apartment-image-container">
         {score !== undefined && <ScoreBadge score={score} maxScore={maxScore} apartment={apartment} alertCriteria={alertCriteria} />}
+        {publicationDate && (
+          <div className="publication-date-tag">{publicationDate}</div>
+        )}
         <div className="apartment-image-placeholder">📷</div>
       </div>
     )
@@ -23,6 +57,9 @@ function Carousel({ photos, carouselId, score, maxScore = 90, apartment = null, 
     return (
       <div className="apartment-image-container">
         {score !== undefined && <ScoreBadge score={score} maxScore={maxScore} apartment={apartment} alertCriteria={alertCriteria} />}
+        {publicationDate && (
+          <div className="publication-date-tag">{publicationDate}</div>
+        )}
         <div className="apartment-image-placeholder">📷</div>
       </div>
     )
@@ -32,6 +69,9 @@ function Carousel({ photos, carouselId, score, maxScore = 90, apartment = null, 
     return (
       <div className="apartment-image-container">
         {score !== undefined && <ScoreBadge score={score} maxScore={maxScore} apartment={apartment} alertCriteria={alertCriteria} />}
+        {publicationDate && (
+          <div className="publication-date-tag">{publicationDate}</div>
+        )}
         <div 
           className="apartment-image" 
           style={{ backgroundImage: `url(${validPhotos[0]})` }}
@@ -98,6 +138,9 @@ function Carousel({ photos, carouselId, score, maxScore = 90, apartment = null, 
   return (
     <div className="apartment-image-container">
       {score !== undefined && <ScoreBadge score={score} maxScore={maxScore} apartment={apartment} alertCriteria={alertCriteria} />}
+      {publicationDate && (
+        <div className="publication-date-tag">{publicationDate}</div>
+      )}
       <div className="carousel-container" data-carousel-id={carouselId}>
         <button 
           className="carousel-nav prev" 

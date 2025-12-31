@@ -207,6 +207,7 @@ def adapt_api_to_scraped_format(api_data: Dict[str, Any], alert_token: Optional[
         'id': apartment_id,
         'url': f"https://www.jinka.fr/alert_result?token={token}&ad={apartment_id}" if token else f"https://www.jinka.fr/alert_result?ad={apartment_id}",
         'scraped_at': created_at,  # Utiliser created_at comme date de scraping
+        'date_creation_annonce': created_at,  # Date de publication sur Jinka (au niveau racine pour accès facile)
         'titre': titre,
         'prix': prix_str,
         'prix_m2': prix_m2_str,

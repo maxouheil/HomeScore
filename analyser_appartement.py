@@ -29,16 +29,10 @@ def trouver_appartement_par_titre(titre_recherche: str, fichier_donnees: str = N
     Returns:
         Dictionnaire avec les données de l'appartement ou None
     """
-    # Chemins possibles pour les fichiers de données
-    chemins_possibles = [
-        '/Users/sou/Desktop/CURSOR/HomeScore/data/scores/all_apartments_scores.json',
-        '/Users/sou/Desktop/HomeScore/data/scores/all_apartments_scores.json',
-        'data/scores/all_apartments_scores.json',
-        'recap_cout_analyse_visuelle_20251207_154245.json'
-    ]
+    from project_config import APARTMENTS_FILE
     
-    # Chercher d'abord dans le fichier source complet qui contient les photos
-    fichier_source = '/Users/sou/Desktop/CURSOR/HomeScore/data/scores/all_apartments_scores.json'
+    # Chercher d'abord dans le fichier source standard depuis PROJECT_ROOT
+    fichier_source = str(APARTMENTS_FILE)
     if os.path.exists(fichier_source):
         try:
             with open(fichier_source, 'r', encoding='utf-8') as f:
@@ -68,35 +62,31 @@ def trouver_appartement_par_titre(titre_recherche: str, fichier_donnees: str = N
         except Exception as e:
             print(f"⚠️ Erreur lors de la lecture du fichier source: {e}")
     
-    if fichier_donnees:
-        chemins_possibles.insert(0, fichier_donnees)
-    
-    for chemin in chemins_possibles:
-        if os.path.exists(chemin):
-            try:
-                with open(chemin, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
+    # Si un fichier personnalisé est fourni, l'utiliser
+    if fichier_donnees and os.path.exists(fichier_donnees):
+        try:
+            with open(fichier_donnees, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Chercher dans les détails par appartement
+            if 'details_par_appartement' in data:
+                appartements = data['details_par_appartement']
+            elif isinstance(data, list):
+                appartements = data
+            else:
+                return None
+            
+            titre_lower = titre_recherche.lower()
+            for apt in appartements:
+                titre = apt.get('titre', '').lower()
+                apt_id = str(apt.get('id', ''))
                 
-                # Chercher dans les détails par appartement
-                if 'details_par_appartement' in data:
-                    appartements = data['details_par_appartement']
-                elif isinstance(data, list):
-                    appartements = data
-                else:
-                    continue
-                
-                titre_lower = titre_recherche.lower()
-                for apt in appartements:
-                    titre = apt.get('titre', '').lower()
-                    apt_id = str(apt.get('id', ''))
-                    
-                    # Rechercher dans le titre ou l'ID
-                    if titre_lower in titre or titre_lower in apt_id or 'goncourt' in titre or 'hôpital' in titre or 'hopital' in titre:
-                        return apt
-                
-            except Exception as e:
-                print(f"⚠️ Erreur lors de la lecture de {chemin}: {e}")
-                continue
+                # Rechercher dans le titre ou l'ID
+                if titre_lower in titre or titre_lower in apt_id or 'goncourt' in titre or 'hôpital' in titre or 'hopital' in titre:
+                    return apt
+            
+        except Exception as e:
+            print(f"⚠️ Erreur lors de la lecture de {fichier_donnees}: {e}")
     
     return None
 
@@ -132,10 +122,11 @@ def analyser_appartement_complet(apt_data: dict, photos: list = None):
                         if os.path.exists(local_path):
                             photos.append(local_path)
                         else:
-                            # Essayer depuis le répertoire CURSOR
-                            cursor_path = f"/Users/sou/Desktop/CURSOR/HomeScore/{local_path}"
-                            if os.path.exists(cursor_path):
-                                photos.append(cursor_path)
+                            # Essayer depuis PROJECT_ROOT
+                            from project_config import PROJECT_ROOT
+                            project_path = PROJECT_ROOT / local_path
+                            if project_path.exists():
+                                photos.append(str(project_path))
                             else:
                                 # Sinon utiliser l'URL
                                 photo_url = photo.get('url', '')

@@ -10,19 +10,23 @@ from pathlib import Path
 from typing import List, Dict, Optional
 from urllib.parse import urlparse
 import hashlib
+from project_config import PHOTOS_DIR
 
 
 class PhotoManager:
     """Gestionnaire de téléchargement et stockage des photos"""
     
-    def __init__(self, base_dir: str = "data/photos"):
+    def __init__(self, base_dir: Optional[Path] = None):
         """
         Initialise le gestionnaire de photos
         
         Args:
-            base_dir: Répertoire de base pour stocker les photos
+            base_dir: Répertoire de base pour stocker les photos (par défaut PHOTOS_DIR depuis PROJECT_ROOT)
         """
-        self.base_dir = Path(base_dir)
+        if base_dir is None:
+            self.base_dir = PHOTOS_DIR
+        else:
+            self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
     
     def get_photo_filename(self, url: str, index: int) -> str:

@@ -324,64 +324,47 @@ def score_style(apartment, config):
             'details': style_data.get('details', {})
         }
     
-    # Si pas de style_analysis, essayer de le générer UNIQUEMENT si les photos sont déjà en cache
-    # Ne pas déclencher de nouvelles analyses pour éviter les appels API coûteux
-    try:
-        from analyze_apartment_style import ApartmentStyleAnalyzer
-        from cache_api import get_cache
+    # RÈGLE GÉNÉRALE: NE JAMAIS lancer d'analyse automatique
+    # Si pas de style_analysis, retourner un score par défaut (tier3 = 0 points)
+    if not style_analysis:
+        return {
+            'score': tier_config['tier3']['score'],
+            'tier': 'tier3',
+            'justification': 'Données d\'analyse de style non disponibles (analyse non effectuée)',
+            'details': {}
+        }
+    
+    # Si style_analysis existe, continuer avec le traitement
+    style_data = style_analysis.get('style', {})
+    style_type = style_data.get('type', '').lower()
+    
+    if style_type:
+        # Tier1: Ancien (Haussmannien) = 20 pts
+        tier1_styles = [s.lower() for s in tier_config['tier1']['styles']]
+        if style_type in tier1_styles or 'haussmann' in style_type:
+            return {
+                'score': tier_config['tier1']['score'],
+                'tier': 'tier1',
+                'justification': style_data.get('justification', f"Style ancien: {style_type}"),
+                'details': style_data.get('details', {})
+            }
         
-        cache = get_cache()
-        photos = apartment.get('photos', [])
+        # Tier2: Atypique = 10 pts
+        if 'atypique' in style_type or 'loft' in style_type:
+            return {
+                'score': tier_config['tier2']['score'],
+                'tier': 'tier2',
+                'justification': style_data.get('justification', f"Style atypique: {style_type}"),
+                'details': style_data.get('details', {})
+            }
         
-        # Vérifier si au moins une photo est déjà en cache
-        photos_in_cache = False
-        if photos:
-            # Vérifier si la première photo a une analyse en cache
-            first_photo_url = photos[0] if isinstance(photos[0], str) else photos[0].get('url', '')
-            if first_photo_url:
-                cached_style = cache.get('style_photo', first_photo_url)
-                if cached_style:
-                    photos_in_cache = True
-        
-        # Seulement analyser si les photos sont déjà en cache (pour éviter les appels API)
-        if photos_in_cache or style_analysis:
-            style_analyzer = ApartmentStyleAnalyzer()
-            style_analysis = style_analyzer.analyze_apartment_photos_from_data(apartment)
-            
-            if style_analysis:
-                style_data = style_analysis.get('style', {})
-                style_type = style_data.get('type', '').lower()
-                
-                if style_type:
-                    # Tier1: Ancien (Haussmannien) = 20 pts
-                    tier1_styles = [s.lower() for s in tier_config['tier1']['styles']]
-                    if style_type in tier1_styles or 'haussmann' in style_type:
-                        return {
-                            'score': tier_config['tier1']['score'],
-                            'tier': 'tier1',
-                            'justification': style_data.get('justification', f"Style ancien: {style_type}"),
-                            'details': style_data.get('details', {})
-                        }
-                    
-                    # Tier2: Atypique = 10 pts
-                    if 'atypique' in style_type or 'loft' in style_type:
-                        return {
-                            'score': tier_config['tier2']['score'],
-                            'tier': 'tier2',
-                            'justification': style_data.get('justification', f"Style atypique: {style_type}"),
-                            'details': style_data.get('details', {})
-                        }
-                    
-                    # Tier3: Neuf = 0 pts
-                    return {
-                        'score': tier_config['tier3']['score'],
-                        'tier': 'tier3',
-                        'justification': style_data.get('justification', f"Style neuf: {style_type}"),
-                        'details': style_data.get('details', {})
-                    }
-    except Exception as e:
-        # Fallback sur méthode ancienne si erreur
-        pass
+        # Tier3: Neuf = 0 pts
+        return {
+            'score': tier_config['tier3']['score'],
+            'tier': 'tier3',
+            'justification': style_data.get('justification', f"Style neuf: {style_type}"),
+            'details': style_data.get('details', {})
+        }
     
     # Fallback: méthode ancienne avec analyse texte seule
     description = apartment.get('description', '').lower()
@@ -642,52 +625,15 @@ def score_large_piece_vie(apartment, config):
                 confidence = salon_data.get('confidence', 0)
                 method_used = 'style_analysis_cache'
         
-        # Si toujours pas trouvé, analyser les photos
+        # RÈGLE GÉNÉRALE: NE JAMAIS lancer d'analyse automatique
+        # Si toujours pas trouvé, retourner un score par défaut (tier3 = 0 points)
         if salon_size is None:
-            photos = apartment.get('photos', [])
-            photos_urls = []
-            if photos:
-                for photo in photos:
-                    if isinstance(photo, dict):
-                        photos_urls.append(photo.get('url', ''))
-                    elif isinstance(photo, str):
-                        photos_urls.append(photo)
-            
-            if not photos_urls:
-                return {
-                    'score': 0,
-                    'tier': 'tier3',
-                    'justification': 'Aucune photo disponible et taille salon non mentionnée dans la description',
-                    'details': {}
-                }
-            
-            try:
-                from analyze_photos import PhotoAnalyzer
-                analyzer = PhotoAnalyzer()
-                salon_analysis = analyzer.analyze_photos_salon_size(photos_urls, style_analysis=style_analysis)
-                
-                salon_size = salon_analysis.get('salon_size_estimate')
-                salon_category = salon_analysis.get('salon_category')
-                confidence = salon_analysis.get('confidence', 0)
-                method_used = 'photo_analysis'
-                
-                if salon_size is None:
-                    return {
-                        'score': 0,
-                        'tier': 'tier3',
-                        'justification': salon_analysis.get('justification', 'Salon non identifié sur les photos'),
-                        'details': {
-                            'salon_analysis': salon_analysis,
-                            'method': method_used
-                        }
-                    }
-            except Exception as e:
-                return {
-                    'score': 0,
-                    'tier': 'tier3',
-                    'justification': f'Erreur analyse salon: {str(e)}',
-                    'details': {}
-                }
+            return {
+                'score': 0,
+                'tier': 'tier3',
+                'justification': 'Données de taille salon non disponibles (analyse non effectuée)',
+                'details': {}
+            }
     
     # Calculer le pourcentage salon/surface totale
     pourcentage_salon = (salon_size / surface_totale) * 100 if surface_totale > 0 else 0
@@ -743,113 +689,128 @@ def score_hauteur_plafond(apartment, config):
     - Tier2 (moyen): 2.50-2.80m (moyenne)
     - Tier3 (bad): <2.50m (basse)
     """
-    # Analyser les photos pour estimer la hauteur sous plafond
-    photos = apartment.get('photos', [])
-    photos_urls = []
-    if photos:
-        for photo in photos:
-            if isinstance(photo, dict):
-                photos_urls.append(photo.get('url', ''))
-            elif isinstance(photo, str):
-                photos_urls.append(photo)
+    # PRIORITÉ: Vérifier si les données de hauteur existent déjà dans l'appartement
+    analyses = apartment.get('analyses', {})
+    hauteur_data = analyses.get('hauteur_plafond', {})
     
-    if not photos_urls:
+    # Vérifier aussi dans style_analysis si disponible
+    if not hauteur_data or not hauteur_data.get('hauteur_estimate'):
+        style_analysis = apartment.get('style_analysis', {})
+        if isinstance(style_analysis, dict):
+            hauteur_style = style_analysis.get('hauteur_plafond', {})
+            if isinstance(hauteur_style, dict) and hauteur_style.get('value'):
+                # Utiliser les données depuis style_analysis
+                hauteur_estimate = hauteur_style.get('value')
+                hauteur_category = None
+                # Déterminer la catégorie depuis la valeur
+                if hauteur_estimate > 3.0:
+                    hauteur_category = 'tres_haute'
+                elif hauteur_estimate >= 2.80:
+                    hauteur_category = 'haute'
+                elif hauteur_estimate >= 2.50:
+                    hauteur_category = 'moyenne'
+                else:
+                    hauteur_category = 'basse'
+                
+                confidence = hauteur_style.get('confidence', 0.5)
+                hauteur_analysis = {
+                    'hauteur_estimate': hauteur_estimate,
+                    'hauteur_category': hauteur_category,
+                    'confidence': confidence,
+                    'justification': hauteur_style.get('details', f'Hauteur sous plafond estimée: {hauteur_estimate}m')
+                }
+            else:
+                hauteur_analysis = None
+        else:
+            hauteur_analysis = None
+    else:
+        # Utiliser les données depuis analyses.hauteur_plafond
+        hauteur_estimate = hauteur_data.get('hauteur_estimate')
+        hauteur_category = hauteur_data.get('hauteur_category')
+        confidence = hauteur_data.get('confidence', 0.5)
+        hauteur_analysis = {
+            'hauteur_estimate': hauteur_estimate,
+            'hauteur_category': hauteur_category,
+            'confidence': confidence,
+            'justification': hauteur_data.get('justification', f'Hauteur sous plafond estimée: {hauteur_estimate}m')
+        }
+    
+    # RÈGLE GÉNÉRALE: NE JAMAIS lancer d'analyse automatique
+    # Si les données n'existent pas, retourner un score par défaut (tier3 = 0 points)
+    if not hauteur_analysis or hauteur_analysis.get('hauteur_estimate') is None:
         return {
             'score': 0,
             'tier': 'tier3',
-            'justification': 'Aucune photo disponible pour analyser la hauteur sous plafond',
+            'justification': 'Données de hauteur sous plafond non disponibles (analyse non effectuée)',
             'details': {}
         }
     
-    try:
-        from analyze_photos import PhotoAnalyzer
-        analyzer = PhotoAnalyzer()
-        hauteur_analysis = analyzer.analyze_photos_hauteur_plafond(photos_urls)
-        
-        # Vérifier que l'analyse a retourné un résultat valide
-        if not hauteur_analysis or not isinstance(hauteur_analysis, dict):
-            return {
-                'score': 0,
-                'tier': 'tier3',
-                'justification': 'Erreur: analyse de hauteur plafond a retourné un résultat invalide',
-                'details': {}
-            }
-        
-        hauteur_estimate = hauteur_analysis.get('hauteur_estimate')
-        hauteur_category = hauteur_analysis.get('hauteur_category')
-        confidence = hauteur_analysis.get('confidence', 0)
-        
-        if hauteur_estimate is None:
-            return {
-                'score': 0,
-                'tier': 'tier3',
-                'justification': hauteur_analysis.get('justification', 'Hauteur sous plafond non estimable depuis les photos'),
-                'details': {
-                    'hauteur_analysis': hauteur_analysis
-                }
-            }
-        
-        # Vérifier que hauteur_estimate est un nombre valide
-        try:
-            hauteur_estimate = float(hauteur_estimate)
-        except (ValueError, TypeError):
-            return {
-                'score': 0,
-                'tier': 'tier3',
-                'justification': f'Erreur: hauteur invalide ({hauteur_estimate})',
-                'details': {
-                    'hauteur_analysis': hauteur_analysis
-                }
-            }
-        
-        # Déterminer le tier selon la hauteur
-        # Tier1: >2.80m (haute ou très haute) = 10 points
-        # Tier2: 2.50-2.80m (moyenne) = 5 points
-        # Tier3: <2.50m (basse) = 0 points
-        
-        if hauteur_estimate > 2.80:
-            tier = 'tier1'
-            score = 10  # Score max pour hauteur élevée
-            justification = f"Hauteur sous plafond élevée: {hauteur_estimate:.2f}m ({hauteur_category})"
-        elif hauteur_estimate >= 2.50:
-            tier = 'tier2'
-            score = 5  # Score moyen
-            justification = f"Hauteur sous plafond moyenne: {hauteur_estimate:.2f}m ({hauteur_category})"
-        else:
-            tier = 'tier3'
-            score = 0  # Score faible
-            justification = f"Hauteur sous plafond basse: {hauteur_estimate:.2f}m ({hauteur_category})"
-        
+    # Extraire les valeurs depuis hauteur_analysis (qu'il vienne du cache ou de l'analyse)
+    hauteur_estimate = hauteur_analysis.get('hauteur_estimate')
+    hauteur_category = hauteur_analysis.get('hauteur_category')
+    confidence = hauteur_analysis.get('confidence', 0)
+    
+    # Vérifier que l'analyse a retourné un résultat valide
+    if not hauteur_analysis or not isinstance(hauteur_analysis, dict):
         return {
-            'score': score,
-            'tier': tier,
-            'justification': justification,
+            'score': 0,
+            'tier': 'tier3',
+            'justification': 'Erreur: analyse de hauteur plafond a retourné un résultat invalide',
+            'details': {}
+        }
+    
+    if hauteur_estimate is None:
+        return {
+            'score': 0,
+            'tier': 'tier3',
+            'justification': hauteur_analysis.get('justification', 'Hauteur sous plafond non estimable depuis les photos'),
             'details': {
-                'hauteur_estimate': hauteur_estimate,
-                'hauteur_category': hauteur_category,
-                'confidence': confidence,
                 'hauteur_analysis': hauteur_analysis
             }
         }
-        
-    except ImportError as e:
+    
+    # Vérifier que hauteur_estimate est un nombre valide
+    try:
+        hauteur_estimate = float(hauteur_estimate)
+    except (ValueError, TypeError):
         return {
             'score': 0,
             'tier': 'tier3',
-            'justification': f'Erreur import PhotoAnalyzer: {str(e)}',
-            'details': {}
+            'justification': f'Erreur: hauteur invalide ({hauteur_estimate})',
+            'details': {
+                'hauteur_analysis': hauteur_analysis
+            }
         }
-    except Exception as e:
-        import traceback
-        error_trace = traceback.format_exc()
-        print(f"⚠️ Erreur dans score_hauteur_plafond: {e}")
-        print(f"   Traceback: {error_trace}")
-        return {
-            'score': 0,
-            'tier': 'tier3',
-            'justification': f'Erreur analyse hauteur plafond: {str(e)}',
-            'details': {}
+    
+    # Déterminer le tier selon la hauteur
+    # Tier1: >2.80m (haute ou très haute) = 10 points
+    # Tier2: 2.50-2.80m (moyenne) = 5 points
+    # Tier3: <2.50m (basse) = 0 points
+    
+    if hauteur_estimate > 2.80:
+        tier = 'tier1'
+        score = 10  # Score max pour hauteur élevée
+        justification = f"Hauteur sous plafond élevée: {hauteur_estimate:.2f}m ({hauteur_category})"
+    elif hauteur_estimate >= 2.50:
+        tier = 'tier2'
+        score = 5  # Score moyen
+        justification = f"Hauteur sous plafond moyenne: {hauteur_estimate:.2f}m ({hauteur_category})"
+    else:
+        tier = 'tier3'
+        score = 0  # Score faible
+        justification = f"Hauteur sous plafond basse: {hauteur_estimate:.2f}m ({hauteur_category})"
+    
+    return {
+        'score': score,
+        'tier': tier,
+        'justification': justification,
+        'details': {
+            'hauteur_estimate': hauteur_estimate,
+            'hauteur_category': hauteur_category,
+            'confidence': confidence,
+            'hauteur_analysis': hauteur_analysis
         }
+    }
 
 
 def score_cuisine(apartment, config):
@@ -889,99 +850,14 @@ def score_cuisine(apartment, config):
                 }
             }
     
-    # Sinon, analyser depuis le texte et les photos
-    try:
-        from extract_cuisine_text import CuisineTextExtractor
-        extractor = CuisineTextExtractor()
-        
-        description = apartment.get('description', '')
-        caracteristiques = apartment.get('caracteristiques', '')
-        photos = apartment.get('photos', [])
-        
-        # Extraire les URLs des photos si liste de dicts
-        photos_urls = []
-        if photos:
-            for photo in photos:
-                if isinstance(photo, dict):
-                    photos_urls.append(photo.get('url', ''))
-                elif isinstance(photo, str):
-                    photos_urls.append(photo)
-        
-        # Vérifier si style_analysis existe et contient déjà les données cuisine
-        style_analysis = apartment.get('style_analysis')
-        
-        cuisine_result = extractor.extract_cuisine_complete(
-            description, caracteristiques, photos_urls, style_analysis=style_analysis
-        )
-        
-        cuisine_ouverte = cuisine_result.get('ouverte')
-        validation_status = cuisine_result.get('validation_status', '')
-        
-        # Si cuisine non analysée (ouverte est None) → tier2 (note moyenne)
-        if cuisine_ouverte is None:
-            return {
-                'score': tier_config['tier2']['score'],
-                'tier': 'tier2',
-                'justification': cuisine_result.get('justification', "Cuisine non analysée - note moyenne par défaut"),
-                'details': {
-                    'confidence': cuisine_result.get('confidence', 0),
-                    'photo_validation': cuisine_result.get('photo_validation'),
-                    'validation_status': validation_status
-                }
-            }
-        
-        # tier1: ouverte (10pts) - analysée et confirmée ouverte
-        if cuisine_ouverte:
-            return {
-                'score': tier_config['tier1']['score'],
-                'tier': 'tier1',
-                'justification': cuisine_result.get('justification', "Cuisine ouverte"),
-                'details': {
-                    'confidence': cuisine_result.get('confidence', 0),
-                    'photo_validation': cuisine_result.get('photo_validation'),
-                    'validation_status': validation_status
-                }
-            }
-        
-        # tier3: fermée (0pts) - analysée et confirmée fermée
-        return {
-            'score': tier_config['tier3']['score'],
-            'tier': 'tier3',
-            'justification': cuisine_result.get('justification', "Cuisine fermée"),
-            'details': {
-                'confidence': cuisine_result.get('confidence', 0),
-                'photo_validation': cuisine_result.get('photo_validation'),
-                'validation_status': validation_status
-            }
-        }
-    except Exception as e:
-        # Fallback sur méthode ancienne si erreur
-        style_analysis = apartment.get('style_analysis', {})
-        cuisine_data = style_analysis.get('cuisine', {})
-        cuisine_ouverte = cuisine_data.get('ouverte')
-        
-        # Si cuisine non analysée (ouverte est None) → note moyenne par défaut
-        if cuisine_ouverte is None:
-            return {
-                'score': tier_config['tier2']['score'],
-                'tier': 'tier2',
-                'justification': "Cuisine non analysée - note moyenne par défaut"
-            }
-        
-        # tier1: ouverte
-        if cuisine_ouverte:
-            return {
-                'score': tier_config['tier1']['score'],
-                'tier': 'tier1',
-                'justification': "Cuisine ouverte"
-            }
-        
-        # tier3: fermée
-        return {
-            'score': tier_config['tier3']['score'],
-            'tier': 'tier3',
-            'justification': "Cuisine fermée"
-        }
+    # RÈGLE GÉNÉRALE: NE JAMAIS lancer d'analyse automatique
+    # Si les données n'existent pas, retourner un score par défaut (tier2 = note moyenne)
+    return {
+        'score': tier_config['tier2']['score'],
+        'tier': 'tier2',
+        'justification': 'Données d\'analyse de cuisine non disponibles (analyse non effectuée)',
+        'details': {}
+    }
 
 
 def calculate_bonus_malus(apartment, config):
@@ -1048,89 +924,14 @@ def score_baignoire(apartment, config):
                 'details': details
             }
     
-    # Sinon, analyser depuis le texte et les photos
-    try:
-        from extract_baignoire import BaignoireExtractor
-        extractor = BaignoireExtractor()
-        
-        description = apartment.get('description', '')
-        caracteristiques = apartment.get('caracteristiques', '')
-        photos = apartment.get('photos', [])
-        
-        # Extraire les URLs des photos si liste de dicts
-        photos_urls = []
-        if photos:
-            for photo in photos:
-                if isinstance(photo, dict):
-                    photos_urls.append(photo.get('url', ''))
-                elif isinstance(photo, str):
-                    photos_urls.append(photo)
-        
-        # Vérifier si style_analysis existe et contient déjà les données baignoire
-        style_analysis = apartment.get('style_analysis')
-        
-        baignoire_result = extractor.extract_baignoire_complete(
-            description, caracteristiques, photos_urls, style_analysis=style_analysis
-        )
-        
-        has_baignoire = baignoire_result.get('has_baignoire')
-        score_baignoire_val = baignoire_result.get('score', 0)
-        tier_baignoire = baignoire_result.get('tier', 'tier3')
-        validation_status = baignoire_result.get('details', {}).get('validation_status', '')
-        justification = baignoire_result.get('justification', '')
-        
-        # Si baignoire non analysée (has_baignoire est None) → tier2 (note moyenne)
-        if has_baignoire is None:
-            return {
-                'score': tier_config['tier2']['score'],
-                'tier': 'tier2',
-                'justification': justification or "Salle de bain non analysée - note moyenne par défaut",
-                'details': baignoire_result.get('details', {})
-            }
-        
-        # tier1: baignoire présente = 10pts - analysée et confirmée présente
-        if has_baignoire:
-            return {
-                'score': tier_config['tier1']['score'],
-                'tier': 'tier1',
-                'justification': justification or 'Baignoire détectée',
-                'details': baignoire_result.get('details', {})
-            }
-        
-        # tier3: pas de baignoire = 0pts - analysée et confirmée absente
-        return {
-            'score': tier_config['tier3']['score'],
-            'tier': 'tier3',
-            'justification': justification or 'Pas de baignoire détectée',
-            'details': baignoire_result.get('details', {})
-        }
-    except Exception as e:
-        # Fallback sur méthode ancienne si erreur
-        from criteria.baignoire import format_baignoire
-        formatted = format_baignoire(apartment)
-        has_baignoire = formatted.get('main_value') == 'Oui'
-        main_value = formatted.get('main_value', '')
-        
-        if has_baignoire:
-            return {
-                'score': tier_config['tier1']['score'],
-                'tier': 'tier1',
-                'justification': 'Baignoire détectée'
-            }
-        
-        # Si pas de données ou non spécifiée → note moyenne par défaut
-        if not main_value or main_value == 'Non spécifié':
-            return {
-                'score': tier_config['tier2']['score'],
-                'tier': 'tier2',
-                'justification': 'Salle de bain non analysée - note moyenne par défaut'
-            }
-        
-        return {
-            'score': tier_config['tier3']['score'],
-            'tier': 'tier3',
-            'justification': 'Pas de baignoire détectée'
-        }
+    # RÈGLE GÉNÉRALE: NE JAMAIS lancer d'analyse automatique
+    # Si les données n'existent pas, retourner un score par défaut (tier2 = note moyenne)
+    return {
+        'score': tier_config['tier2']['score'],
+        'tier': 'tier2',
+        'justification': 'Données d\'analyse de baignoire non disponibles (analyse non effectuée)',
+        'details': {}
+    }
 
 
 def score_ascenseur(apartment, config):

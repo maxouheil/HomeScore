@@ -194,6 +194,12 @@ const CRITERIA_OPTIONS = [
     name: 'Neuf',
     description: 'J\'aime les murs droits et les prises qui fonctionnent',
     icon: '✨'
+  },
+  {
+    id: 'calme',
+    name: 'Calme',
+    description: 'Un quartier tranquille pour se reposer',
+    icon: '🔇'
   }
 ]
 
@@ -217,6 +223,7 @@ function AlertCreator({ isOpen, onClose, onSuccess, editingAlert }) {
   const [quartierInput, setQuartierInput] = useState('')
   const [quartierSuggestions, setQuartierSuggestions] = useState([])
   const [showSuggestions, setShowSuggestions] = useState(false)
+  const [stats, setStats] = useState(null)
 
   // Fonction pour obtenir le numéro de ligne d'une station de métro
   const getMetroLine = useCallback((stationName) => {
@@ -366,12 +373,42 @@ function AlertCreator({ isOpen, onClose, onSuccess, editingAlert }) {
     }
   }, [isOpen, editingAlert, getMetroLine])
 
+  // Charger les statistiques quand le composant s'ouvre
+  useEffect(() => {
+    if (isOpen) {
+      const loadStats = async () => {
+        try {
+          const response = await fetch('/api/apartments/stats')
+          if (response.ok) {
+            const data = await response.json()
+            setStats(data)
+          }
+        } catch (err) {
+          console.error('Erreur lors du chargement des statistiques:', err)
+        }
+      }
+      loadStats()
+    }
+  }, [isOpen])
+
   // Calculer les critères disponibles (non sélectionnés) - mémorisé pour éviter les re-renders
   const availableCriteria = useMemo(() => {
     return CRITERIA_OPTIONS.filter(
       criterion => !selectedCriteria.find(selected => selected.id === criterion.id)
     )
   }, [selectedCriteria])
+
+  // Fonction pour obtenir le nombre d'appartements avec un critère
+  const getCriterionCount = (criterionId) => {
+    if (!stats) return null
+    if (criterionId === 'calme') {
+      return stats.apartments_with_calme
+    }
+    if (criterionId === 'large_piece_vie') {
+      return stats.apartments_with_piece_vie
+    }
+    return null
+  }
 
   // Gérer le début du drag depuis la liste disponible
   const handleDragStart = (e, criterion) => {
@@ -1233,7 +1270,14 @@ function AlertCreator({ isOpen, onClose, onSuccess, editingAlert }) {
                 <div className="available-criterion-content">
                   <span className="available-criterion-icon">{criterion.icon}</span>
                   <div className="available-criterion-info">
-                    <span className="available-criterion-name">{criterion.name}</span>
+                    <div className="available-criterion-name-wrapper">
+                      <span className="available-criterion-name">{criterion.name}</span>
+                      {getCriterionCount(criterion.id) !== null && (
+                        <span className="available-criterion-count">
+                          {getCriterionCount(criterion.id)} appartements
+                        </span>
+                      )}
+                    </div>
                     <span className="available-criterion-description">{criterion.description}</span>
                   </div>
                 </div>
