@@ -200,15 +200,7 @@ function round(value, decimals) {
   return Math.round(value * Math.pow(10, decimals)) / Math.pow(10, decimals)
 }
 
-function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
-  // Debug: vérifier que alertCriteria est bien passé
-  if (apartment?.alert_criteria_scores && !alertCriteria) {
-    console.warn('⚠️ ApartmentCard: alert_criteria_scores présent mais alertCriteria est null!', {
-      apartment_id: apartment.id,
-      has_alert_criteria_scores: !!apartment.alert_criteria_scores,
-      alertCriteria
-    })
-  }
+function ApartmentCard({ apartment, alertCriteria = null }) {
   const apartmentInfo = useMemo(() => {
     const prix = apartment.prix || ''
     const prixK = formatPrixK(prix)
@@ -381,24 +373,9 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
   
   // Utiliser le score calculé (somme des critères) si disponible, sinon alert_score du backend, sinon megaScore
   const displayScore = useMemo(() => {
-    // DEBUG: Log pour comprendre le problème
-    console.log(`🔍 ApartmentCard ${apartment.id}:`, {
-      has_alert_criteria_scores: !!apartment.alert_criteria_scores,
-      has_alert_score: apartment.alert_score !== undefined,
-      alert_score: apartment.alert_score,
-      has_alert_tier: !!apartment.alert_tier,
-      calculatedAlertScore,
-      has_alertCriteria: !!alertCriteria
-    })
-    
     // PRIORITÉ ABSOLUE: Si on a alert_criteria_scores, TOUJOURS utiliser le calcul local (sur 5)
     // C'est la source de vérité car elle contient les scores individuels à jour (1pt, 0.5pt, 0pt)
     if (calculatedAlertScore !== null && calculatedAlertScore !== undefined) {
-      // DEBUG: Vérifier que le score calculé est bien sur 5
-      if (calculatedAlertScore > 5) {
-        console.warn(`⚠️ ApartmentCard: calculatedAlertScore ${calculatedAlertScore} > 5 pour appartement ${apartment.id}`)
-      }
-      console.log(`✅ ApartmentCard ${apartment.id}: Utilisation calculatedAlertScore = ${calculatedAlertScore}`)
       return calculatedAlertScore
     }
     
@@ -414,7 +391,6 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
         }
       }
       if (total > 0 || total === 0) { // Afficher même si 0
-        console.log(`✅ ApartmentCard ${apartment.id}: Utilisation recalcul manuel = ${round(total, 2)}`)
         return round(total, 2)
       }
     }
@@ -423,29 +399,21 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
     // Le backend renvoie maintenant toujours sur 5
     // Ne pas vérifier alertCriteria ici - si alert_score existe, c'est qu'on est dans une vue d'alerte
     if (apartment.alert_score !== undefined) {
-      // DEBUG: Vérifier que le score est bien sur 5
+      // Ancien système (sur 100), convertir en divisant par 20 si nécessaire
       if (apartment.alert_score > 5) {
-        console.warn(`⚠️ ApartmentCard: alert_score ${apartment.alert_score} > 5 pour appartement ${apartment.id}, conversion nécessaire`)
-        // Ancien système (sur 100), convertir en divisant par 20
-        const converted = round(apartment.alert_score / 20, 2)
-        console.log(`✅ ApartmentCard ${apartment.id}: Utilisation alert_score converti = ${converted}`)
-        return converted
+        return round(apartment.alert_score / 20, 2)
       }
-      // Sinon, c'est déjà sur 5 (ou moins)
-      console.log(`✅ ApartmentCard ${apartment.id}: Utilisation alert_score direct = ${apartment.alert_score}`)
       return apartment.alert_score
     }
     
     // Si aucune alerte n'est sélectionnée (pas d'alertCriteria passé en prop), ne pas afficher de score
     // Sur la page d'accueil sans critères sélectionnés, les appartements ne doivent pas avoir de mega score
     if (!alertCriteria) {
-      console.log(`❌ ApartmentCard ${apartment.id}: Pas d'alertCriteria, retour undefined`)
       return undefined
     }
     
     // Sinon, utiliser megaScore (score standard) - SEULEMENT si ce n'est PAS une alerte
     // Si on est dans la vue Alertes, on ne devrait jamais arriver ici
-    console.log(`✅ ApartmentCard ${apartment.id}: Utilisation megaScore = ${megaScore}`)
     return megaScore
   }, [calculatedAlertScore, apartment.alert_score, apartment.alert_criteria_scores, apartment.alert_tier, apartment.id, megaScore, alertCriteria])
   
@@ -453,10 +421,6 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
   const maxScore = useMemo(() => {
     // Si on a des critères d'alerte, un tier d'alerte, ou un alert_score, c'est une alerte (score sur 5)
     if (apartment.alert_criteria_scores || apartment.alert_tier || apartment.alert_score !== undefined) {
-      // DEBUG: Vérifier que maxScore est bien 5
-      if (apartment.alert_score !== undefined && apartment.alert_score > 5) {
-        console.warn(`⚠️ ApartmentCard: alert_score ${apartment.alert_score} > 5 mais maxScore devrait être 5 pour appartement ${apartment.id}`)
-      }
       return 5
     }
     // Sinon, c'est un score standard (megaScore sur 90)
@@ -490,6 +454,111 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
     return photoUrls.slice(0, 10) // Limiter à 10 photos
   }, [apartment])
   
+  // Extraire l'index de la photo détectée (cuisine ou baignoire) pour initialiser le Carousel
+  const detectedPhotoIndex = useMemo(() => {
+    // Chercher d'abord pour la cuisine
+    let detectedPhotos = []
+    
+    // Source 1: scores_detaille.cuisine.details.photo_validation.photo_result.detected_photos
+    const cuisineScore = apartment.scores_detaille?.cuisine || {}
+    const cuisineDetails = cuisineScore.details || {}
+    const cuisinePhotoValidation = cuisineDetails.photo_validation || {}
+    const cuisinePhotoResult = cuisinePhotoValidation.photo_result || {}
+    if (cuisinePhotoResult.detected_photos && Array.isArray(cuisinePhotoResult.detected_photos)) {
+      detectedPhotos.push(...cuisinePhotoResult.detected_photos)
+    }
+    
+    // Source 2: style_analysis.cuisine.detected_photos
+    const styleCuisine = apartment.style_analysis?.cuisine || {}
+    if (styleCuisine.detected_photos && Array.isArray(styleCuisine.detected_photos)) {
+      detectedPhotos.push(...styleCuisine.detected_photos)
+    }
+    
+    // Source 3: formatted_data.cuisine.detected_photos
+    const cuisineFormatted = apartment.formatted_data?.cuisine || {}
+    if (cuisineFormatted.detected_photos && Array.isArray(cuisineFormatted.detected_photos)) {
+      detectedPhotos.push(...cuisineFormatted.detected_photos)
+    }
+    
+    // Si pas de photo détectée pour la cuisine, chercher pour la baignoire
+    if (detectedPhotos.length === 0) {
+      const baignoireScore = apartment.scores_detaille?.baignoire || {}
+      const baignoireDetails = baignoireScore.details || {}
+      const baignoirePhotoValidation = baignoireDetails.photo_validation || {}
+      const baignoirePhotoResult = baignoirePhotoValidation.photo_result || {}
+      if (baignoirePhotoResult.detected_photos && Array.isArray(baignoirePhotoResult.detected_photos)) {
+        detectedPhotos.push(...baignoirePhotoResult.detected_photos)
+      }
+      
+      // Source 2: style_analysis.baignoire.detected_photos
+      const styleBaignoire = apartment.style_analysis?.baignoire || {}
+      if (styleBaignoire.detected_photos && Array.isArray(styleBaignoire.detected_photos)) {
+        detectedPhotos.push(...styleBaignoire.detected_photos)
+      }
+      
+      // Source 3: formatted_data.baignoire.detected_photos
+      const baignoireFormatted = apartment.formatted_data?.baignoire || {}
+      if (baignoireFormatted.detected_photos && Array.isArray(baignoireFormatted.detected_photos)) {
+        detectedPhotos.push(...baignoireFormatted.detected_photos)
+      }
+      
+      // Source 4: baignoire_data.detected_photos
+      const baignoireData = apartment.baignoire_data || {}
+      if (baignoireData.detected_photos && Array.isArray(baignoireData.detected_photos)) {
+        detectedPhotos.push(...baignoireData.detected_photos)
+      }
+    }
+    
+    // Prendre le premier numéro unique
+    const uniqueDetectedPhotos = [...new Set(detectedPhotos)]
+    if (uniqueDetectedPhotos.length > 0) {
+      let photoIndex = uniqueDetectedPhotos[0]
+      
+      // Normaliser: si c'est un index 0-based (0-19), utiliser tel quel
+      // Si c'est un numéro 1-based (1-20), convertir en 0-based
+      if (typeof photoIndex === 'number') {
+        if (photoIndex >= 1 && photoIndex <= 20) {
+          // Probablement 1-based, convertir en 0-based
+          photoIndex = photoIndex - 1
+        }
+        // Si photoIndex est déjà 0-based (0-19), utiliser tel quel
+        
+        // S'assurer que l'index est valide par rapport au nombre de photos
+        if (photoIndex >= 0 && photoIndex < photos.length) {
+          return photoIndex
+        }
+      }
+    }
+    
+    // Fallback: extraire le numéro de photo depuis les descriptions si detected_photos n'est pas disponible
+    // Chercher dans les indices de la cuisine (réutiliser cuisineFormatted déclaré plus haut)
+    const cuisineIndices = cuisineFormatted.indices || ''
+    if (cuisineIndices) {
+      const cuisineMatch = cuisineIndices.match(/photo\s*(\d+)|image\s*(\d+)/i)
+      if (cuisineMatch) {
+        const photoNum = parseInt(cuisineMatch[1] || cuisineMatch[2], 10)
+        if (photoNum >= 1 && photoNum <= photos.length) {
+          return photoNum - 1 // Convertir 1-based en 0-based
+        }
+      }
+    }
+    
+    // Chercher dans les indices de la baignoire
+    const baignoireFormattedFallback = apartment.formatted_data?.baignoire || {}
+    const baignoireIndices = baignoireFormattedFallback.indices || ''
+    if (baignoireIndices) {
+      const baignoireMatch = baignoireIndices.match(/photo\s*(\d+)|image\s*(\d+)/i)
+      if (baignoireMatch) {
+        const photoNum = parseInt(baignoireMatch[1] || baignoireMatch[2], 10)
+        if (photoNum >= 1 && photoNum <= photos.length) {
+          return photoNum - 1 // Convertir 1-based en 0-based
+        }
+      }
+    }
+    
+    return null
+  }, [apartment, photos.length])
+  
   const handleClick = () => {
     if (apartment.url) {
       window.open(apartment.url, '_blank')
@@ -500,69 +569,13 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
   
   return (
     <div className="scorecard" onClick={handleClick}>
-      <Carousel photos={photos} carouselId={carouselId} score={showScore ? displayScore : undefined} maxScore={maxScore} apartment={apartment} alertCriteria={alertCriteria} />
+      <Carousel photos={photos} carouselId={carouselId} score={displayScore} maxScore={maxScore} apartment={apartment} alertCriteria={alertCriteria} initialIndex={detectedPhotoIndex} />
       <div className="apartment-info">
         <div className="apartment-title">{apartmentInfoWithEtage.title}</div>
         <div className="apartment-subtitle">{apartmentInfoWithEtage.subtitle}</div>
         
         {/* Critères */}
         {(() => {
-          // Dans la vue "all apartments" (showScore={false}), vérifier les données enrichies
-          if (!showScore) {
-            // Vérifier si l'appartement a des données enrichies (formatted_data)
-            const formattedData = apartment.formatted_data || {}
-            const hasEnrichedData = Object.keys(formattedData).length > 0 && 
-                                   Object.values(formattedData).some(data => 
-                                     data && (data.indices || data.main_value)
-                                   )
-            
-            // Si pas de données enrichies, afficher les données manuelles par défaut
-            if (!hasEnrichedData) {
-              const manualCriteria = formatManualDataCriteria(apartment, etage)
-              return (
-                <>
-                  {manualCriteria.map((criterion, index) => (
-                    <Criterion
-                      key={criterion.name}
-                      name={criterion.name}
-                      score={0}
-                      tier="tier3"
-                      customTitle={criterion.title}
-                      customDescription={criterion.description}
-                      indices={criterion.indices}
-                      isGray={true}
-                      noBorderBottom={index < manualCriteria.length - 1}
-                    />
-                  ))}
-                </>
-              )
-            }
-            
-            // Sinon, afficher les critères formatés même sans score
-            // (le code continue après cette condition)
-          }
-          
-          // Vérifier si l'appartement a un score (pour les vues avec score)
-          const hasScore = apartment.alert_score !== undefined || 
-                           apartment.alert_criteria_scores || 
-                           apartment.scores_detaille
-          
-          // Si pas de score ET qu'on affiche les scores, afficher "Appartement sans score"
-          if (showScore && !hasScore) {
-            return (
-              <div style={{
-                padding: '16px',
-                textAlign: 'center',
-                color: '#666',
-                fontSize: '14px',
-                fontStyle: 'italic',
-                borderTop: '1px solid #eee'
-              }}>
-                Appartement sans score
-              </div>
-            )
-          }
-          
           // Si c'est un résultat d'alerte, afficher d'abord les critères de l'alerte
           if (apartment.alert_criteria_scores && alertCriteria) {
             const alertCriteriaScores = apartment.alert_criteria_scores
@@ -583,7 +596,7 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
               'ensoleillement': { key: 'ensoleillement', name: 'Exposition', alertKeys: ['luminosite'], alwaysShow: false },
               'cuisine': { key: 'cuisine', name: 'Cuisine', alertKeys: ['cuisine_ouverte'], alwaysShow: false },
               'baignoire': { key: 'baignoire', name: 'Baignoire', alertKeys: ['baignoire'], alwaysShow: true },
-              'calme': { key: 'calme', name: 'Calme', alertKeys: [], alwaysShow: true },
+              'hauteur_plafond': { key: 'hauteur_plafond', name: 'Hauteur plafond', alertKeys: ['hauteur_plafond'], alwaysShow: true },
               'large_piece_vie': { key: 'large_piece_vie', name: 'Pièce de vie', alertKeys: ['large_piece_vie'], alwaysShow: true }
             }
             
@@ -630,23 +643,40 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
                     const styleData = formatStyleCriterion(apartment)
                     customTitle = styleData.title || displayName
                     customDescription = styleData.description || justification
-                    // Passer les indices séparément pour l'affichage avec l'icône
+                    // Passer les indices pour l'affichage en bleu
                     customIndices = styleData.indices || null
                   } else if (alertCriterionName === 'luminosite') {
                     const expoData = formatExpositionCriterion(apartment, etage)
                     customTitle = expoData.title || displayName
                     customDescription = expoData.description || justification
-                    // Pour l'exposition, les indices sont déjà dans la description
+                    // Passer les indices pour l'affichage en bleu
+                    customIndices = expoData.indices || null
                   } else if (alertCriterionName === 'cuisine_ouverte') {
                     const cuisineData = formatCuisineCriterion(apartment)
                     customTitle = cuisineData.title || displayName
                     customDescription = cuisineData.description || justification
+                    // Passer les indices pour l'affichage en bleu
+                    customIndices = cuisineData.indices || null
                   } else if (alertCriterionName === 'baignoire') {
                     const baignoireData = formatBaignoireCriterion(apartment)
                     customTitle = baignoireData.title || displayName
                     customDescription = baignoireData.description || justification
+                    // Passer les indices pour l'affichage en bleu
+                    customIndices = baignoireData.indices || null
+                  } else if (alertCriterionName === 'hauteur_plafond') {
+                    const hauteurData = formatHauteurPlafondCriterion(apartment)
+                    customTitle = hauteurData.title || displayName
+                    customDescription = hauteurData.description || justification
+                    // Passer les indices pour l'affichage en bleu
+                    customIndices = hauteurData.indices || null
+                  } else if (alertCriterionName === 'large_piece_vie') {
+                    const largePieceVieData = formatLargePieceVieCriterion(apartment)
+                    customTitle = largePieceVieData.title || displayName
+                    customDescription = largePieceVieData.description || justification
+                    // Passer les indices pour l'affichage en bleu
+                    customIndices = largePieceVieData.indices || null
                   } else {
-                    // Critères simples (ascenseur, large_piece_vie, hauteur_plafond, renove)
+                    // Critères simples (ascenseur, renove)
                     customTitle = displayName
                     customDescription = justification || 'Non spécifié'
                   }
@@ -729,6 +759,7 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
                         tier={tier}
                         customTitle={expoData.title}
                         customDescription={expoData.description}
+                        indices={expoData.indices}
                         confidence={expoData.confidence}
                         isGray={true}
                         noBorderBottom={noBorderBottom}
@@ -746,6 +777,7 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
                         tier={cuisineData.tier}
                         customTitle={cuisineData.title}
                         customDescription={cuisineData.description}
+                        indices={cuisineData.indices}
                         confidence={cuisineData.confidence}
                         isGray={true}
                         noBorderBottom={noBorderBottom}
@@ -761,21 +793,23 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
                         tier={baignoireData.tier}
                         customTitle={baignoireData.title}
                         customDescription={baignoireData.description}
+                        indices={baignoireData.indices}
                         confidence={baignoireData.confidence}
                         isGray={true}
                         noBorderBottom={noBorderBottom}
                       />
                     )
-                  } else if (key === 'calme') {
-                    const calmeData = formatCalmeCriterion(apartment)
+                  } else if (key === 'hauteur_plafond') {
+                    const hauteurData = formatHauteurPlafondCriterion(apartment)
                     return (
                       <Criterion
                         key={key}
                         name={name}
-                        score={calmeData.score}
-                        tier={calmeData.tier}
-                        customTitle={calmeData.title}
-                        customDescription={calmeData.description}
+                        score={hauteurData.score}
+                        tier={hauteurData.tier}
+                        customTitle={hauteurData.title}
+                        customDescription={hauteurData.description}
+                        indices={hauteurData.indices}
                         isGray={true}
                         noBorderBottom={noBorderBottom}
                       />
@@ -790,6 +824,7 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
                         tier={largePieceVieData.tier}
                         customTitle={largePieceVieData.title}
                         customDescription={largePieceVieData.description}
+                        indices={largePieceVieData.indices}
                         isGray={true}
                         noBorderBottom={noBorderBottom}
                       />
@@ -802,192 +837,15 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
           }
           
           // Sinon, afficher les critères standards (comportement normal)
-          // Dans la vue "all apartments" (showScore={false}), afficher depuis formatted_data même sans scores_detaille
-          const hasScoresDetaille = apartment.scores_detaille && Object.keys(apartment.scores_detaille).length > 0
-          const hasFormattedData = apartment.formatted_data && Object.keys(apartment.formatted_data).length > 0
-          
-          // Si on est dans la vue "all apartments" (showScore={false}), afficher les critères formatés même sans score
-          if (!showScore) {
-            // Afficher tous les critères disponibles depuis formatted_data ou depuis les données brutes
-            const formattedData = apartment.formatted_data || {}
-            
-            return (
-              <>
-                {/* Localisation - toujours disponible depuis les données brutes */}
-                {(() => {
-                  const locData = formatLocalisation(apartment)
-                  // Debug: vérifier ce qui est extrait
-                  if (process.env.NODE_ENV === 'development') {
-                    console.log('Localisation data:', {
-                      id: apartment.id,
-                      title: locData.title,
-                      description: locData.description,
-                      localisation: apartment.localisation,
-                      localisation_precise: apartment.localisation_precise,
-                      map_info_streets: apartment.map_info?.streets
-                    })
-                  }
-                  if (locData.title || locData.description) {
-                    return (
-                      <Criterion 
-                        name="Localisation"
-                        score={0}
-                        tier="tier3"
-                        customTitle={locData.title}
-                        customDescription={locData.description}
-                        descriptionClass={locData.descriptionClass}
-                        isGray={true}
-                      />
-                    )
-                  }
-                  return null
-                })()}
-                {/* Prix - toujours utiliser formatPrixCriterion pour le format correct */}
-                {(() => {
-                  const prixData = formatPrixCriterion(apartment)
-                  if (prixData.title && prixData.description && prixData.description !== 'Non analysé') {
-                    return (
-                      <Criterion 
-                        name="Prix"
-                        score={0}
-                        tier="tier3"
-                        customTitle={prixData.title}
-                        customDescription={prixData.description}
-                        isGray={true}
-                      />
-                    )
-                  }
-                  return null
-                })()}
-                {/* Style - toujours utiliser formatStyleCriterion pour le format correct */}
-                {(() => {
-                  const styleData = formatStyleCriterion(apartment)
-                  if (styleData.title || styleData.description) {
-                    return (
-                      <Criterion 
-                        name="Style"
-                        score={0}
-                        tier="tier3"
-                        customTitle={styleData.title}
-                        customDescription={styleData.description}
-                        indices={styleData.indices}
-                        confidence={apartment.style_analysis?.style?.confidence}
-                        isGray={true}
-                      />
-                    )
-                  }
-                  return null
-                })()}
-                {/* Exposition - toujours utiliser formatExpositionCriterion pour le format correct */}
-                {(() => {
-                  const expoData = formatExpositionCriterion(apartment, etage)
-                  if (expoData.title || expoData.description) {
-                    return (
-                      <Criterion 
-                        name="Exposition"
-                        score={0}
-                        tier="tier3"
-                        customTitle={expoData.title}
-                        customDescription={expoData.description}
-                        confidence={expoData.confidence}
-                        isGray={true}
-                      />
-                    )
-                  }
-                  return null
-                })()}
-                {/* Cuisine - toujours utiliser formatCuisineCriterion pour le format correct */}
-                {(() => {
-                  const cuisineData = formatCuisineCriterion(apartment)
-                  if (cuisineData.title && cuisineData.description && cuisineData.description !== 'Non analysée') {
-                    return (
-                      <Criterion 
-                        name="Cuisine"
-                        score={0}
-                        tier="tier3"
-                        customTitle={cuisineData.title}
-                        customDescription={cuisineData.description}
-                        confidence={cuisineData.confidence}
-                        isGray={true}
-                      />
-                    )
-                  }
-                  return null
-                })()}
-                {/* Baignoire - toujours utiliser formatBaignoireCriterion pour le format correct */}
-                {(() => {
-                  // Vérifier si on a des données baignoire (formatted_data ou scores_detaille)
-                  if (formattedData.baignoire || apartment.scores_detaille?.baignoire) {
-                    const baignoireData = formatBaignoireCriterion(apartment)
-                    if (baignoireData.title && baignoireData.description && baignoireData.description !== 'Non analysé') {
-                      return (
-                        <Criterion 
-                          name="Baignoire"
-                          score={0}
-                          tier="tier3"
-                          customTitle={baignoireData.title}
-                          customDescription={baignoireData.description}
-                          confidence={baignoireData.confidence}
-                          isGray={true}
-                        />
-                      )
-                    }
-                  }
-                  return null
-                })()}
-                {/* Calme - toujours utiliser formatCalmeCriterion pour le format correct */}
-                {(() => {
-                  // Vérifier si on a des données calme (formatted_data ou scores_detaille)
-                  if (formattedData.calme || apartment.scores_detaille?.calme) {
-                    const calmeData = formatCalmeCriterion(apartment)
-                    if (calmeData && (calmeData.title !== 'Calme' || calmeData.description !== 'Non analysé')) {
-                      return (
-                        <Criterion 
-                          name="Calme"
-                          score={0}
-                          tier="tier3"
-                          customTitle={calmeData.title}
-                          customDescription={calmeData.description}
-                          isGray={true}
-                        />
-                      )
-                    }
-                  }
-                  return null
-                })()}
-                {/* Pièce de vie - depuis scores_detaille si disponible */}
-                {(() => {
-                  if (apartment.scores_detaille?.large_piece_vie) {
-                    const largePieceVieData = formatLargePieceVieCriterion(apartment)
-                    if (largePieceVieData && (largePieceVieData.title !== 'Pièce de vie' || largePieceVieData.description !== 'Non analysé')) {
-                      return (
-                        <Criterion 
-                          name="Pièce de vie"
-                          score={0}
-                          tier="tier3"
-                          customTitle={largePieceVieData.title}
-                          customDescription={largePieceVieData.description}
-                          isGray={true}
-                        />
-                      )
-                    }
-                  }
-                  return null
-                })()}
-              </>
-            )
-          }
-          
-          // Sinon, afficher depuis scores_detaille (comportement normal avec score)
-          return hasScoresDetaille ? (
+          return (
             <>
-              {apartment.scores_detaille.localisation && (() => {
+              {(() => {
                 const locData = formatLocalisation(apartment)
                 return (
                   <Criterion 
                     name="Localisation"
-                    score={apartment.scores_detaille.localisation.score || 0}
-                    tier={apartment.scores_detaille.localisation.tier || 'tier3'}
+                    score={apartment.scores_detaille?.localisation?.score || 0}
+                    tier={apartment.scores_detaille?.localisation?.tier || 'tier3'}
                     customTitle={locData.title}
                     customDescription={locData.description}
                     descriptionClass={locData.descriptionClass}
@@ -1009,13 +867,13 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
                   />
                 )
               })()}
-              {apartment.scores_detaille.style && (() => {
+              {(() => {
                 const styleData = formatStyleCriterion(apartment)
                 return (
                   <Criterion 
                     name="Style"
-                    score={apartment.scores_detaille.style.score || 0}
-                    tier={apartment.scores_detaille.style.tier || 'tier3'}
+                    score={apartment.scores_detaille?.style?.score || 0}
+                    tier={apartment.scores_detaille?.style?.tier || 'tier3'}
                     customTitle={styleData.title}
                     customDescription={styleData.description}
                     indices={styleData.indices}
@@ -1024,9 +882,9 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
                   />
                 )
               })()}
-              {apartment.scores_detaille.ensoleillement && (() => {
+              {(() => {
                 const expoData = formatExpositionCriterion(apartment, etage)
-                let tier = apartment.scores_detaille.ensoleillement.tier || 'tier3'
+                let tier = apartment.scores_detaille?.ensoleillement?.tier || 'tier3'
                 
                 // Calculer le score selon le tier pour garantir la cohérence
                 // tier1 (Lumineux) = 20 pts, tier2 (Luminosité moyenne) = 10 pts, tier3 (Sombre) = 0 pts
@@ -1038,14 +896,15 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
                     tier={tier}
                     customTitle={expoData.title}
                     customDescription={expoData.description}
+                    indices={expoData.indices}
                     confidence={expoData.confidence}
                     isGray={!alertCriteria}
                   />
                 )
               })()}
-              {apartment.scores_detaille.cuisine && (() => {
+              {(() => {
                 const cuisineData = formatCuisineCriterion(apartment)
-                const cuisineScore = apartment.scores_detaille.cuisine || {}
+                const cuisineScore = apartment.scores_detaille?.cuisine || {}
                 const cuisineScoreValue = cuisineScore.score !== undefined ? cuisineScore.score : (cuisineData.tier === 'tier1' ? 20 : cuisineData.tier === 'tier2' ? 10 : 0)
                 
                 return (
@@ -1055,6 +914,7 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
                     tier={cuisineData.tier}
                     customTitle={cuisineData.title}
                     customDescription={cuisineData.description}
+                    indices={cuisineData.indices}
                     confidence={cuisineData.confidence}
                     isGray={!alertCriteria}
                   />
@@ -1069,20 +929,22 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
                     tier={baignoireData.tier}
                     customTitle={baignoireData.title}
                     customDescription={baignoireData.description}
+                    indices={baignoireData.indices}
                     confidence={baignoireData.confidence}
                     isGray={!alertCriteria}
                   />
                 )
               })()}
               {(() => {
-                const calmeData = formatCalmeCriterion(apartment)
+                const hauteurData = formatHauteurPlafondCriterion(apartment)
                 return (
                   <Criterion 
-                    name="Calme"
-                    score={calmeData.score}
-                    tier={calmeData.tier}
-                    customTitle={calmeData.title}
-                    customDescription={calmeData.description}
+                    name="Hauteur plafond"
+                    score={hauteurData.score}
+                    tier={hauteurData.tier}
+                    customTitle={hauteurData.title}
+                    customDescription={hauteurData.description}
+                    indices={hauteurData.indices}
                     isGray={!alertCriteria}
                   />
                 )
@@ -1096,12 +958,13 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
                     tier={largePieceVieData.tier}
                     customTitle={largePieceVieData.title}
                     customDescription={largePieceVieData.description}
+                    indices={largePieceVieData.indices}
                     isGray={!alertCriteria}
                   />
                 )
               })()}
             </>
-          ) : null
+          )
         })()}
       </div>
     </div>
@@ -1111,59 +974,41 @@ function ApartmentCard({ apartment, alertCriteria = null, showScore = true }) {
 // Fonctions de formatage des critères
 function formatLocalisation(apartment) {
   const metro = getMetroName(apartment)
+  const quartier = getQuartierName(apartment)
   const mapInfo = apartment.map_info || {}
   const streets = mapInfo.streets || []
   
-  // Format ALL apartments: title "Metro X", description "166 rue saint maur"
-  const title = metro ? `Metro ${metro}` : 'Localisation'
-  
-  // Chercher une rue dans plusieurs sources
+  // Chercher une rue dans streets ou dans localisation
   let rue = null
-  
-  // Priorité 1: map_info.streets
   if (streets.length > 0) {
     rue = streets[0]
   } else {
-    // Priorité 2: localisation_precise (si disponible)
-    const localisationPrecise = apartment.localisation_precise || ''
-    if (localisationPrecise) {
-      // Format: "35 Rue Mélingue, 75019 Paris 19e" -> extraire "35 Rue Mélingue"
-      if (localisationPrecise.includes(',')) {
-        rue = localisationPrecise.split(',')[0].trim()
-      } else {
-        // Chercher un pattern de rue dans localisation_precise
-        const rueMatch = localisationPrecise.match(/(\d+\s*(?:rue|Rue|RUE|avenue|Avenue|AVENUE|boulevard|Boulevard|BOULEVARD|place|Place|PLACE)[^,]*)/i)
-        if (rueMatch) {
-          rue = rueMatch[1].trim()
-        }
-      }
-    }
-    
-    // Priorité 3: extraire depuis localisation (format "Metro X · 166 rue Saint Maur" ou similaire)
-    if (!rue) {
-      const localisation = apartment.localisation || ''
-      // Chercher après "·" (séparateur) ou directement dans la string
-      // Pattern amélioré pour capturer "35 Rue Mélingue" même avec espaces
-      const rueMatch = localisation.match(/(\d+\s+(?:rue|avenue|boulevard|place|Rue|Avenue|Boulevard|Place)\s+[^·,]+)/i)
-      if (rueMatch) {
-        rue = rueMatch[1].trim()
-      } else {
-        // Fallback: chercher n'importe quel pattern avec numéro + type de rue
-        const rueMatch2 = localisation.match(/(\d+\s*(?:rue|avenue|boulevard|place)[^·,]*)/i)
-        if (rueMatch2) {
-          rue = rueMatch2[1].trim()
-        }
-      }
+    // Extraire la rue depuis localisation (format "166 rue Saint Maur" ou similaire)
+    const localisation = apartment.localisation || ''
+    const rueMatch = localisation.match(/(\d+\s*(?:rue|Rue|RUE|avenue|Avenue|AVENUE|boulevard|Boulevard|BOULEVARD|place|Place|PLACE)[^·,]*)/i)
+    if (rueMatch) {
+      rue = rueMatch[1].trim()
     }
   }
   
-  // Description: la rue en minuscules (retourner string vide si pas de rue, pas null)
-  const description = rue ? rue.toLowerCase() : ''
+  // Construire le titre: "Metro Goncourt" (ou "Metro Belleville" si pas de métro mais quartier disponible)
+  const titleParts = []
+  if (metro) {
+    titleParts.push(`Metro ${metro}`)
+  } else if (quartier) {
+    titleParts.push(`Metro ${quartier}`)
+  }
+  
+  const title = titleParts.length > 0 ? titleParts.join(' · ') : 'Localisation'
+  
+  // Description: adresse exacte
+  const description = rue || null
+  const descriptionClass = null
   
   return {
     title,
     description,
-    descriptionClass: null
+    descriptionClass
   }
 }
 
@@ -1213,8 +1058,27 @@ function getArrondissementNumber(postalCode) {
 }
 
 function formatPrixCriterion(apartment) {
-  // Format ALL apartments: title "11,8k € /m2", description "Moyenne 11e: 11k€ /m2"
-  // Pas besoin de vérifier le tier pour le titre dans cette vue
+  // Vérifier si le prix a été analysé
+  const prixScore = apartment.scores_detaille?.prix
+  const tier = prixScore?.tier || 'tier3'
+  
+  // Si pas encore analysé, afficher "Non analysé"
+  if (!prixScore) {
+    return {
+      title: 'Prix du marché',
+      description: 'Non analysé'
+    }
+  }
+  
+  // Titre selon le tier
+  let title = 'Prix'
+  if (tier === 'tier1') {
+    title = 'Prix en dessous du marché'
+  } else if (tier === 'tier2') {
+    title = 'Prix du marché'
+  } else {
+    title = 'Prix au dessus du marché'
+  }
   
   // Calculer prix/m²
   let prixM2 = null
@@ -1247,7 +1111,7 @@ function formatPrixCriterion(apartment) {
   
   if (!prixM2) {
     return {
-      title: 'Prix',
+      title,
       description: 'Non analysé'
     }
   }
@@ -1255,7 +1119,7 @@ function formatPrixCriterion(apartment) {
   // Arrondir au 100€ près
   const prixM2Rounded = Math.round(prixM2 / 100) * 100
   
-  // Récupérer le code postal
+  // Récupérer le code postal depuis plusieurs sources
   let postalCode = apartment._api_data?.postal_code || ''
   if (!postalCode) {
     // Essayer depuis localisation
@@ -1265,23 +1129,61 @@ function formatPrixCriterion(apartment) {
       postalCode = postalMatch[0]
     }
   }
+  // Essayer aussi depuis map_info si disponible
+  if (!postalCode && apartment.map_info?.postal_code) {
+    postalCode = apartment.map_info.postal_code
+  }
+  
+  // S'assurer que le code postal est une string
+  if (postalCode) {
+    postalCode = String(postalCode)
+  }
   
   // Extraire l'arrondissement et le prix médian
   const arrondissementNum = getArrondissementNumber(postalCode)
   const medianPrice = getArrondissementMedianPrice(postalCode)
   
-  // Format ALL apartments: title "11,8k € /m2", description "Moyenne 11e: 11k€ /m2"
-  // Convertir prixM2Rounded en format "k" (ex: 11800 -> 11,8k)
-  const prixM2K = (prixM2Rounded / 1000).toFixed(1).replace('.0', '').replace('.', ',')
-  const title = `${prixM2K}k € /m2`
+  // Debug: vérifier les valeurs
+  console.log('[formatPrixCriterion]', {
+    postalCode,
+    arrondissementNum,
+    medianPrice,
+    prixM2Rounded,
+    apartmentId: apartment.id
+  })
   
-  // Description: "Moyenne 11e: 11k€ /m2"
+  // Formater le prix/m² avec espaces pour les milliers
+  const prixM2Formatted = prixM2Rounded.toLocaleString('fr-FR')
+  
+  // Formater le prix médian avec espaces pour les milliers
+  const medianPriceFormatted = medianPrice ? medianPrice.toLocaleString('fr-FR') : null
+  
+  // Formater selon le format demandé: "20e : 12000€/m² · haut dessus du marché"
+  // Construire la description du tier
+  let tierDescription = ''
+  if (tier === 'tier1') {
+    tierDescription = 'en dessous du marché'
+  } else if (tier === 'tier2') {
+    tierDescription = 'du marché'
+  } else {
+    tierDescription = 'haut dessus du marché'
+  }
+  
+  // Formater le prix sans espaces pour les milliers (format compact: 12000 au lieu de 12 000)
+  const prixM2Compact = prixM2Rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '')
+  
+  // Formater le prix médian en format compact
+  const medianPriceCompact = medianPrice ? medianPrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '') : null
+  
   let description = ''
-  if (medianPrice && arrondissementNum) {
-    const medianK = (medianPrice / 1000).toFixed(0)
-    description = `Moyenne ${arrondissementNum}e: ${medianK}k€ /m2`
+  if (arrondissementNum && medianPriceCompact) {
+    description = `${arrondissementNum}e : ${prixM2Compact}€/m² (médian: ${medianPriceCompact}€/m²) · ${tierDescription}`
   } else if (arrondissementNum) {
-    description = `${arrondissementNum}e`
+    description = `${arrondissementNum}e : ${prixM2Compact}€/m² · ${tierDescription}`
+  } else if (medianPriceCompact) {
+    description = `${prixM2Compact}€/m² (médian: ${medianPriceCompact}€/m²) · ${tierDescription}`
+  } else {
+    description = `${prixM2Compact}€/m² · ${tierDescription}`
   }
   
   return {
@@ -1294,6 +1196,9 @@ function formatStyleCriterion(apartment) {
   const styleAnalysis = apartment.style_analysis || {}
   const styleData = styleAnalysis.style || {}
   const styleType = styleData.type || ''
+  
+  // Description: "Construit en X (si date dispo) + indices (moulures · parquet..)"
+  const descriptionParts = []
   
   // Année de construction
   let anneeConstruction = null
@@ -1341,25 +1246,20 @@ function formatStyleCriterion(apartment) {
     const year = parseInt(anneeConstruction)
     if (!isNaN(year)) {
       if (year < 1910) {
-        title = 'Haussmanien'  // Format screenshot: sans "Style" devant
+        title = 'Style Haussmannien'
       } else if (year >= 1910 && year <= 1980) {
         // Calculer la décennie (ex: 1976 -> années 70)
         const decade = Math.floor(year / 10) * 10
-        title = `Années ${decade.toString().slice(-2)}`
+        title = `Style années ${decade.toString().slice(-2)}`
       } else if (year > 1980) {
-        title = 'Moderne'
+        title = 'Style Moderne'
       }
     }
+    // Description: juste "Construit en XXXX" quand l'année est disponible
+    descriptionParts.push(`Construit en ${anneeConstruction}`)
   } else {
-    // Pas d'année trouvée, utiliser le style depuis formatted_data (backend) en priorité
-    const formattedStyle = apartment.formatted_data?.style
-    const mainValue = formattedStyle?.main_value
-    
-    if (mainValue && mainValue !== 'Non spécifié') {
-      // Utiliser le style depuis formatted_data (créé par le backend)
-      title = mainValue
-    } else if (styleType && styleType !== 'autre' && styleType !== 'inconnu') {
-      // Fallback: utiliser le style détecté par l'IA
+    // Pas d'année trouvée, utiliser le style détecté par l'IA
+    if (styleType && styleType !== 'autre' && styleType !== 'inconnu') {
       let styleName = styleType.charAt(0).toUpperCase() + styleType.slice(1)
       
       // Gérer les cas spéciaux
@@ -1369,73 +1269,79 @@ function formatStyleCriterion(apartment) {
         styleName = "Haussmannien"
       }
       
-      title = styleName  // Format screenshot: sans "Style" devant
+      title = `Style ${styleName}`
     }
   }
   
-  // Extraire les indices du style séparément (comme pour l'exposition)
-  let indices = null
-  
-  // Utiliser les indices depuis formatted_data en priorité
-  let styleIndices = apartment.formatted_data?.style?.indices
-  
-  if (styleIndices && styleIndices !== 'Style expo cuisine et baignoire') {
-    // Nettoyer les indices
-    let indicesClean = styleIndices
-      .replace(/^Style Indice:\n?/i, '')
-      .replace(/^Style:\n?/i, '')
-      .replace(/Style\s+(?:haussmannien|neuf|atypique|70s|autre|inconnu)[\s·,]*/gi, '')
-      .replace(/\([^)]*construction[^)]*\)/gi, '')
-      .trim()
-    
-    if (indicesClean && !indicesClean.includes('Non spécifié') && indicesClean.length > 0) {
-      indices = indicesClean
-    }
-  }
-  
-  // Fallback: chercher dans style_analysis si formatted_data n'a pas d'indices
-  if (!indices) {
+  // Indices du style (moulures, cheminée, etc.)
+  // Ne les ajouter QUE si aucune année n'a été trouvée
+  // Déclarer keywords en dehors du bloc pour qu'il soit accessible partout
+  const keywords = []
+  if (!anneeConstruction) {
     const details = styleData.details || ''
     const justification = styleData.justification || ''
     const textToSearch = `${details} ${justification}`.toLowerCase()
-    
-    const keywords = []
     if (textToSearch.includes('moulures') || textToSearch.includes('moldings')) {
-      keywords.push('moulures')
+      keywords.push('Moulures')
     }
     if (textToSearch.includes('cheminée') || textToSearch.includes('fireplace')) {
-      keywords.push('cheminée')
+      keywords.push('Cheminée')
     }
     if (textToSearch.includes('parquet')) {
-      keywords.push('parquet')
-    }
-    if (textToSearch.includes('balcon') && (textToSearch.includes('fer') || textToSearch.includes('forgé'))) {
-      keywords.push('balcon fer forgé')
-    }
-    if (textToSearch.includes('éléments décoratifs') || textToSearch.includes('elements decoratifs')) {
-      keywords.push('éléments décoratifs')
+      keywords.push('Parquet')
     }
     if (textToSearch.includes('hauteur sous plafond')) {
-      keywords.push('hauteur sous plafond')
+      keywords.push('Hauteur sous plafond')
     }
     
-    if (keywords.length > 0) {
-      indices = keywords.join(', ')
+    // Utiliser les indices depuis formatted_data si disponibles
+    let styleIndices = apartment.formatted_data?.style?.indices
+    if (styleIndices && styleIndices !== 'Style expo cuisine et baignoire') {
+      // Extraire les détails depuis les indices
+      let indicesClean = styleIndices
+        .replace(/^Style Indice:\n?/i, '')
+        .replace(/^Style:\n?/i, '')
+        .replace(/Style\s+(?:haussmannien|neuf|atypique|70s|autre|inconnu)[\s·,]*/gi, '') // Retirer "Style haussmannien" ou similaire
+        .replace(/\([^)]*construction[^)]*\)/gi, '') // Retirer les parenthèses avec "construction"
+        .trim()
+      
+      if (indicesClean && !indicesClean.includes('Non spécifié') && indicesClean.length > 0) {
+        descriptionParts.push(indicesClean)
+      } else if (keywords.length > 0) {
+        descriptionParts.push(keywords.join(' · '))
+      }
+    } else if (keywords.length > 0) {
+      descriptionParts.push(keywords.join(' · '))
+    }
+
+  }
+  
+  const description = descriptionParts.length > 0 ? descriptionParts.join(' · ') : null
+  
+  // Extraire les indices séparément pour l'affichage en bleu
+  // Si on a une année, pas d'indices séparés (tout est dans la description)
+  // Sinon, les indices sont les éléments détectés (moulures, parquet, etc.)
+  let indices = null
+  if (!anneeConstruction) {
+    // Utiliser les indices depuis formatted_data si disponibles
+    let styleIndices = apartment.formatted_data?.style?.indices
+    if (styleIndices && styleIndices !== 'Style expo cuisine et baignoire') {
+      let indicesClean = styleIndices
+        .replace(/^Style Indice:\n?/i, '')
+        .replace(/^Style:\n?/i, '')
+        .replace(/Style\s+(?:haussmannien|neuf|atypique|70s|autre|inconnu)[\s·,]*/gi, '')
+        .replace(/\([^)]*construction[^)]*\)/gi, '')
+        .trim()
+      
+      if (indicesClean && !indicesClean.includes('Non spécifié') && indicesClean.length > 0) {
+        indices = indicesClean
+      } else if (keywords.length > 0) {
+        indices = keywords.join(' · ')
+      }
+    } else if (keywords.length > 0) {
+      indices = keywords.join(' · ')
     }
   }
-  
-  // Ajouter le préfixe "Indices:" si des indices sont présents
-  if (indices) {
-    indices = `Indices: ${indices}`
-  }
-  
-  // Format ALL apartments: description "Construit en 1855" (si dispo) sinon null (les indices seront affichés séparément)
-  let description = null
-  if (anneeConstruction) {
-    // Si année disponible, description = "Construit en XXXX"
-    description = `Construit en ${anneeConstruction}`
-  }
-  // Sinon, description reste null et les indices seront affichés séparément
   
   return {
     title,
@@ -1493,26 +1399,18 @@ function formatExpositionCriterion(apartment, etage) {
     }
     
     if (visavisDistance !== null && visavisDistance !== undefined && visavisDistance !== '') {
-      // Format screenshot: "Vis à vis 10m" (sans catégorie entre parenthèses)
-      // Vérifier si les indices originaux contiennent "(upgrade >20m)" OU si vis-à-vis > 20m
-      const hasUpgradeInfo = (indices && indices.includes('(upgrade >20m)')) || visavisDistance > 20
-      let visavisText = `Vis à vis ${visavisDistance}m`
-      if (hasUpgradeInfo) {
-        visavisText += ' (upgrade >20m)'
+      if (visavisCategory) {
+        const categoryFr = translateCategory(visavisCategory)
+        descriptionParts.push(`Vis a vis ${categoryFr} (${visavisDistance}m)`)
+      } else {
+        descriptionParts.push(`Vis a vis ${visavisDistance}m`)
       }
-      descriptionParts.push(visavisText)
     } else {
-      // Fallback: essayer d'extraire depuis les indices existants (préserver upgrade info si présente)
+      // Fallback: essayer d'extraire depuis les indices existants
       if (indices) {
-        const visavisMatch = indices.match(/vis[-\sà]?[aà][-\sà]?vis[^·]*?(\d+)\s*m[^·]*?(\(upgrade\s*>20m\))?/i)
+        const visavisMatch = indices.match(/vis[-\sà]?[aà][-\sà]?vis\s+(\d+)\s*m/i)
         if (visavisMatch) {
-          const extractedDistance = parseInt(visavisMatch[1], 10)
-          const hasUpgradeInfo = visavisMatch[2] || extractedDistance > 20
-          let visavisText = `Vis à vis ${extractedDistance}m`
-          if (hasUpgradeInfo) {
-            visavisText += ' (upgrade >20m)'
-          }
-          descriptionParts.push(visavisText)
+          descriptionParts.push(`Vis a vis ${visavisMatch[1]}m`)
         }
       }
     }
@@ -1577,41 +1475,75 @@ function formatExpositionCriterion(apartment, etage) {
     }
     
     if (visavisDistance !== null && visavisDistance !== undefined && visavisDistance !== '') {
-      // Format screenshot: "Vis à vis 10m" (sans catégorie entre parenthèses)
-      const hasUpgrade = visavisDistance > 20
-      let visavisText = `Vis à vis ${visavisDistance}m`
-      if (hasUpgrade) {
-        visavisText += ' (upgrade >20m)'
+      if (visavisCategory) {
+        const categoryFr = translateCategory(visavisCategory)
+        descriptionParts.push(`Vis a vis ${categoryFr} (${visavisDistance}m)`)
+      } else {
+        descriptionParts.push(`Vis a vis ${visavisDistance}m`)
       }
-      descriptionParts.push(visavisText)
     }
     
     indices = descriptionParts.length > 0 ? descriptionParts.join(' · ') : null
     confidence = exposition.confidence || null
   }
   
-  // Titre: "Lumineux" / "Luminosité normale" / "Sombre" (format du screenshot)
+  // Titre: "Bonne luminosité" (ou "Luminosité moyenne" / "Faible luminosité")
   let title = 'Exposition'
   if (mainValue === 'Lumineux') {
-    title = 'Lumineux'
+    title = 'Bonne luminosité'
   } else if (mainValue === 'Luminosité moyenne') {
-    title = 'Luminosité normale'
+    title = 'Luminosité moyenne'
   } else {
-    title = 'Sombre'
+    title = 'Faible luminosité'
   }
   
-  // Description: "1er étage · Vis a vis moyen (15m)" (format systématique)
-  const description = indices
-  
+  // Description: null (les indices sont affichés séparément en bleu)
+  // Les indices contiennent "1er étage · Vis a vis moyen (15m)"
   return {
     title,
-    description,
+    description: null,
+    indices,
     confidence
   }
 }
 
 function formatCuisineCriterion(apartment) {
-  // Vérifier que scores_detaille existe
+  // PRIORITÉ: Utiliser formatted_data depuis le backend (données enrichies)
+  const cuisineFormatted = apartment.formatted_data?.cuisine
+  // #region agent log
+  fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:1491',message:'formatCuisineCriterion entry - checking formatted_data.cuisine',data:{apartment_id:apartment.id,cuisineFormatted:cuisineFormatted,has_main_value:!!cuisineFormatted?.main_value},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+  // #endregion
+  if (cuisineFormatted && cuisineFormatted.main_value) {
+    const mainValue = cuisineFormatted.main_value
+    const isOuverte = mainValue === 'Ouverte' || mainValue === 'Cuisine ouverte'
+    const tier = isOuverte ? 'tier1' : 'tier3'
+    // Chercher detected_photos pour ajouter le numéro d'image aux indices
+    let indices = cuisineFormatted.indices || null
+    let detectedPhotos = cuisineFormatted.detected_photos
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:1500',message:'Using formatted_data.cuisine - checking detected_photos',data:{apartment_id:apartment.id,mainValue:mainValue,detectedPhotos:detectedPhotos,indices:indices},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
+    // Si on a detected_photos, ajouter le numéro d'image aux indices
+    if (detectedPhotos && Array.isArray(detectedPhotos) && detectedPhotos.length > 0) {
+      const photoNum = detectedPhotos[0]
+      if (isOuverte) {
+        indices = `Cuisine ouverte détectée image ${photoNum}`
+      } else {
+        indices = `Cuisine fermée détectée image ${photoNum}`
+      }
+    }
+    const confidence = cuisineFormatted.confidence || null
+    
+    return {
+      title: isOuverte ? 'Cuisine ouverte' : 'Cuisine fermée',
+      description: null,
+      indices,
+      tier,
+      confidence
+    }
+  }
+  
+  // Fallback: Utiliser scores_detaille si formatted_data n'existe pas
   if (!apartment.scores_detaille) {
     return {
       title: 'Cuisine',
@@ -1659,22 +1591,78 @@ function formatCuisineCriterion(apartment) {
     title = cuisineOuverte ? 'Cuisine ouverte' : 'Cuisine fermée'
   }
   
-  // Description: "Detectee en image 7"
-  let description = null
+  // Indices: "Cuisine fermée détectée image X" (affiché en bleu)
+  let indices = null
   
-  // Chercher les photos détectées
-  const detectedPhotos = photoValidation.photo_result?.detected_photos || []
-  if (detectedPhotos.length > 0) {
-    const photoNum = detectedPhotos[0]
-    description = `Détectée sur photo ${photoNum}`
-  } else {
-    // Fallback: utiliser les indices depuis formatted_data
+  // Chercher les photos détectées depuis plusieurs sources
+  let detectedPhotos = []
+  
+  // Source 1: photo_validation.photo_result.detected_photos
+  if (photoValidation.photo_result?.detected_photos) {
+    detectedPhotos = photoValidation.photo_result.detected_photos
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:1564',message:'Found detected_photos in photo_validation.photo_result',data:{apartment_id:apartment.id,detectedPhotos:detectedPhotos,source:'photo_validation.photo_result'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+  }
+  
+  // Source 2: style_analysis.cuisine.detected_photos
+  if (detectedPhotos.length === 0) {
+    const styleCuisine = apartment.style_analysis?.cuisine || {}
+    if (styleCuisine.detected_photos && Array.isArray(styleCuisine.detected_photos)) {
+      detectedPhotos = styleCuisine.detected_photos
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:1571',message:'Found detected_photos in style_analysis.cuisine',data:{apartment_id:apartment.id,detectedPhotos:detectedPhotos,source:'style_analysis.cuisine'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+    }
+  }
+  
+  // Source 3: formatted_data.cuisine.detected_photos
+  if (detectedPhotos.length === 0) {
+    const cuisineFormatted = apartment.formatted_data?.cuisine || {}
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:1577',message:'Checking formatted_data.cuisine.detected_photos',data:{apartment_id:apartment.id,cuisineFormatted:cuisineFormatted,detected_photos:cuisineFormatted.detected_photos,detected_photos_type:typeof cuisineFormatted.detected_photos,is_array:Array.isArray(cuisineFormatted.detected_photos)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    if (cuisineFormatted.detected_photos && Array.isArray(cuisineFormatted.detected_photos)) {
+      detectedPhotos = cuisineFormatted.detected_photos
+    }
+  }
+  
+  // Source 4: extraire depuis formatted_data.cuisine.indices
+  if (detectedPhotos.length === 0) {
     const cuisineIndices = apartment.formatted_data?.cuisine?.indices
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:1585',message:'Extracting image number from indices',data:{apartment_id:apartment.id,cuisineIndices:cuisineIndices,imageMatch:cuisineIndices ? cuisineIndices.match(/image\s*(\d+)/i) : null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+    // #endregion
     if (cuisineIndices && cuisineIndices !== 'Style expo cuisine et baignoire') {
-      // Extraire le numéro d'image depuis les indices
+      // Extraire le numéro d'image depuis les indices (format: "Cuisine ouverte détectée image 2")
       const imageMatch = cuisineIndices.match(/image\s*(\d+)/i)
       if (imageMatch) {
-        description = `Détectée sur photo ${imageMatch[1]}`
+        detectedPhotos = [parseInt(imageMatch[1], 10)]
+      }
+    }
+  }
+  
+  // #region agent log
+  fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:1595',message:'Final detectedPhotos check before setting indices',data:{apartment_id:apartment.id,detectedPhotos:detectedPhotos,detectedPhotos_length:detectedPhotos.length,cuisineOuverte:cuisineOuverte},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+  // #endregion
+  if (detectedPhotos.length > 0) {
+    const photoNum = detectedPhotos[0]
+    if (cuisineOuverte) {
+      indices = `Cuisine ouverte détectée image ${photoNum}`
+    } else {
+      indices = `Cuisine fermée détectée image ${photoNum}`
+    }
+  } else {
+    // Fallback: utiliser les indices depuis formatted_data sans numéro d'image
+    const cuisineIndices = apartment.formatted_data?.cuisine?.indices
+    if (cuisineIndices && cuisineIndices !== 'Style expo cuisine et baignoire') {
+      // Nettoyer le préfixe "Cuisine Indice:" et extraire le contenu
+      let cleanedIndices = cuisineIndices
+        .replace(/^Cuisine Indice:\s*/i, '')
+        .replace(/^Cuisine:\s*/i, '')
+        .trim()
+      if (cleanedIndices) {
+        indices = cleanedIndices
       }
     }
   }
@@ -1684,14 +1672,51 @@ function formatCuisineCriterion(apartment) {
   
   return {
     title,
-    description,
+    description: null,
+    indices,
     tier,
     confidence
   }
 }
 
 function formatBaignoireCriterion(apartment) {
-  // Utiliser les scores depuis scores_detaille.baignoire
+  // PRIORITÉ: Utiliser formatted_data depuis le backend (données enrichies)
+  const baignoireFormatted = apartment.formatted_data?.baignoire
+  if (baignoireFormatted && baignoireFormatted.main_value) {
+    const mainValue = baignoireFormatted.main_value
+    const hasBaignoire = mainValue === 'Oui' || mainValue === 'Baignoire'
+    const tier = hasBaignoire ? 'tier1' : 'tier3'
+    let indices = baignoireFormatted.indices || null
+    const confidence = baignoireFormatted.confidence || null
+    
+    let title = 'Baignoire'
+    let description = null
+    // Nettoyer les indices pour l'affichage en bleu
+    if (indices && indices !== 'Style expo cuisine et baignoire') {
+      let cleanedIndices = indices
+        .replace(/^Baignoire Indice:\s*/i, '')
+        .replace(/^Baignoire:\s*/i, '')
+        .trim()
+      if (cleanedIndices && !cleanedIndices.toLowerCase().includes('non spécifié')) {
+        // Les indices seront affichés en bleu, pas besoin de description
+        indices = cleanedIndices
+      } else {
+        indices = null
+        description = 'info non disponible'
+      }
+    }
+    
+    return {
+      title,
+      description,
+      indices,
+      tier,
+      score: hasBaignoire ? 20 : 0,
+      confidence
+    }
+  }
+  
+  // Fallback: Utiliser scores_detaille si formatted_data n'existe pas
   const scoresDetaille = apartment.scores_detaille || {}
   const baignoireScore = scoresDetaille.baignoire || {}
   
@@ -1760,22 +1785,26 @@ function formatBaignoireCriterion(apartment) {
   if (tier === 'tier2' || (tier === 'tier3' && !hasBaignoire && !photoHasBaignoire)) {
     title = 'Baignoire non spécifiée'
     description = 'info non disponible'
+    indices = null
   } else {
     // Construire les indices avec distinction claire entre "information non disponible" et "trouvé dans image X"
+    // Les résultats IA doivent être dans indices (affichés en bleu)
     if (!indices || indices === 'Style expo cuisine et baignoire') {
       if (photosAnalyzed && detectedPhotos.length > 0) {
         // Photos analysées et quelque chose détecté
         const photosStr = detectedPhotos.map(p => `image ${p}`).join(', ')
         if (photoHasBaignoire === true) {
-          description = `Baignoire trouvée dans ${photosStr}`
+          indices = `Baignoire détectée ${photosStr}`
         } else if (photoHasDouche === true) {
-          description = `Douche trouvée dans ${photosStr}`
+          indices = `Douche détectée ${photosStr}`
         } else {
           description = 'info non disponible'
+          indices = null
         }
       } else if (photosAnalyzed) {
         // Photos analysées mais rien détecté
         description = 'info non disponible'
+        indices = null
       } else {
         // Pas de photos analysées
         const justification = baignoireScore.justification || ''
@@ -1783,23 +1812,28 @@ function formatBaignoireCriterion(apartment) {
           const justificationLower = justification.toLowerCase()
           if (justificationLower.includes('photo') || justificationLower.includes('détectée') || justificationLower.includes('analysée')) {
             if (hasBaignoire) {
-              description = 'Analyse photo : Baignoire détectée'
+              indices = 'Baignoire détectée'
             } else {
-              description = 'Analyse photo : Douche détectée'
+              indices = 'Douche détectée'
             }
           } else if (justificationLower.includes('description') || justificationLower.includes('caractéristiques')) {
+            // Texte mentionné, pas un résultat IA, donc description
             if (hasBaignoire) {
               description = 'Baignoire mentionnée dans le texte'
             } else {
               description = 'Douche mentionnée dans le texte'
             }
+            indices = null
           } else if (justification.length < 100) {
             description = justification
+            indices = null
           } else {
             description = 'info non disponible'
+            indices = null
           }
         } else {
           description = 'info non disponible'
+          indices = null
         }
       }
     } else {
@@ -1812,19 +1846,20 @@ function formatBaignoireCriterion(apartment) {
       // Si les indices contiennent "Non spécifié", remplacer par "info non disponible"
       if (cleanedIndices.toLowerCase().includes('non spécifié')) {
         description = 'info non disponible'
+        indices = null
       } else {
         // Si les indices contiennent "détectée" mais pas de numéro d'image, essayer d'ajouter les numéros
         if (cleanedIndices.includes('détectée') && !cleanedIndices.includes('image') && detectedPhotos.length > 0) {
           const photosStr = detectedPhotos.map(p => `image ${p}`).join(', ')
           if (cleanedIndices.includes('Baignoire')) {
-            description = `Baignoire trouvée dans ${photosStr}`
+            indices = `Baignoire détectée ${photosStr}`
           } else if (cleanedIndices.includes('Douche')) {
-            description = `Douche trouvée dans ${photosStr}`
+            indices = `Douche détectée ${photosStr}`
           } else {
-            description = cleanedIndices
+            indices = cleanedIndices
           }
         } else {
-          description = cleanedIndices
+          indices = cleanedIndices
         }
       }
     }
@@ -1833,6 +1868,7 @@ function formatBaignoireCriterion(apartment) {
   return {
     title,
     description,
+    indices,
     tier,
     score,
     confidence: confidencePct
@@ -1840,6 +1876,43 @@ function formatBaignoireCriterion(apartment) {
 }
 
 function formatCalmeCriterion(apartment) {
+  // PRIORITÉ: Utiliser formatted_data depuis le backend (données enrichies)
+  const calmeFormatted = apartment.formatted_data?.calme
+  if (calmeFormatted && calmeFormatted.main_value) {
+    const mainValue = calmeFormatted.main_value
+    let tier = 'tier3'
+    let title = 'Calme'
+    
+    if (mainValue === 'Calme' || mainValue === 'Très calme') {
+      tier = 'tier1'
+      title = 'Calme'
+    } else if (mainValue === 'Moyennement calme') {
+      tier = 'tier2'
+      title = 'Moyennement calme'
+    } else {
+      tier = 'tier3'
+      title = 'Animé'
+    }
+    
+    const indices = calmeFormatted.indices || ''
+    let description = indices
+      .replace(/^Calme Indice:\s*/i, '')
+      .replace(/^Calme:\s*/i, '')
+      .trim()
+    
+    if (!description) {
+      description = 'Non spécifié'
+    }
+    
+    return {
+      title,
+      description,
+      tier,
+      score: tier === 'tier1' ? 20 : tier === 'tier2' ? 10 : 0
+    }
+  }
+  
+  // Fallback: Utiliser scores_detaille si formatted_data n'existe pas
   const scoresDetaille = apartment.scores_detaille || {}
   const calmeScore = scoresDetaille.calme || {}
   
@@ -1893,9 +1966,194 @@ function formatCalmeCriterion(apartment) {
 }
 
 function formatLargePieceVieCriterion(apartment) {
+  // #region agent log
+  const logData = {location:'ApartmentCard.jsx:1947',message:'formatLargePieceVieCriterion entry',data:{aptId:apartment.id,hasCriteria:!!apartment.criteria?.piece_vie?.display?.indices,hasFormattedData:!!apartment.formatted_data?.piece_vie,hasScoresDetaille:!!apartment.scores_detaille?.large_piece_vie},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'};
+  console.log('[DEBUG]', logData);
+  fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logData)}).catch(()=>{});
+  // #endregion
+  // PRIORITÉ ABSOLUE: Utiliser les données normalisées depuis le backend si disponibles
+  if (apartment.criteria?.piece_vie?.display?.indices) {
+    let normalizedIndices = apartment.criteria.piece_vie.display.indices
+    const normalizedTitle = apartment.criteria.piece_vie.display.title
+    const normalizedTier = apartment.criteria.piece_vie.tier
+    const normalizedScore = apartment.criteria.piece_vie.score || 0
+    
+    // Vérifier si le pourcentage est présent dans les indices normalisés
+    const hasPourcentageInIndices = normalizedIndices && (
+      normalizedIndices.includes('% de la surface totale') ||
+      normalizedIndices.includes('% de l\'appartement')
+    )
+    
+    // Si le pourcentage n'est pas présent, chercher dans scores_detaille comme fallback
+    if (!hasPourcentageInIndices) {
+      const scoresDetaille = apartment.scores_detaille || {}
+      const largePieceVieScore = scoresDetaille.large_piece_vie || {}
+      const details = largePieceVieScore.details || {}
+      if (details.pourcentage_salon !== undefined && details.pourcentage_salon !== null) {
+        const pourcentage = parseFloat(details.pourcentage_salon)
+        if (!isNaN(pourcentage)) {
+          // Ajouter le pourcentage aux indices existants ou le créer
+          if (normalizedIndices && normalizedIndices.trim()) {
+            normalizedIndices = `${normalizedIndices} · ${pourcentage.toFixed(1)}% de la surface totale de l'appartement`
+          } else {
+            normalizedIndices = `${pourcentage.toFixed(1)}% de la surface totale de l'appartement`
+          }
+        }
+      }
+    }
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:1961',message:'Using criteria.piece_vie branch',data:{aptId:apartment.id,indices:normalizedIndices,title:normalizedTitle,hasPourcentage:normalizedIndices?.includes('%')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    return {
+      title: normalizedTitle,
+      description: apartment.criteria.piece_vie.display.description,
+      indices: normalizedIndices,
+      tier: normalizedTier,
+      score: normalizedScore
+    }
+  }
+  
+  // PRIORITÉ 2: Utiliser formatted_data depuis le backend (données enrichies)
+  const pieceVieFormatted = apartment.formatted_data?.piece_vie
+  if (pieceVieFormatted && pieceVieFormatted.main_value) {
+    const mainValue = pieceVieFormatted.main_value
+    const indicesRaw = pieceVieFormatted.indices || ''
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:1966',message:'Using formatted_data branch',data:{aptId:apartment.id,mainValue,indicesRaw},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
+    // Nettoyer les indices (retirer préfixe et garder le contenu)
+    let cleanedIndices = indicesRaw
+      .replace(/^Pièce de vie Indice:\s*/i, '')
+      .replace(/^Pièce de vie:\s*/i, '')
+      .trim()
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:1974',message:'After cleaning indices',data:{aptId:apartment.id,cleanedIndices,hasPercentInCleaned:cleanedIndices?.includes('%')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    // Utiliser le main_value comme titre (ex: "Grande pièce de vie")
+    let title = mainValue
+    
+    // Extraire le pourcentage ou les m² depuis les indices pour les mettre dans indices (affichés en bleu)
+    let indices = null
+    let description = null
+    
+    // Chercher d'abord le pourcentage (% de la surface totale) dans les indices
+    const pourcentageMatch = cleanedIndices.match(/(\d+[.,]?\d*)%\s*de\s*la\s*surface\s*totale/i)
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:1984',message:'Regex match result',data:{aptId:apartment.id,pourcentageMatch:!!pourcentageMatch,matchValue:pourcentageMatch?pourcentageMatch[0]:null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    if (pourcentageMatch) {
+      indices = `${pourcentageMatch[1]}% de la surface totale de l'appartement`
+      // Garder la description complète aussi si elle contient plus d'infos
+      if (cleanedIndices.length > pourcentageMatch[0].length + 10) {
+        description = cleanedIndices
+      }
+    } else {
+      // Fallback: chercher le pourcentage dans scores_detaille.large_piece_vie.details.pourcentage_salon
+      const scoresDetaille = apartment.scores_detaille || {}
+      const largePieceVieScore = scoresDetaille.large_piece_vie || {}
+      const details = largePieceVieScore.details || {}
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:1992',message:'Checking scores_detaille fallback',data:{aptId:apartment.id,pourcentageSalon:details.pourcentage_salon,detailsKeys:Object.keys(details)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      if (details.pourcentage_salon !== undefined && details.pourcentage_salon !== null) {
+        const pourcentage = parseFloat(details.pourcentage_salon)
+        if (!isNaN(pourcentage)) {
+          indices = `${pourcentage.toFixed(1)}% de la surface totale de l'appartement`
+          // #region agent log
+          fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:1999',message:'Found pourcentage in scores_detaille',data:{aptId:apartment.id,pourcentage,indices},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+          // #endregion
+          // Si les indices nettoyés contiennent plus d'infos, les mettre dans description
+          if (cleanedIndices && cleanedIndices.length > 50) {
+            description = cleanedIndices
+          }
+        }
+      }
+      
+      // Si toujours pas de pourcentage, chercher les m² dans les indices (ex: "28m²" ou "environ 28m²")
+      if (!indices) {
+        const m2Match = cleanedIndices.match(/(?:environ\s*)?(\d+[.,]?\d*)\s*m²/i)
+        let tailleM2 = m2Match ? parseFloat(m2Match[1].replace(',', '.')) : null
+        
+        // Si pas trouvé dans les indices, chercher dans piece_vie.taille_m2
+        if (!tailleM2) {
+          const pieceVieData = apartment.piece_vie || {}
+          tailleM2 = pieceVieData.taille_m2
+        }
+        
+        // Si on a la taille en m², essayer de calculer le pourcentage depuis la surface totale
+        if (tailleM2) {
+          const surface = apartment.surface || ''
+          const surfaceMatch = surface.match(/(\d+)/)
+          if (surfaceMatch) {
+            const surfaceTotale = parseFloat(surfaceMatch[1])
+            if (surfaceTotale > 0) {
+              const pourcentage = (tailleM2 / surfaceTotale * 100).toFixed(1)
+              indices = `${pourcentage}% de la surface totale de l'appartement`
+              // Si la description complète est longue, la mettre dans description
+              if (cleanedIndices.length > 150) {
+                description = cleanedIndices
+              }
+            } else if (m2Match) {
+              // Pas de surface totale, afficher juste les m²
+              indices = `${tailleM2.toFixed(0)}m²`
+              if (cleanedIndices.length > 150) {
+                description = cleanedIndices
+              }
+            }
+          } else if (m2Match) {
+            // Pas de surface totale, afficher juste les m²
+            indices = `${tailleM2.toFixed(0)}m²`
+            if (cleanedIndices.length > 150) {
+              description = cleanedIndices
+            }
+          }
+        }
+        
+        // Si toujours pas d'indices, utiliser les indices nettoyés
+        if (!indices) {
+          if (cleanedIndices && !cleanedIndices.toLowerCase().includes('non spécifié')) {
+            if (cleanedIndices.length < 100) {
+              // Version courte: mettre dans indices
+              indices = cleanedIndices
+            } else {
+              // Version longue: mettre dans description
+              description = cleanedIndices
+            }
+          } else {
+            description = 'Non spécifié'
+          }
+        }
+      }
+    }
+    
+    // Si pas d'indices ni description, mettre "Non spécifié"
+    if (!indices && !description) {
+      description = 'Non spécifié'
+    }
+    
+    // Récupérer le tier et le score depuis scores_detaille si disponible
+    const scoresDetaille = apartment.scores_detaille || {}
+    const largePieceVieScore = scoresDetaille.large_piece_vie || {}
+    const tier = largePieceVieScore.tier || 'tier3'
+    const score = largePieceVieScore.score || 0
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:2075',message:'Returning formatted_data result',data:{aptId:apartment.id,title,indices,description,hasPourcentage:indices?.includes('%')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+    return {
+      title,
+      description,
+      indices,
+      tier,
+      score
+    }
+  }
+  
+  // Fallback: Utiliser scores_detaille si formatted_data n'existe pas
   const scoresDetaille = apartment.scores_detaille || {}
   const largePieceVieScore = scoresDetaille.large_piece_vie || {}
-  
+  // #region agent log
+  fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:2084',message:'Using scores_detaille fallback branch',data:{aptId:apartment.id,hasLargePieceVie:!!largePieceVieScore,keys:largePieceVieScore?Object.keys(largePieceVieScore):[]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+  // #endregion
   // Si pas encore analysé, afficher "Non analysé"
   if (!largePieceVieScore || Object.keys(largePieceVieScore).length === 0) {
     return {
@@ -1909,7 +2167,9 @@ function formatLargePieceVieCriterion(apartment) {
   const tier = largePieceVieScore.tier || 'tier3'
   const justification = largePieceVieScore.justification || ''
   const details = largePieceVieScore.details || {}
-  
+  // #region agent log
+  fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:2094',message:'scores_detaille details check',data:{aptId:apartment.id,pourcentageSalon:details.pourcentage_salon,detailsKeys:Object.keys(details)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+  // #endregion
   // Titre selon le tier
   let title = 'Pièce de vie'
   if (tier === 'tier1') {
@@ -1921,207 +2181,244 @@ function formatLargePieceVieCriterion(apartment) {
   }
   
   // Description depuis la justification ou les détails
-  let description = justification
-  if (!description && details.pourcentage_salon !== undefined) {
+  let description = null
+  let indices = null
+  
+  // Les résultats IA (% de la surface totale) doivent être dans indices (affichés en bleu)
+  if (details.pourcentage_salon !== undefined) {
     const pourcentage = details.pourcentage_salon
-    const salonSize = details.salon_size_estimate
-    if (salonSize && pourcentage) {
-      description = `${salonSize}m² (${pourcentage.toFixed(1)}% de la surface totale)`
+    if (pourcentage !== null && pourcentage !== undefined) {
+      indices = `${pourcentage.toFixed(1)}% de la surface totale de l'appartement`
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:2107',message:'scores_detaille branch found pourcentage',data:{aptId:apartment.id,pourcentage,indices},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
     }
   }
   
-  if (!description) {
+  // Si pas de pourcentage, utiliser formatted_data
+  if (!indices && apartment.formatted_data?.piece_vie) {
+    const pieceVieFormatted = apartment.formatted_data.piece_vie
+    const pieceVieIndices = pieceVieFormatted.indices
+    if (pieceVieIndices) {
+      // Nettoyer le préfixe "Pièce de vie Indice:" si présent
+      let cleanedIndices = pieceVieIndices
+        .replace(/^Pièce de vie Indice:\s*/i, '')
+        .replace(/^Pièce de vie:\s*/i, '')
+        .trim()
+      // Chercher le pourcentage dans les indices
+      const pourcentageMatch = cleanedIndices.match(/(\d+[.,]?\d*)%\s*de\s*la\s*surface\s*totale/i)
+      if (pourcentageMatch) {
+        // S'assurer que "de l'appartement" est présent
+        if (!cleanedIndices.includes('de l\'appartement')) {
+          indices = `${pourcentageMatch[1]}% de la surface totale de l'appartement`
+        } else {
+          indices = cleanedIndices
+        }
+      } else {
+        // Si pas de pourcentage mais qu'on a des indices, les utiliser quand même
+        // (peut contenir la taille en m²)
+        if (cleanedIndices && cleanedIndices !== 'Non spécifié') {
+          indices = cleanedIndices
+        }
+      }
+    }
+  }
+  
+  // Fallback: chercher dans style_analysis.piece_vie directement
+  if (!indices) {
+    const styleAnalysis = apartment.style_analysis || {}
+    const pieceVieStyle = styleAnalysis.piece_vie || {}
+    const tailleM2 = pieceVieStyle.taille_m2
+    const details = pieceVieStyle.details || {}
+    const pourcentage = details.pourcentage_salon || details.pourcentage
+    
+    if (tailleM2 || pourcentage) {
+      const indicesParts = []
+      if (tailleM2) {
+        try {
+          indicesParts.push(`${parseFloat(tailleM2).toFixed(0)}m²`)
+        } catch (e) {
+          // Ignorer les erreurs de parsing
+        }
+      }
+      if (pourcentage) {
+        try {
+          indicesParts.push(`${parseFloat(pourcentage).toFixed(1)}% de la surface totale de l'appartement`)
+        } catch (e) {
+          // Ignorer les erreurs de parsing
+        }
+      }
+      if (indicesParts.length > 0) {
+        indices = indicesParts.join(' · ')
+      }
+    }
+  }
+  
+  // Si pas de résultats IA, utiliser la justification comme description (pas IA)
+  if (!indices && justification) {
+    description = justification
+  } else if (!indices) {
     description = 'Non spécifié'
   }
   
   return {
     title,
     description,
+    indices,
     tier,
     score: largePieceVieScore.score || 0
   }
 }
 
-// Fonction pour formater les données manuelles (sans IA) pour les appartements sans données enrichies
-function formatManualDataCriteria(apartment, etage) {
-  const criteria = []
+function formatHauteurPlafondCriterion(apartment) {
+  const scoresDetaille = apartment.scores_detaille || {}
+  const hauteurScore = scoresDetaille.hauteur_plafond || {}
   
-  // 1. Localisation (Metro + Adresse)
-  const locData = formatLocalisation(apartment)
-  if (locData.title || locData.description) {
-    criteria.push({
-      name: 'Localisation',
-      title: locData.title || 'Localisation',
-      description: locData.description || '',
-      emoji: '📍'
-    })
+  // Extraire la hauteur depuis différentes sources (priorité: formatted_data > analyses > style_analysis > scores_detaille)
+  let hauteurEstimee = null
+  let tier = 'tier3'
+  let justification = ''
+  let hauteurFormatted = null
+  
+  // PRIORITÉ 1: Chercher dans formatted_data.hauteur_plafond (données enrichies)
+  // Fallback: chercher aussi dans formatted_data.hauteur (ancien format)
+  if (apartment.formatted_data?.hauteur_plafond) {
+    hauteurFormatted = apartment.formatted_data.hauteur_plafond
+  } else if (apartment.formatted_data?.hauteur) {
+    // Support de l'ancien format pour compatibilité
+    hauteurFormatted = apartment.formatted_data.hauteur
   }
   
-  // 2. Prix par m²
-  const prixData = formatPrixCriterion(apartment)
-  if (prixData.title && prixData.description && prixData.description !== 'Non analysé') {
-    criteria.push({
-      name: 'Prix',
-      title: prixData.title,
-      description: prixData.description,
-      emoji: '💰'
-    })
-  }
-  
-  // 3. Style architectural
-  const styleData = formatStyleCriterion(apartment)
-  if (styleData.title || styleData.description) {
-    criteria.push({
-      name: 'Style',
-      title: styleData.title || 'Style',
-      description: styleData.description || 'Non spécifié',
-      emoji: '🔑',
-      indices: styleData.indices
-    })
-  }
-  
-  // 4. Luminosité/Exposition
-  // Calculer la luminosité en fonction de l'étage (logique du backend)
-  let expoTitle = 'Luminosité normale' // Par défaut
-  let expoDescription = etage || 'Non spécifié'
-  
-  // Extraire le numéro d'étage pour calculer la luminosité
-  let etageNum = null
-  if (etage) {
-    // Extraire le numéro depuis "3e étage", "1er étage", "RDC", etc.
-    const etageMatch = etage.match(/(\d+)(?:er?|e|ème?)/i)
-    if (etageMatch) {
-      etageNum = parseInt(etageMatch[1])
-    } else if (etage.toLowerCase().includes('rdc') || etage.toLowerCase().includes('rez')) {
-      etageNum = 0
+  if (hauteurFormatted) {
+    const indices = hauteurFormatted.indices || ''
+    // Extraire la hauteur depuis les indices (ex: "Moyenne 2,70m") ou main_value (ex: "2,55m")
+    let match = indices.match(/(\d+[.,]\d+)\s*m/i)
+    if (!match && hauteurFormatted.main_value) {
+      match = hauteurFormatted.main_value.match(/(\d+[.,]\d+)\s*m/i)
+    }
+    if (match) {
+      hauteurEstimee = parseFloat(match[1].replace(',', '.'))
     }
   }
   
-  // Logique de classification selon l'étage (même que backend)
-  // Sombre : < 3e étage (RDC, 1er, 2e)
-  // Moyen : 3e-4e étage
-  // Lumineux : > 4e étage (≥5e)
-  if (etageNum !== null) {
-    if (etageNum < 3) {
-      expoTitle = 'Sombre'
-    } else if (etageNum >= 3 && etageNum <= 4) {
-      expoTitle = 'Luminosité normale'
-    } else if (etageNum > 4) {
-      expoTitle = 'Lumineux'
-    }
+  // PRIORITÉ 2: Chercher dans analyses.hauteur_plafond
+  if (!hauteurEstimee) {
+    const analyses = apartment.analyses || {}
+    const hauteurData = analyses.hauteur_plafond || {}
+    hauteurEstimee = hauteurData.hauteur_estimee || hauteurData.hauteur_estimate
   }
   
-  // Essayer d'améliorer avec l'orientation si disponible (upgrade)
-  const exposition = apartment.exposition || {}
-  const expositionDir = exposition.exposition || ''
-  if (expositionDir && etageNum !== null) {
-    const expoNormalized = expositionDir.toLowerCase().replace(/[_\s-]/g, '')
-    // Upgrade si Sud/Ouest mentionné
-    if (expoNormalized === 'sud' || expoNormalized === 'sudouest' || expoNormalized === 'sudest') {
-      if (expoTitle === 'Sombre') {
-        expoTitle = 'Luminosité normale'
-      } else if (expoTitle === 'Luminosité normale') {
-        expoTitle = 'Lumineux'
-      }
-    } else if (expoNormalized === 'nord' || expoNormalized === 'nordouest' || expoNormalized === 'nordest') {
-      // Downgrade si Nord
-      if (expoTitle === 'Lumineux') {
-        expoTitle = 'Luminosité normale'
-      } else if (expoTitle === 'Luminosité normale') {
-        expoTitle = 'Sombre'
-      }
-    }
-  }
-  
-  // Fallback: utiliser style_analysis si disponible
-  if (expoTitle === 'Luminosité normale' && etageNum === null) {
+  // PRIORITÉ 3: Chercher dans style_analysis.hauteur_plafond
+  if (!hauteurEstimee) {
     const styleAnalysis = apartment.style_analysis || {}
-    const luminositeData = styleAnalysis.luminosite || {}
-    const luminositeType = luminositeData.type || ''
-    if (luminositeType) {
-      if (luminositeType.toLowerCase().includes('excellente')) {
-        expoTitle = 'Lumineux'
-      } else if (luminositeType.toLowerCase().includes('sombre')) {
-        expoTitle = 'Sombre'
+    const hauteurStyle = styleAnalysis.hauteur_plafond || {}
+    hauteurEstimee = hauteurStyle.value
+    // Fallback: chercher dans style_analysis.style.hauteur_plafond_estimee
+    if (!hauteurEstimee) {
+      const styleData = styleAnalysis.style || {}
+      hauteurEstimee = styleData.hauteur_plafond_estimee
+    }
+  }
+  
+  // PRIORITÉ 4: Chercher dans scores_detaille.hauteur_plafond (justification)
+  if (!hauteurEstimee && hauteurScore && Object.keys(hauteurScore).length > 0) {
+    tier = hauteurScore.tier || 'tier3'
+    justification = hauteurScore.justification || ''
+    if (justification) {
+      // Chercher un pattern comme "2.80m" ou "2,80m" dans la justification
+      const match = justification.match(/(\d+[.,]\d+)\s*m/i)
+      if (match) {
+        hauteurEstimee = parseFloat(match[1].replace(',', '.'))
       }
     }
   }
   
-  criteria.push({
-    name: 'Exposition',
-    title: expoTitle,
-    description: expoDescription,
-    emoji: '☀️'
-  })
+  // Si pas encore analysé, afficher "Non analysé"
+  if (!hauteurEstimee && (!hauteurScore || Object.keys(hauteurScore).length === 0)) {
+    return {
+      title: 'Hauteur plafond',
+      description: 'Non analysé',
+      tier: 'tier3',
+      score: 0
+    }
+  }
   
-  // 5. Cuisine
-  // Pour les données manuelles, utiliser un format simplifié
-  let cuisineTitle = 'Cuisine'
-  let cuisineDescription = 'non specifié'
+  // Si on a une hauteur mais pas de tier, le calculer depuis la hauteur
+  if (hauteurEstimee && (!hauteurScore || Object.keys(hauteurScore).length === 0)) {
+    if (hauteurEstimee >= 2.80) {
+      tier = 'tier1'
+    } else if (hauteurEstimee >= 2.50) {
+      tier = 'tier2'
+    } else {
+      tier = 'tier3'
+    }
+  } else if (hauteurScore && Object.keys(hauteurScore).length > 0) {
+    tier = hauteurScore.tier || 'tier3'
+    justification = hauteurScore.justification || ''
+  }
   
-  // Essayer d'extraire depuis les données brutes si disponibles
-  const cuisineData = formatCuisineCriterion(apartment)
-  if (cuisineData.title && cuisineData.title !== 'Cuisine' && cuisineData.description && cuisineData.description !== 'Non analysée') {
-    cuisineTitle = cuisineData.title
-    cuisineDescription = cuisineData.description
+  // Titre selon le tier et la hauteur
+  let title = 'Hauteur plafond'
+  if (hauteurEstimee) {
+    if (hauteurEstimee >= 2.80) {
+      title = 'Belle hauteur plafond'
+    } else {
+      // Format avec virgule pour les décimales (format français)
+      title = `${hauteurEstimee.toFixed(2).replace('.', ',')}m`
+    }
   } else {
-    // Chercher dans style_analysis si disponible
-    const styleAnalysis = apartment.style_analysis || {}
-    const cuisineAnalysis = styleAnalysis.cuisine || {}
-    if (cuisineAnalysis.ouverte !== undefined) {
-      cuisineTitle = cuisineAnalysis.ouverte ? 'Cuisine ouverte' : 'Cuisine fermée'
-      cuisineDescription = 'Détectée dans les données'
+    if (tier === 'tier1') {
+      title = 'Belle hauteur plafond'
+    } else if (tier === 'tier2') {
+      title = 'Hauteur plafond'
+    } else {
+      title = 'Hauteur plafond'
     }
   }
   
-  criteria.push({
-    name: 'Cuisine',
-    title: cuisineTitle,
-    description: cuisineDescription,
-    emoji: '👨‍🍳'
-  })
+  // Description depuis la justification ou formatted_data
+  let description = null
+  let indices = null
   
-  // 6. Ascenseur
-  const caracteristiques = apartment.caracteristiques || {}
-  const description = apartment.description || ''
-  const apiData = apartment._api_data || {}
-  const features = apiData.features || {}
-  
-  let hasAscenseur = false
-  let ascenseurDescription = 'Analyse manquante'
-  
-  // Vérifier dans caracteristiques
-  if (typeof caracteristiques === 'object' && caracteristiques.ascenseur !== undefined) {
-    hasAscenseur = caracteristiques.ascenseur === true || caracteristiques.ascenseur === 'Oui' || caracteristiques.ascenseur === 'oui'
-    ascenseurDescription = hasAscenseur ? 'Ascenseur présent' : 'Pas d\'ascenseur'
-  } else if (typeof caracteristiques === 'string' && caracteristiques.toLowerCase().includes('ascenseur')) {
-    hasAscenseur = !caracteristiques.toLowerCase().includes('sans ascenseur')
-    ascenseurDescription = hasAscenseur ? 'Ascenseur présent' : 'Pas d\'ascenseur'
-  } else if (features.lift === 1) {
-    hasAscenseur = true
-    ascenseurDescription = 'Ascenseur présent'
-  } else if (description.toLowerCase().includes('ascenseur')) {
-    hasAscenseur = !description.toLowerCase().includes('sans ascenseur')
-    ascenseurDescription = hasAscenseur ? 'Ascenseur présent' : 'Pas d\'ascenseur'
+  // PRIORITÉ: Utiliser formatted_data.hauteur_plafond ou hauteur (données enrichies du backend)
+  // Les résultats IA doivent être dans indices (affichés en bleu)
+  if (hauteurFormatted) {
+    const hauteurIndices = hauteurFormatted.indices
+    if (hauteurIndices) {
+      // Nettoyer le préfixe "Hauteur Indice:" si présent
+      let cleanedIndices = hauteurIndices.replace(/^Hauteur Indice:\s*/i, '').trim()
+      if (cleanedIndices && cleanedIndices !== 'Non spécifié') {
+        indices = cleanedIndices
+      }
+    }
+    // Si pas d'indices mais qu'on a main_value, l'utiliser
+    if (!indices && hauteurFormatted.main_value) {
+      const mainValueMatch = hauteurFormatted.main_value.match(/(\d+[.,]\d+)\s*m/i)
+      if (mainValueMatch) {
+        indices = hauteurFormatted.main_value
+      }
+    }
   }
   
-  criteria.push({
-    name: 'Ascenseur',
-    title: hasAscenseur ? 'Ascenseur' : 'Pas d\'ascenseur',
-    description: ascenseurDescription,
-    emoji: '🛗'
-  })
+  // Fallback: utiliser la hauteur estimée si pas d'indices depuis formatted_data
+  if (!indices && hauteurEstimee) {
+    indices = `Hauteur moyenne ${hauteurEstimee.toFixed(2).replace('.', ',')}m`
+  }
   
-  // 7. Taille pièce de vie
-  const largePieceVieData = formatLargePieceVieCriterion(apartment)
-  criteria.push({
-    name: 'Pièce de vie',
-    title: 'Taille pièce de vie',
-    description: largePieceVieData.description || 'Analyse manquante',
-    emoji: '🛋️'
-  })
+  // Si pas de hauteur estimée, utiliser la justification comme description (pas IA)
+  if (!indices && justification) {
+    description = justification
+  } else if (!indices) {
+    description = 'Non spécifié'
+  }
   
-  return criteria
+  return {
+    title,
+    description,
+    indices,
+    tier,
+    score: hauteurScore.score || 0
+  }
 }
 
 // Mapping des critères vers leurs emojis
@@ -2132,7 +2429,7 @@ const CRITERION_EMOJIS = {
   'Exposition': '☀️',
   'Cuisine': '👨‍🍳',
   'Baignoire': '🛁',
-  'Calme': '🔇',
+  'Hauteur plafond': '📏',
   'Pièce de vie': '🛋️'
 }
 
@@ -2193,6 +2490,11 @@ function Criterion({ name, score, tier, value, confidence, indices, tierLabel, t
   if (noBorderBottom) criterionClasses.push('criterion-no-border-bottom')
   if (noBorderTop) criterionClasses.push('criterion-no-border-top')
   
+  // Classes pour la description (bleu si analyse IA, sinon utiliser descriptionClass)
+  const descriptionClassFinal = descriptionClass 
+    ? `criterion-description-${descriptionClass}` 
+    : ''
+  
   return (
     <div className={criterionClasses.join(' ')}>
       <div className="criterion-content">
@@ -2201,7 +2503,7 @@ function Criterion({ name, score, tier, value, confidence, indices, tierLabel, t
           <div className="criterion-text-wrapper">
             <div className="criterion-name">{title}</div>
             {description && (
-              <div className={`criterion-description ${descriptionClass ? `criterion-description-${descriptionClass}` : ''}`}>
+              <div className={`criterion-description ${descriptionClassFinal}`}>
                 {typeof description === 'string' ? (
                   <span dangerouslySetInnerHTML={{ __html: description.replace(/m²/g, 'm<sup>2</sup>') }} />
                 ) : (
@@ -2246,5 +2548,3 @@ function Criterion({ name, score, tier, value, confidence, indices, tierLabel, t
 }
 
 export default ApartmentCard
-
-

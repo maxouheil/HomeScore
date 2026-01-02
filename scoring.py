@@ -821,31 +821,66 @@ def score_cuisine(apartment, config):
     style_analysis = apartment.get('style_analysis', {})
     cuisine_data = style_analysis.get('cuisine', {})
     
-    # Si on a déjà une analyse cuisine avec des données valides, l'utiliser
-    if cuisine_data and cuisine_data.get('ouverte') is not None:
-        cuisine_ouverte = cuisine_data.get('ouverte', False)
+    # Si on a déjà une analyse cuisine (même si ouverte est None), créer la structure photo_validation
+    if cuisine_data:
+        cuisine_ouverte = cuisine_data.get('ouverte')
         confidence = cuisine_data.get('confidence', 0)
         justification = cuisine_data.get('justification', '')
+        detected_photos = cuisine_data.get('detected_photos', [])
         
-        if cuisine_ouverte:
+        # Construire photo_validation avec photo_result pour que format_cuisine puisse le trouver
+        photo_validation = cuisine_data.get('photo_validation', {})
+        if not photo_validation or 'photo_result' not in photo_validation:
+            # Créer la structure photo_validation.photo_result si elle n'existe pas
+            photo_validation = {
+                'photo_result': {
+                    'ouverte': cuisine_ouverte,
+                    'confidence': confidence,
+                    'detected_photos': detected_photos
+                }
+            }
+        elif 'photo_result' in photo_validation:
+            # S'assurer que photo_result a les bonnes valeurs
+            photo_result = photo_validation.get('photo_result', {})
+            if 'ouverte' not in photo_result:
+                photo_result['ouverte'] = cuisine_ouverte
+            if 'confidence' not in photo_result and confidence:
+                photo_result['confidence'] = confidence
+            if 'detected_photos' not in photo_result and detected_photos:
+                photo_result['detected_photos'] = detected_photos
+        
+        # Si on a une valeur déterminée (True ou False), utiliser le score approprié
+        if cuisine_ouverte is True:
             return {
                 'score': tier_config['tier1']['score'],
                 'tier': 'tier1',
                 'justification': justification or "Cuisine ouverte",
                 'details': {
                     'confidence': confidence,
-                    'photo_validation': cuisine_data.get('photo_validation'),
+                    'photo_validation': photo_validation,
                     'validation_status': 'from_style_analysis'
                 }
             }
-        else:
+        elif cuisine_ouverte is False:
             return {
                 'score': tier_config['tier3']['score'],
                 'tier': 'tier3',
                 'justification': justification or "Cuisine fermée",
                 'details': {
                     'confidence': confidence,
-                    'photo_validation': cuisine_data.get('photo_validation'),
+                    'photo_validation': photo_validation,
+                    'validation_status': 'from_style_analysis'
+                }
+            }
+        else:
+            # cuisine_ouverte est None = non détectée ou non déterminable
+            return {
+                'score': tier_config['tier2']['score'],
+                'tier': 'tier2',
+                'justification': justification or "Cuisine non analysée",
+                'details': {
+                    'confidence': confidence,
+                    'photo_validation': photo_validation,
                     'validation_status': 'from_style_analysis'
                 }
             }

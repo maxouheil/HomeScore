@@ -59,11 +59,29 @@ async def websocket_endpoint(websocket: WebSocket):
 
 async def broadcast_to_clients(message: dict):
     """Envoie un message à tous les clients WebSocket connectés"""
+    # #region agent log
+    import json as json_module
+    import time
+    with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+        logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"main.py:60","message":"broadcast_to_clients called","data":{"message_type":message.get("type"),"connections_count":len(active_connections)},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
+    # #endregion
     disconnected = []
     for connection in active_connections:
         try:
+            # #region agent log
+            with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+                logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"main.py:68","message":"Sending WebSocket message to client","data":{"message_type":message.get("type")},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
+            # #endregion
             await connection.send_json(message)
+            # #region agent log
+            with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+                logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"main.py:72","message":"WebSocket message sent successfully","data":{},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
+            # #endregion
         except Exception as e:
+            # #region agent log
+            with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+                logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"main.py:75","message":"Error sending WebSocket message","data":{"error":str(e)},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
+            # #endregion
             print(f"Erreur lors de l'envoi WebSocket: {e}")
             disconnected.append(connection)
     
@@ -71,6 +89,10 @@ async def broadcast_to_clients(message: dict):
     for conn in disconnected:
         if conn in active_connections:
             active_connections.remove(conn)
+    # #region agent log
+    with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+        logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"main.py:83","message":"broadcast_to_clients completed","data":{"sent_count":len(active_connections) - len(disconnected),"disconnected_count":len(disconnected)},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
+    # #endregion
 
 # Instance globale du service de surveillance
 watch_service_instance = None
@@ -79,8 +101,13 @@ watch_service_instance = None
 async def startup_event():
     """Démarre le service de surveillance des fichiers"""
     global watch_service_instance
+    import asyncio
     print("🚀 Démarrage du serveur HomeScore API")
+    # Obtenir la boucle principale pour le watch service
+    main_loop = asyncio.get_event_loop()
     watch_service_instance = WatchService(broadcast_callback=broadcast_to_clients)
+    # Stocker la boucle principale pour pouvoir l'utiliser depuis le thread de watch
+    watch_service_instance._main_loop = main_loop
     watch_service_instance.start_watching()
 
 @app.on_event("shutdown")
@@ -109,11 +136,15 @@ async def health():
     return {"status": "ok"}
 
 if __name__ == "__main__":
+    import os
+    # Désactiver le reload par défaut pour éviter les rechargements constants
+    # Activer avec RELOAD=true dans l'environnement si nécessaire
+    reload_enabled = os.getenv("RELOAD", "false").lower() == "true"
     uvicorn.run(
         "backend.main:app",
         host="0.0.0.0",
         port=8000,
-        reload=True,
+        reload=reload_enabled,
         log_level="info"
     )
 

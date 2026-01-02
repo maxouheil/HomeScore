@@ -67,9 +67,9 @@ def analyze_photos_once(apartment):
         from analyze_apartment_unified import UnifiedApartmentAnalyzer
         unified_analyzer = UnifiedApartmentAnalyzer()
         
-        # Analyser l'appartement UNE SEULE FOIS pour tout extraire (style, cuisine, baignoire, luminosité)
-        # OPTIMISATION: Réduire à 3 photos (au lieu de 5) pour réduire les coûts de 24%
-        unified_result = unified_analyzer.analyze_apartment_unified(apartment, max_photos=3)
+        # Analyser l'appartement UNE SEULE FOIS pour tout extraire (style, cuisine, baignoire, luminosité, hauteur plafond, taille pièce de vie)
+        # Analyse jusqu'à 7 photos pour une meilleure couverture des critères
+        unified_result = unified_analyzer.analyze_apartment_unified(apartment, max_photos=7)
         
         if unified_result:
             # 1. Style

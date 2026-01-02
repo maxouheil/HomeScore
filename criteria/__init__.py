@@ -11,6 +11,7 @@ from .cuisine import format_cuisine
 from .baignoire import format_baignoire
 from .hauteur import format_hauteur
 from .calme import format_calme
+from .piece_vie import format_piece_vie
 
 __all__ = [
     'format_localisation',
@@ -21,6 +22,7 @@ __all__ = [
     'format_baignoire',
     'format_hauteur',
     'format_calme',
+    'format_piece_vie',
     'get_metro_name',
     'get_quartier_name',
 ]

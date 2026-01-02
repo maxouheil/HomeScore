@@ -74,8 +74,11 @@ def install_frontend_dependencies():
 def start_backend():
     """Démarre le serveur backend FastAPI"""
     print("\n🚀 Démarrage du backend (port 8000)...")
+    # Le reload est désactivé par défaut pour éviter les rechargements constants
+    # Activer avec RELOAD=true dans l'environnement si nécessaire
+    reload_flag = ['--reload'] if os.getenv('RELOAD', 'false').lower() == 'true' else []
     backend_process = subprocess.Popen(
-        [sys.executable, '-m', 'uvicorn', 'backend.main:app', '--host', '0.0.0.0', '--port', '8000', '--reload'],
+        [sys.executable, '-m', 'uvicorn', 'backend.main:app', '--host', '0.0.0.0', '--port', '8000'] + reload_flag,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         universal_newlines=True,

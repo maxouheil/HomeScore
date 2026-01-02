@@ -86,7 +86,8 @@ class BatchAnalyzer:
         for attempt in range(max_retries):
             try:
                 # Vérifier le cache avant analyse (déjà fait dans analyze_apartment_unified)
-                result = self.analyzer.analyze_apartment_unified(apartment, max_photos=3)
+                # Analyse jusqu'à 7 photos pour une meilleure couverture des critères
+                result = self.analyzer.analyze_apartment_unified(apartment, max_photos=7)
                 
                 if result:
                     self.stats['analyzed'] += 1

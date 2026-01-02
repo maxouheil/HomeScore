@@ -350,6 +350,15 @@ Contributions are welcome! To contribute:
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
+### 📝 Documentation Conventions
+
+**⚠️ IMPORTANT**: When referencing project paths in Markdown files:
+
+- ✅ **CORRECT**: `Cursor/homescore` (no space)
+- ❌ **FORBIDDEN**: `Cursor /homescore` (with space)
+
+Always use `Cursor/homescore` without space in all `.md` files. See `RÈGLE_CHEMINS_FICHIERS.md` for more details.
+
 ## 📄 License
 
 This project is licensed under the MIT License. See the `LICENSE` file for details.

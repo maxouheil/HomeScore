@@ -19,6 +19,9 @@ def main():
     
     try:
         # Démarrer le serveur avec uvicorn
+        # Le reload est désactivé par défaut pour éviter les rechargements constants
+        # Activer avec RELOAD=true dans l'environnement si nécessaire
+        reload_flag = ['--reload'] if os.getenv('RELOAD', 'false').lower() == 'true' else []
         subprocess.run(
             [
                 sys.executable, 
@@ -26,9 +29,8 @@ def main():
                 'uvicorn', 
                 'backend.main:app', 
                 '--host', '0.0.0.0', 
-                '--port', '8000', 
-                '--reload'
-            ],
+                '--port', '8000'
+            ] + reload_flag,
             check=True
         )
     except KeyboardInterrupt:

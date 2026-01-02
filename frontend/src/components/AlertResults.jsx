@@ -1,7 +1,40 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import ApartmentCard from './ApartmentCard'
+import ApartmentCardSimplified from './ApartmentCardSimplified'
 import Pagination from './Pagination'
 import './AlertResults.css'
+
+// Fonction helper pour vérifier si un appartement a des photos valides
+// Utilise exactement la même logique que ApartmentCard.jsx
+function hasValidPhotos(apartment) {
+  if (!apartment || !apartment.photos) {
+    return false
+  }
+  
+  if (!Array.isArray(apartment.photos) || apartment.photos.length === 0) {
+    return false
+  }
+  
+  const apartmentId = apartment.id
+  const photoUrls = []
+  
+  // Utiliser exactement la même logique que dans ApartmentCard.jsx
+  apartment.photos.forEach(photo => {
+    // Ignorer les valeurs null, undefined, ou vides
+    if (!photo) return
+    
+    const url = typeof photo === 'string' ? photo : (photo.url || photo.local_path)
+    
+    // Vérifier que l'URL est valide et non vide (même logique que ApartmentCard)
+    if (url && typeof url === 'string' && url.trim() !== '' && 
+        !url.includes('logo') && !url.includes('Logo')) {
+      // La conversion des URLs se fait dans ApartmentCard, ici on vérifie juste que l'URL existe
+      photoUrls.push(url.trim())
+    }
+  })
+  
+  // Retourner true seulement si on a au moins une photo valide
+  return photoUrls.length > 0
+}
 
 function AlertResults({ alertId, alert, sortBy = 'score' }) {
   const [apartmentsRaw, setApartmentsRaw] = useState([])
@@ -101,7 +134,10 @@ function AlertResults({ alertId, alert, sortBy = 'score' }) {
   const apartments = useMemo(() => {
     if (apartmentsRaw.length === 0) return []
     
-    return [...apartmentsRaw].sort((a, b) => {
+    // Filtrer les appartements sans photos
+    const apartmentsWithPhotos = apartmentsRaw.filter(apartment => hasValidPhotos(apartment))
+    
+    return [...apartmentsWithPhotos].sort((a, b) => {
       if (sortBy === 'date') {
         // Trier par date de publication (plus récent en premier)
         const dateA = a.date_creation_annonce || a.scraped_at || ''
@@ -324,7 +360,7 @@ function AlertResults({ alertId, alert, sortBy = 'score' }) {
             className="apartment-card-wrapper"
             style={{ animationDelay: `${index * 0.1}s` }}
           >
-            <ApartmentCard 
+            <ApartmentCardSimplified 
               apartment={apartment} 
               alertCriteria={alertData?.criteria}
               key={`card-${apartment.id}`}

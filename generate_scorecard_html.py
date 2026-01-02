@@ -1372,10 +1372,11 @@ def generate_scorecard_html(apartments):
             color: #999;
             font-size: 2rem;
             position: relative;
+            border-radius: 8px 8px 0 0;
         }}
         
-        .apartment-image-placeholder::before {{
-            content: "📷";
+        .apartment-image-placeholder svg {{
+            opacity: 0.4;
         }}
         
         .apartment-image-container {{
@@ -1850,7 +1851,13 @@ def generate_scorecard_html(apartments):
             photo_html = f'<div class="apartment-image-container"><div class="score-badge-top" style="background: {score_badge_color};">{mega_score_display}</div><div class="apartment-image" style="{photo_style}"></div></div>'
         else:
             # Aucune photo
-            photo_html = f'<div class="apartment-image-container"><div class="score-badge-top" style="background: {score_badge_color};">{mega_score_display}</div><div class="apartment-image-placeholder"></div></div>'
+            placeholder_svg = '''<svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="3" y="6" width="18" height="12" rx="2" fill="#666" opacity="0.3"/>
+                <path d="M9 3L7.17 5H4C2.9 5 2 5.9 2 7V17C2 18.1 2.9 19 4 19H20C21.1 19 22 18.1 22 17V7C22 5.9 21.1 5 20 5H16.83L15 3H9Z" fill="#666" opacity="0.4"/>
+                <circle cx="12" cy="11" r="3" fill="#666" opacity="0.3"/>
+                <path d="M2 2L22 22" stroke="#666" stroke-width="2.5" stroke-linecap="round" opacity="0.6"/>
+            </svg>'''
+            photo_html = f'<div class="apartment-image-container"><div class="score-badge-top" style="background: {score_badge_color};">{mega_score_display}</div><div class="apartment-image-placeholder">{placeholder_svg}</div></div>'
         
         html += f"""
             <div class="scorecard" onclick="window.open('{apartment_url}', '_blank')">

@@ -1,5 +1,6 @@
-import { useEffect, useState, useMemo } from 'react'
-import ApartmentCard from './components/ApartmentCard'
+import { useEffect, useState, useMemo, useRef } from 'react'
+import ApartmentCardSimplified from './components/ApartmentCardSimplified'
+import ApartmentCard from './components/ApartmentCard' // Fallback pour compatibilité
 import AlertCreator from './components/AlertCreator'
 import AlertResults from './components/AlertResults'
 import AlertSidebar from './components/AlertSidebar'
@@ -8,6 +9,78 @@ import RefreshToast from './components/RefreshToast'
 import Pagination from './components/Pagination'
 import { calculateMegaScore } from './utils/scoreUtils'
 import './App.css'
+
+// Fonction helper pour vérifier si un appartement a des photos valides
+// Utilise EXACTEMENT la même logique que ApartmentCard.jsx (lignes 456-476)
+// MAIS filtre aussi les URLs externes suspectes (Googleusercontent, etc.) qui ne se chargent souvent pas
+function hasValidPhotos(apartment) {
+  if (!apartment || !apartment.photos) {
+    return false
+  }
+  
+  if (!Array.isArray(apartment.photos) || apartment.photos.length === 0) {
+    return false
+  }
+  
+  const apartmentId = apartment.id
+  const photoUrls = []
+  const localPhotos = []
+  const externalPhotos = []
+  
+  // Utiliser EXACTEMENT la même logique que dans ApartmentCard.jsx
+  apartment.photos.forEach(photo => {
+    // Ignorer les valeurs null, undefined, ou vides
+    if (!photo) return
+    
+    const url = typeof photo === 'string' ? photo : (photo.url || photo.local_path)
+    
+    // Vérifier que l'URL est valide et non vide (EXACTEMENT comme ApartmentCard ligne 464-465)
+    if (url && typeof url === 'string' && url.trim() !== '' && 
+        !url.includes('logo') && !url.includes('Logo')) {
+      const trimmedUrl = url.trim()
+      photoUrls.push(trimmedUrl)
+      
+      // Catégoriser les photos : locales vs externes
+      if (trimmedUrl.startsWith('/data/photos/') || 
+          trimmedUrl.startsWith('../data/photos/') ||
+          trimmedUrl.startsWith('data/photos/') ||
+          (!trimmedUrl.startsWith('http') && !trimmedUrl.startsWith('https'))) {
+        localPhotos.push(trimmedUrl)
+      } else {
+        externalPhotos.push(trimmedUrl)
+      }
+    }
+  })
+  
+  // Si on a des photos locales, c'est bon
+  if (localPhotos.length > 0) {
+    return true
+  }
+  
+  // Si on n'a QUE des photos externes, vérifier qu'elles ne sont pas toutes suspectes
+  // Les URLs Googleusercontent sont souvent expirées/invalides
+  if (externalPhotos.length > 0) {
+    // Filtrer les URLs suspectes (Googleusercontent, etc.)
+    const suspiciousDomains = ['googleusercontent.com', 'googleapis.com']
+    const validExternalPhotos = externalPhotos.filter(url => {
+      // Vérifier que l'URL n'est pas d'un domaine suspect
+      const isSuspicious = suspiciousDomains.some(domain => url.includes(domain))
+      return !isSuspicious
+    })
+    
+    // Si on a au moins une photo externe non suspecte, c'est bon
+    if (validExternalPhotos.length > 0) {
+      return true
+    }
+    
+    // Si toutes les photos externes sont suspectes, les considérer comme invalides
+    // (car elles ne se chargeront probablement pas)
+    return false
+  }
+  
+  // Retourner true seulement si on a au moins une photo valide
+  return photoUrls.length > 0
+}
 
 function App() {
   const [selectedAlert, setSelectedAlert] = useState(null)
@@ -22,6 +95,7 @@ function App() {
   const [enrichmentProgress, setEnrichmentProgress] = useState({ current: 0, total: 0, visible: false })
   
   const [apartmentsRaw, setApartmentsRaw] = useState([])
+  const apartmentsRawRef = useRef([]) // Ref pour comparer les données
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [stats, setStats] = useState(null)
@@ -30,28 +104,85 @@ function App() {
   const itemsPerPage = 30
 
   // Charger les données initiales au démarrage
+  const loadApartments = async (forceRefresh = false) => {
+    try {
+      setLoading(true)
+      // Désactiver l'enrichissement par défaut car c'est trop lent avec 1400+ appartements
+      // Ajouter un timestamp pour éviter le cache navigateur si forceRefresh
+      const timestamp = forceRefresh ? `&t=${new Date().getTime()}` : ''
+      const response = await fetch(`/api/apartments?enrich=false${timestamp}`)
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      const data = await response.json()
+      console.log('📦 Appartements chargés:', data.length, 'appartements')
+      if (data.length > 0) {
+        const first = data[0]
+        console.log('📋 Premier appartement:', first.id, first.criteria ? 'normalisé ✅' : 'non normalisé ❌')
+        if (first.criteria) {
+          // Vérifier les critères enrichis
+          const style = first.criteria.style
+          const cuisine = first.criteria.cuisine
+          const exposition = first.criteria.exposition
+          const hauteur = first.criteria.hauteur_plafond
+          const pieceVie = first.criteria.piece_vie
+          
+          console.log('🔍 Critères du premier appartement:')
+          console.log('  - Style:', style?.display?.title, style?.display?.description || '', style?.display?.indices ? `[indices: ${style.display.indices}]` : '')
+          console.log('  - Cuisine:', cuisine?.display?.title, cuisine?.display?.indices || cuisine?.display?.description || '')
+          console.log('  - Exposition:', exposition?.display?.title, exposition?.display?.description || '', exposition?.display?.indices ? `[indices: ${exposition.display.indices}]` : '')
+          console.log('  - Hauteur:', hauteur?.display?.title, hauteur?.display?.indices || '')
+          console.log('  - Pièce de vie:', pieceVie?.display?.title, pieceVie?.display?.indices || '')
+          
+          // Vérifier si les données ont changé (comparer avec l'état précédent via ref)
+          if (apartmentsRawRef.current.length > 0) {
+            const prevFirst = apartmentsRawRef.current.find(apt => apt.id === first.id)
+            if (prevFirst) {
+              const prevStyle = prevFirst.criteria?.style
+              const prevCuisine = prevFirst.criteria?.cuisine
+              const prevExposition = prevFirst.criteria?.exposition
+              const styleChanged = prevStyle?.display?.indices !== style?.display?.indices || prevStyle?.display?.description !== style?.display?.description
+              const cuisineChanged = prevCuisine?.display?.indices !== cuisine?.display?.indices || prevCuisine?.display?.title !== cuisine?.display?.title
+              const expositionChanged = prevExposition?.display?.indices !== exposition?.display?.indices
+              
+              if (styleChanged || cuisineChanged || expositionChanged) {
+                console.log('✨ CHANGEMENT DÉTECTÉ dans les critères!')
+                if (styleChanged) {
+                  console.log('  - Style changé:')
+                  console.log('    description:', prevStyle?.display?.description, '→', style?.display?.description)
+                  console.log('    indices:', prevStyle?.display?.indices, '→', style?.display?.indices)
+                }
+                if (cuisineChanged) {
+                  console.log('  - Cuisine changé:', prevCuisine?.display?.title, '→', cuisine?.display?.title)
+                  console.log('    indices:', prevCuisine?.display?.indices, '→', cuisine?.display?.indices)
+                }
+                if (expositionChanged) {
+                  console.log('  - Exposition indices changé:', prevExposition?.display?.indices, '→', exposition?.display?.indices)
+                }
+              } else {
+                console.log('⚠️ Aucun changement détecté dans les critères visibles')
+              }
+            }
+          }
+        }
+      }
+      // Stocker les données brutes, le tri sera fait par useMemo
+      // Créer un nouvel array avec de nouveaux objets pour forcer React à détecter le changement
+      const newData = data.map(apt => ({ ...apt }))
+      apartmentsRawRef.current = newData // Mettre à jour la ref pour la prochaine comparaison
+      setApartmentsRaw(newData)
+      setError(null)
+    } catch (err) {
+      console.error('Erreur lors du chargement des appartements:', err)
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   useEffect(() => {
     // Charger les données initiales
-    const loadApartments = async () => {
-      try {
-        setLoading(true)
-        // Désactiver l'enrichissement par défaut car c'est trop lent avec 1400+ appartements
-        const response = await fetch('/api/apartments?enrich=false')
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`)
-        }
-        const data = await response.json()
-        // Stocker les données brutes, le tri sera fait par useMemo
-        console.log(`📊 Nombre d'appartements chargés: ${data.length}`)
-        setApartmentsRaw(data)
-        setError(null)
-      } catch (err) {
-        console.error('Erreur lors du chargement des appartements:', err)
-        setError(err.message)
-      } finally {
-        setLoading(false)
-      }
-    }
+    loadApartments()
 
     // Charger les statistiques
     const loadStats = async () => {
@@ -67,7 +198,6 @@ function App() {
     }
 
     // Par défaut, afficher la vue globale (tous les appartements) au lieu d'une alerte spécifique
-    loadApartments()
     loadStats()
   }, [])
 
@@ -75,7 +205,12 @@ function App() {
   const apartments = useMemo(() => {
     if (apartmentsRaw.length === 0) return []
     
-    const sorted = [...apartmentsRaw].sort((a, b) => {
+    // Filtrer les appartements sans photos
+    const apartmentsWithPhotos = apartmentsRaw.filter(apartment => {
+      return hasValidPhotos(apartment)
+    })
+    
+    const sorted = [...apartmentsWithPhotos].sort((a, b) => {
       if (sortBy === 'date') {
         // Trier par date de publication (plus récent en premier)
         const dateA = a.date_creation_annonce || a.scraped_at || ''
@@ -118,21 +253,6 @@ function App() {
       }
     })
     
-    // Log pour vérifier le tri par date
-    if (sortBy === 'date' && sorted.length > 0) {
-      const firstDate = sorted[0].date_creation_annonce || sorted[0].scraped_at || 'N/A'
-      const lastDate = sorted[sorted.length - 1].date_creation_annonce || sorted[sorted.length - 1].scraped_at || 'N/A'
-      const firstId = sorted[0].id || 'N/A'
-      const lastId = sorted[sorted.length - 1].id || 'N/A'
-      console.log(`📅 Tri par date: ${sorted.length} appartements - Plus récent: ${firstDate} (ID: ${firstId}), Plus ancien: ${lastDate} (ID: ${lastId})`)
-      
-      // Vérifier les 5 premiers pour diagnostiquer
-      console.log('📅 Top 5 dates:', sorted.slice(0, 5).map(apt => ({
-        id: apt.id,
-        date: apt.date_creation_annonce || apt.scraped_at,
-        parsed: new Date(apt.date_creation_annonce || apt.scraped_at).toISOString()
-      })))
-    }
     
     return sorted
   }, [apartmentsRaw, sortBy])
@@ -193,19 +313,33 @@ function App() {
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data)
+            console.log('📨 Message WebSocket reçu:', data.type)
             if (data.type === 'apartments_updated') {
-              // Recharger les données et les statistiques
-              fetch('/api/apartments')
-                .then(res => res.json())
-                .then(data => setApartmentsRaw(data))
-                .catch(console.error)
+              console.log('🔄 Mise à jour détectée, rechargement des données...')
+              console.log('📝 Fichiers modifiés:', data.changed_files)
+              
+              // Sauvegarder l'état actuel pour comparaison
+              const previousData = apartmentsRaw
+              console.log('📊 Données avant rechargement:', previousData.length, 'appartements')
+              
+              // Recharger les données avec forceRefresh pour éviter le cache
+              loadApartments(true).then(() => {
+                // Comparer après un court délai pour laisser le state se mettre à jour
+                setTimeout(() => {
+                  // Note: on ne peut pas comparer directement car setState est asynchrone
+                  // Mais on peut vérifier dans loadApartments
+                }, 100)
+              })
+              
               fetch('/api/apartments/stats')
                 .then(res => res.json())
                 .then(data => setStats(data))
                 .catch(console.error)
+            } else if (data.type === 'connected') {
+              console.log('✅ WebSocket connecté:', data.message)
             }
           } catch (err) {
-            // Ignorer les erreurs de parsing
+            console.error('❌ Erreur parsing message WebSocket:', err)
           }
         }
 
@@ -279,7 +413,6 @@ function App() {
 
   const handleRefresh = async () => {
     try {
-      console.log('🔄 Début du rafraîchissement...')
       setIsRefreshing(true)
       setRefreshMessage(null)
       setError(null)
@@ -358,11 +491,9 @@ function App() {
                 setRefreshMessage(data.message || `${data.new_count} nouveaux appartements ajoutés, ${data.photos_downloaded} photos téléchargées`)
                 
                 // Recharger les appartements après le refresh
-                console.log('🔄 Rechargement des appartements...')
                 const apartmentsResponse = await fetch('/api/apartments')
                 if (apartmentsResponse.ok) {
                   const apartmentsData = await apartmentsResponse.json()
-                  console.log(`📊 ${apartmentsData.length} appartements rechargés`)
                   setApartmentsRaw(apartmentsData)
                 }
                 
@@ -391,7 +522,6 @@ function App() {
       }, 5000)
     } finally {
       setIsRefreshing(false)
-      console.log('🏁 Rafraîchissement terminé')
     }
   }
 
@@ -414,6 +544,7 @@ function App() {
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let enrichmentCompleted = false
 
       while (true) {
         const { done, value } = await reader.read()
@@ -440,24 +571,13 @@ function App() {
                   visible: true 
                 })
               } else if (data.type === 'complete') {
+                enrichmentCompleted = true
                 setEnrichmentProgress({ 
                   current: data.total, 
                   total: data.total, 
                   visible: false 
                 })
                 setEnrichMessage(data.message || `${data.enriched_count} appartement(s) enrichi(s)`)
-                
-                // Recharger les appartements après l'enrichissement
-                const apartmentsResponse = await fetch('/api/apartments')
-                if (apartmentsResponse.ok) {
-                  const apartmentsData = await apartmentsResponse.json()
-                  setApartmentsRaw(apartmentsData)
-                }
-                
-                // Effacer le message après 5 secondes
-                setTimeout(() => {
-                  setEnrichMessage(null)
-                }, 5000)
               } else if (data.type === 'error') {
                 setEnrichmentProgress({ current: 0, total: 0, visible: false })
                 throw new Error(data.message || 'Erreur lors de l\'enrichissement')
@@ -467,6 +587,28 @@ function App() {
             }
           }
         }
+      }
+      
+      // Recharger les appartements après la fin du flux SSE
+      if (enrichmentCompleted) {
+        await new Promise(resolve => setTimeout(resolve, 500)) // Délai de 500ms pour laisser le temps au backend
+        
+        // Ajouter un timestamp pour éviter le cache navigateur et forcer l'enrichissement
+        const timestamp = new Date().getTime()
+        const apartmentsResponse = await fetch(`/api/apartments?enrich=true&t=${timestamp}`, {
+          cache: 'no-store'
+        })
+        if (apartmentsResponse.ok) {
+          const apartmentsData = await apartmentsResponse.json()
+          setApartmentsRaw(apartmentsData)
+        } else {
+          console.error('❌ Erreur lors du rechargement des appartements:', apartmentsResponse.status)
+        }
+        
+        // Effacer le message après 5 secondes
+        setTimeout(() => {
+          setEnrichMessage(null)
+        }, 5000)
       }
     } catch (err) {
       console.error('Erreur lors de l\'enrichissement:', err)
@@ -614,7 +756,7 @@ function App() {
         )}
         <div className="apartments-grid">
           {paginatedApartments.map(apartment => (
-            <ApartmentCard key={apartment.id} apartment={apartment} showScore={false} />
+            <ApartmentCardSimplified key={apartment.id} apartment={apartment} alertCriteria={null} />
           ))}
         </div>
         <Pagination

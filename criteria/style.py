@@ -92,22 +92,45 @@ def format_style(apartment):
     # PRIORITÉ 1: Extraire l'année de construction depuis l'API
     construction_year = extract_construction_year(apartment)
     
+    # PRIORITÉ 1B: Vérifier si on a une analyse photo avec éléments détectés
+    style_analysis = apartment.get('style_analysis', {})
+    style_data = style_analysis.get('style', {})
+    elements_detectes = style_data.get('details', {}).get('elements_detectes', [])
+    
     if construction_year:
         # Classification basée sur l'année
         if construction_year < 1910:
             style_name = "Haussmannien"
             confidence = 95  # Très haute confiance si date API disponible
-            indices_str = f"Style Indice:\nConstruit en {construction_year}"
         elif construction_year >= 1910 and construction_year <= 1980:
             # Calculer la décennie (ex: 1976 -> années 70)
             decade = (construction_year // 10) * 10
             decade_str = str(decade)[-2:]  # "70" pour 1970
             style_name = f"Années {decade_str}"
             confidence = 90  # Haute confiance si date API disponible
-            indices_str = f"Style Indice:\nConstruit en {construction_year}"
         else:  # > 1980
             style_name = "Moderne"
             confidence = 90  # Haute confiance si date API disponible
+        
+        # Utiliser les éléments détectés depuis l'image si disponibles (au lieu de répéter "Construit en X")
+        if elements_detectes and isinstance(elements_detectes, list) and len(elements_detectes) > 0:
+            # Formater les éléments détectés en mots-clés (max 3 lignes)
+            elements_to_show = elements_detectes[:9]  # Max 9 éléments pour 3 lignes de 3
+            lines = []
+            current_line = []
+            for i, elem in enumerate(elements_to_show):
+                current_line.append(str(elem))
+                if len(current_line) >= 3:  # 3 éléments par ligne
+                    lines.append(', '.join(current_line))
+                    current_line = []
+            if current_line:
+                lines.append(', '.join(current_line))
+            
+            # Limiter à 3 lignes max
+            lines = lines[:3]
+            indices_str = "Style Indice:\n" + "\n".join(lines)
+        else:
+            # Fallback: utiliser l'année seulement si pas d'éléments détectés
             indices_str = f"Style Indice:\nConstruit en {construction_year}"
         
         return {
@@ -171,12 +194,85 @@ def format_style(apartment):
     if not justification:
         justification = style_data.get('justification', '')
     
-    # Formater les indices
-    indices_str = None
-    if justification:
-        indices_str = f"Style Indice:\n{justification}"
+    # Extraire les éléments détectés depuis style_data.details.elements_detectes
+    elements_detectes = style_data.get('details', {}).get('elements_detectes', [])
+    if not elements_detectes or not isinstance(elements_detectes, list):
+        # Fallback: essayer d'extraire depuis la justification
+        # Extraire les mots-clés de la justification
+        keywords = []
+        if justification:
+            # Nettoyer et extraire les mots-clés pertinents
+            text = justification.lower()
+            # Mots-clés à chercher
+            keyword_patterns = [
+                r'\b(?:îlot|ilot)\s+(?:de\s+)?cuisine\b',
+                r'\bcuisine\s+(?:moderne|ouverte|fermée)\b',
+                r'\bchaises?\s+(?:en\s+)?rotin\b',
+                r'\bdesign\s+contemporain\b',
+                r'\bpanneaux?\s+(?:décoratifs?|en\s+bois|lamellé)\b',
+                r'\bbois\s+lamellé\b',
+                r'\bmobilier\b',
+                r'\bagencement\s+ouvert\b',
+                r'\bsuspension\b',
+                r'\bmoulures?\b',
+                r'\bparquet\s+(?:ancien|haussmanien)\b',
+                r'\bcaractéristiques?\s+haussmaniennes?\b',
+                r'\béléments?\s+(?:des\s+)?années\b',
+            ]
+            for pattern in keyword_patterns:
+                matches = re.findall(pattern, text)
+                if matches:
+                    keywords.extend(matches)
+        
+        # Si pas de mots-clés trouvés, utiliser les premiers éléments de la justification
+        if not keywords and justification:
+            # Extraire les premiers mots significatifs (max 10 mots)
+            words = justification.split()[:10]
+            keywords = [w for w in words if len(w) > 3]  # Filtrer les mots trop courts
+        
+        # Limiter à 5-6 mots-clés max
+        keywords = keywords[:6]
+        elements_detectes = keywords
+    
+    # Formater les indices en mots-clés (max 3 lignes)
+    indices_parts = []
+    if elements_detectes:
+        # Prendre les premiers éléments détectés
+        elements_to_show = elements_detectes[:9]  # Max 9 éléments pour 3 lignes de 3
+        # Formater en 3 lignes max
+        lines = []
+        current_line = []
+        for i, elem in enumerate(elements_to_show):
+            current_line.append(str(elem))
+            if len(current_line) >= 3:  # 3 éléments par ligne
+                lines.append(', '.join(current_line))
+                current_line = []
+        if current_line:
+            lines.append(', '.join(current_line))
+        
+        # Limiter à 3 lignes max
+        lines = lines[:3]
+        indices_parts = lines
+    elif justification:
+        # Fallback: extraire les mots-clés de la justification
+        # Simplifier la justification en mots-clés
+        text = justification.lower()
+        # Extraire les phrases courtes ou mots-clés
+        sentences = re.split(r'[.,;]', justification)
+        keywords = []
+        for sent in sentences[:3]:  # Max 3 phrases
+            sent = sent.strip()
+            if len(sent) > 5 and len(sent) < 50:  # Phrases de taille raisonnable
+                keywords.append(sent)
+        if keywords:
+            indices_parts = keywords[:3]  # Max 3 lignes
+        else:
+            indices_parts = [justification[:60]]  # Limiter à 60 caractères
     else:
-        indices_str = f"Style Indice:\nAnalyse photo: {style_type}"
+        indices_parts = [f"Analyse photo: {style_type}"]
+    
+    # Formater avec le préfixe "Style Indice:" sur une ligne séparée
+    indices_str = "Style Indice:\n" + "\n".join(indices_parts[:3])  # Max 3 lignes
     
     return {
         'main_value': style_name,

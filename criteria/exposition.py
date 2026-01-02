@@ -275,16 +275,36 @@ def format_exposition(apartment):
         if floor is not None:
             etage_num = int(floor)
     
-    # 2. Classification basée uniquement sur l'étage
-    etage_class = classify_etage(etage_num)
+    # PRIORITÉ 1: Utiliser la luminosité depuis l'analyse IA si disponible
+    style_analysis = apartment.get('style_analysis', {})
+    luminosite_ia = style_analysis.get('luminosite', {})
+    luminosite_type_ia = luminosite_ia.get('type', '').lower() if luminosite_ia.get('type') else None
     
-    if etage_class:
-        main_value = etage_class
-        confidence = 70  # Confiance moyenne quand étage disponible
+    if luminosite_type_ia:
+        # Mapper les valeurs de l'IA au format attendu
+        if 'tres_lumineux' in luminosite_type_ia or 'très lumineux' in luminosite_type_ia:
+            main_value = 'Lumineux'
+            confidence = min(85, luminosite_ia.get('confidence', 0.7) * 100) if isinstance(luminosite_ia.get('confidence'), float) else 75
+        elif 'lumineux' in luminosite_type_ia:
+            main_value = 'Lumineux'
+            confidence = min(80, luminosite_ia.get('confidence', 0.7) * 100) if isinstance(luminosite_ia.get('confidence'), float) else 70
+        elif 'faible' in luminosite_type_ia or 'sombre' in luminosite_type_ia:
+            main_value = 'Sombre'
+            confidence = min(75, luminosite_ia.get('confidence', 0.7) * 100) if isinstance(luminosite_ia.get('confidence'), float) else 65
+        else:  # moyen ou autre
+            main_value = 'Moyen'
+            confidence = min(70, luminosite_ia.get('confidence', 0.6) * 100) if isinstance(luminosite_ia.get('confidence'), float) else 60
     else:
-        # Pas d'étage disponible: défaut à Moyen
-        main_value = "Moyen"
-        confidence = 50
+        # PRIORITÉ 2: Classification basée uniquement sur l'étage
+        etage_class = classify_etage(etage_num)
+        
+        if etage_class:
+            main_value = etage_class
+            confidence = 70  # Confiance moyenne quand étage disponible
+        else:
+            # Pas d'étage disponible: défaut à Moyen
+            main_value = "Moyen"
+            confidence = 50
     
     # 3. Upgrade si Sud/Ouest mentionné OU vis-à-vis > 20m (NOUVEAU)
     upgrade_applied = False
@@ -360,8 +380,11 @@ def format_exposition(apartment):
         expo_display = '-'.join([word.capitalize() for word in expo_display])
         indices_parts.append(f"{expo_display} mentionné")
     
-    # Luminosité image (optionnel, à la fin)
-    if brightness_value is not None:
+    # Luminosité depuis analyse IA (priorité sur brightness_value)
+    if luminosite_type_ia:
+        luminosite_display = luminosite_ia.get('type', '').replace('_', ' ').title()
+        indices_parts.append(f"Luminosité IA: {luminosite_display}")
+    elif brightness_value is not None:
         indices_parts.append(f"Luminosité {brightness_value:.1f}")
     
     # Formater avec le préfixe "Exposition Indice:" sur une ligne séparée (même format que cuisine et baignoire)

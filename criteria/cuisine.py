@@ -39,7 +39,8 @@ def format_cuisine(apartment):
     if cuisine_ouverte is None:
         style_analysis = apartment.get('style_analysis', {})
         cuisine_data = style_analysis.get('cuisine', {})
-        cuisine_ouverte = cuisine_data.get('ouverte', False)
+        # Ne pas utiliser False par défaut, garder None si vraiment None
+        cuisine_ouverte = cuisine_data.get('ouverte')  # Peut être None, True, ou False
         if confidence is None:
             confidence = cuisine_data.get('confidence')
         # Chercher detected_photos dans cuisine_data

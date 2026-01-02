@@ -35,6 +35,13 @@
     color: #999;
     font-size: 2rem;
     position: relative;
+    border-radius: 16px 16px 0 0;
+}
+
+.apartment-image-placeholder svg {
+    opacity: 0.6;
+    width: 64px;
+    height: 64px;
 }
 
 .carousel-container {

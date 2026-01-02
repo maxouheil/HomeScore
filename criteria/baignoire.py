@@ -53,15 +53,18 @@ def format_baignoire(apartment):
         confidence = photo_result.get('confidence')
     
     # Fallback: utiliser baignoire_data si pas trouvé dans photo_validation
-    if has_baignoire is None:
+    if has_baignoire is None or not detected_photos:
         baignoire_data = apartment.get('baignoire', {}) or apartment.get('baignoire_data', {})
-        has_baignoire = baignoire_data.get('has_baignoire')
+        if has_baignoire is None:
+            has_baignoire = baignoire_data.get('has_baignoire')
         if has_douche is None:
             has_douche = baignoire_data.get('has_douche')
         if confidence is None:
             confidence = baignoire_data.get('confidence')
-        if not detected_photos:
-            detected_photos = baignoire_data.get('detected_photos', [])
+        # Toujours utiliser detected_photos depuis baignoire_data si disponible (priorité)
+        baignoire_detected_photos = baignoire_data.get('detected_photos', [])
+        if baignoire_detected_photos:
+            detected_photos = baignoire_detected_photos
     
     # Si douche détectée mais pas de baignoire → pas de baignoire
     if has_douche is True and has_baignoire is None:
@@ -88,12 +91,21 @@ def format_baignoire(apartment):
     indices_parts = []
     
     # RÈGLE V2: Format "Baignoire détectée image 3" ou "Douche détectée image 3" (photos ONLY)
-    if detected_photos:
+    # Priorité: utiliser detected_photos depuis baignoire_data si disponible
+    if not detected_photos:
+        # Fallback: chercher dans baignoire_data
+        baignoire_data = apartment.get('baignoire_data', {})
+        detected_photos = baignoire_data.get('detected_photos', [])
+    
+    if detected_photos and len(detected_photos) > 0:
         photos_str = ", ".join([f"image {p}" for p in sorted(detected_photos)])
         if has_baignoire is True:
             indices_parts.append(f"Baignoire détectée {photos_str}")
         elif has_douche is True:
             indices_parts.append(f"Douche détectée {photos_str}")
+        else:
+            # Si on a des photos mais pas de résultat clair, indiquer quand même
+            indices_parts.append(f"Détectée {photos_str}")
     elif has_baignoire is not None:
         # Pas de numéros d'images mais résultat disponible
         if has_baignoire:

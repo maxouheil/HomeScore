@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import ScoreBadge from './ScoreBadge'
 import './Carousel.css'
 
@@ -26,7 +26,7 @@ function formatPublicationDate(dateString) {
   }
 }
 
-function Carousel({ photos, carouselId, score, maxScore = 90, apartment = null, alertCriteria = null }) {
+function Carousel({ photos, carouselId, score, maxScore = 90, apartment = null, alertCriteria = null, initialIndex = null }) {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [failedImages, setFailedImages] = useState(new Set())
   
@@ -37,7 +37,55 @@ function Carousel({ photos, carouselId, score, maxScore = 90, apartment = null, 
     return formatPublicationDate(dateStr)
   }, [apartment])
   
-  if (!photos || photos.length === 0) {
+  // Filtrer les photos invalides (null, undefined, chaînes vides)
+  const validPhotos = useMemo(() => {
+    if (!photos || !Array.isArray(photos)) {
+      return []
+    }
+    const filtered = photos.filter(photo => {
+      if (!photo) return false
+      const url = typeof photo === 'string' ? photo : (photo.url || photo.local_path)
+      return url && typeof url === 'string' && url.trim() !== ''
+    })
+    return filtered
+  }, [photos])
+  
+  // Réinitialiser failedImages et currentIndex quand les photos changent
+  useEffect(() => {
+    setFailedImages(new Set())
+    // Utiliser initialIndex si fourni et valide
+    // initialIndex est basé sur le tableau photos original, on doit le convertir pour validPhotos
+    if (initialIndex !== null && initialIndex !== undefined && 
+        typeof initialIndex === 'number' && 
+        initialIndex >= 0 && initialIndex < photos.length) {
+      // Trouver l'index correspondant dans validPhotos
+      // Si initialIndex correspond à une photo valide, utiliser son index dans validPhotos
+      let validIndex = 0
+      let found = false
+      for (let i = 0; i < photos.length; i++) {
+        const photo = photos[i]
+        if (!photo) continue
+        const url = typeof photo === 'string' ? photo : (photo.url || photo.local_path)
+        if (url && typeof url === 'string' && url.trim() !== '') {
+          if (i === initialIndex) {
+            found = true
+            break
+          }
+          validIndex++
+        }
+      }
+      if (found && validIndex < validPhotos.length) {
+        setCurrentIndex(validIndex)
+      } else {
+        setCurrentIndex(0)
+      }
+    } else {
+      setCurrentIndex(0)
+    }
+  }, [validPhotos.length, apartment?.id, initialIndex, photos])
+  
+  // Toujours afficher le placeholder si pas de photos valides
+  if (!validPhotos || validPhotos.length === 0) {
     return (
       <div className="apartment-image-container">
         {score !== undefined && <ScoreBadge score={score} maxScore={maxScore} apartment={apartment} alertCriteria={alertCriteria} />}
@@ -49,11 +97,11 @@ function Carousel({ photos, carouselId, score, maxScore = 90, apartment = null, 
     )
   }
   
-  // Filtrer les photos qui ont échoué
-  const validPhotos = photos.filter((_, index) => !failedImages.has(index))
+  // Filtrer les photos qui ont échoué (en utilisant les indices originaux)
+  const photosAfterFailures = validPhotos.filter((_, index) => !failedImages.has(index))
   
   // Si toutes les images ont échoué, afficher le placeholder
-  if (validPhotos.length === 0) {
+  if (photosAfterFailures.length === 0) {
     return (
       <div className="apartment-image-container">
         {score !== undefined && <ScoreBadge score={score} maxScore={maxScore} apartment={apartment} alertCriteria={alertCriteria} />}
@@ -65,7 +113,7 @@ function Carousel({ photos, carouselId, score, maxScore = 90, apartment = null, 
     )
   }
   
-  if (validPhotos.length === 1) {
+  if (photosAfterFailures.length === 1) {
     return (
       <div className="apartment-image-container">
         {score !== undefined && <ScoreBadge score={score} maxScore={maxScore} apartment={apartment} alertCriteria={alertCriteria} />}
@@ -74,7 +122,7 @@ function Carousel({ photos, carouselId, score, maxScore = 90, apartment = null, 
         )}
         <div 
           className="apartment-image" 
-          style={{ backgroundImage: `url(${validPhotos[0]})` }}
+          style={{ backgroundImage: `url(${photosAfterFailures[0]})` }}
         />
       </div>
     )
@@ -83,10 +131,10 @@ function Carousel({ photos, carouselId, score, maxScore = 90, apartment = null, 
   const nextSlide = (e) => {
     e.stopPropagation()
     // Trouver la prochaine image valide
-    let nextIndex = (currentIndex + 1) % photos.length
+    let nextIndex = (currentIndex + 1) % validPhotos.length
     let attempts = 0
-    while (failedImages.has(nextIndex) && attempts < photos.length) {
-      nextIndex = (nextIndex + 1) % photos.length
+    while (failedImages.has(nextIndex) && attempts < validPhotos.length) {
+      nextIndex = (nextIndex + 1) % validPhotos.length
       attempts++
     }
     if (!failedImages.has(nextIndex)) {
@@ -97,10 +145,10 @@ function Carousel({ photos, carouselId, score, maxScore = 90, apartment = null, 
   const prevSlide = (e) => {
     e.stopPropagation()
     // Trouver l'image valide précédente
-    let prevIndex = (currentIndex - 1 + photos.length) % photos.length
+    let prevIndex = (currentIndex - 1 + validPhotos.length) % validPhotos.length
     let attempts = 0
-    while (failedImages.has(prevIndex) && attempts < photos.length) {
-      prevIndex = (prevIndex - 1 + photos.length) % photos.length
+    while (failedImages.has(prevIndex) && attempts < validPhotos.length) {
+      prevIndex = (prevIndex - 1 + validPhotos.length) % validPhotos.length
       attempts++
     }
     if (!failedImages.has(prevIndex)) {
@@ -121,10 +169,10 @@ function Carousel({ photos, carouselId, score, maxScore = 90, apartment = null, 
       const newSet = new Set([...prev, index])
       // Si c'est l'image actuelle qui échoue, passer à la suivante valide
       if (index === currentIndex) {
-        let nextIndex = (index + 1) % photos.length
+        let nextIndex = (index + 1) % validPhotos.length
         let attempts = 0
-        while (newSet.has(nextIndex) && attempts < photos.length) {
-          nextIndex = (nextIndex + 1) % photos.length
+        while (newSet.has(nextIndex) && attempts < validPhotos.length) {
+          nextIndex = (nextIndex + 1) % validPhotos.length
           attempts++
         }
         if (!newSet.has(nextIndex)) {
@@ -149,7 +197,7 @@ function Carousel({ photos, carouselId, score, maxScore = 90, apartment = null, 
           ‹
         </button>
         <div className="carousel-track" style={{ transform: `translateX(-${currentIndex * 100}%)` }}>
-          {photos.map((photo, index) => (
+          {validPhotos.map((photo, index) => (
             <div key={index} className="carousel-slide" style={{ display: failedImages.has(index) ? 'none' : 'block' }}>
               <img 
                 src={photo} 
@@ -169,7 +217,7 @@ function Carousel({ photos, carouselId, score, maxScore = 90, apartment = null, 
           ›
         </button>
         <div className="carousel-dots">
-          {photos.map((_, index) => {
+          {validPhotos.map((_, index) => {
             if (failedImages.has(index)) return null
             return (
               <div

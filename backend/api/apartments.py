@@ -39,7 +39,7 @@ except Exception as e:
             raise HTTPException(status_code=500, detail=f"Erreur lors du chargement des données: {str(e)}")
 
 try:
-    from criteria import format_cuisine, format_baignoire, format_style, format_exposition, format_prix
+    from criteria import format_cuisine, format_baignoire, format_style, format_exposition, format_prix, format_hauteur, format_piece_vie
 except Exception as e:
     print(f"⚠️ Erreur lors de l'import des critères: {e}")
     import traceback
@@ -48,8 +48,10 @@ except Exception as e:
     def format_cuisine(apt): return {'indices': None}
     def format_baignoire(apt): return {'main_value': 'Non', 'indices': None, 'confidence': None}
     def format_style(apt): return {'indices': None}
+    def format_hauteur(apt): return {'main_value': 'Non spécifié', 'indices': None, 'confidence': None}
     def format_exposition(apt): return {'main_value': 'Non spécifié', 'indices': None, 'confidence': None}
     def format_prix(apt): return {'main_value': None, 'indices': None, 'confidence': None}
+    def format_piece_vie(apt): return {'main_value': 'Non spécifié', 'indices': None, 'confidence': None}
 
 # Importer la fonction de scoring pour valider les scores style
 try:
@@ -76,7 +78,9 @@ except ImportError:
 router = APIRouter(prefix="/api", tags=["apartments"])
 
 # Cache pour éviter de recharger les données à chaque requête
-_cached_apartments = None
+# Deux caches séparés: un pour les données enrichies, un pour les données brutes
+_cached_apartments_enriched = None
+_cached_apartments_raw = None
 _cache_timestamp = 0
 
 def validate_style_score(apartment: Dict[str, Any]) -> Dict[str, Any]:
@@ -166,15 +170,39 @@ def enrich_apartment_with_indices(apartment: Dict[str, Any]) -> Dict[str, Any]:
                     cuisine_formatted = format_cuisine(apartment)
                     if 'formatted_data' not in apartment:
                         apartment['formatted_data'] = {}
+                    # Récupérer les photos détectées depuis style_analysis ou photo_validation
+                    detected_photos = []
+                    style_cuisine = apartment.get('style_analysis', {}).get('cuisine', {})
+                    if style_cuisine.get('detected_photos'):
+                        detected_photos = style_cuisine['detected_photos']
+                    else:
+                        # Fallback: chercher dans photo_validation
+                        cuisine_score = apartment.get('scores_detaille', {}).get('cuisine', {})
+                        photo_validation = cuisine_score.get('details', {}).get('photo_validation', {})
+                        photo_result = photo_validation.get('photo_result', {})
+                        if photo_result.get('detected_photos'):
+                            detected_photos = photo_result['detected_photos']
                     apartment['formatted_data']['cuisine'] = {
-                        'indices': cuisine_formatted.get('indices')
+                        'main_value': cuisine_formatted.get('main_value'),
+                        'indices': cuisine_formatted.get('indices'),
+                        'confidence': cuisine_formatted.get('confidence'),
+                        'detected_photos': detected_photos if detected_photos else None
                     }
+                    # #region agent log
+                    import time
+                    with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+                        import json as json_module
+                        logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"apartments.py:189","message":"Storing cuisine data in formatted_data","data":{"apartment_id":apartment.get('id'),"main_value":cuisine_formatted.get('main_value'),"detected_photos":detected_photos,"detected_photos_type":type(detected_photos).__name__,"detected_photos_len":len(detected_photos) if detected_photos else 0,"indices":cuisine_formatted.get('indices')[:100] if cuisine_formatted.get('indices') else None,"formatted_data_cuisine":apartment['formatted_data']['cuisine']},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + "\n")
+                    # #endregion
                 except Exception as e:
                     # En cas d'erreur, utiliser la phrase par défaut
                     if 'formatted_data' not in apartment:
                         apartment['formatted_data'] = {}
                     apartment['formatted_data']['cuisine'] = {
-                        'indices': "Style expo cuisine et baignoire"
+                        'main_value': None,
+                        'indices': "Style expo cuisine et baignoire",
+                        'confidence': None,
+                        'detected_photos': None
                     }
             
             # Baignoire
@@ -183,10 +211,23 @@ def enrich_apartment_with_indices(apartment: Dict[str, Any]) -> Dict[str, Any]:
                     baignoire_formatted = format_baignoire(apartment)
                     if 'formatted_data' not in apartment:
                         apartment['formatted_data'] = {}
+                    # Récupérer les photos détectées depuis style_analysis ou photo_validation
+                    detected_photos = []
+                    style_baignoire = apartment.get('style_analysis', {}).get('baignoire', {})
+                    if style_baignoire.get('detected_photos'):
+                        detected_photos = style_baignoire['detected_photos']
+                    else:
+                        # Fallback: chercher dans photo_validation
+                        baignoire_score = apartment.get('scores_detaille', {}).get('baignoire', {})
+                        photo_validation = baignoire_score.get('details', {}).get('photo_validation', {})
+                        photo_result = photo_validation.get('photo_result', {})
+                        if photo_result.get('detected_photos'):
+                            detected_photos = photo_result['detected_photos']
                     apartment['formatted_data']['baignoire'] = {
                         'main_value': baignoire_formatted.get('main_value'),
                         'indices': baignoire_formatted.get('indices'),
-                        'confidence': baignoire_formatted.get('confidence')
+                        'confidence': baignoire_formatted.get('confidence'),
+                        'detected_photos': detected_photos if detected_photos else None
                     }
                 except Exception as e:
                     # En cas d'erreur, utiliser la phrase par défaut
@@ -195,7 +236,8 @@ def enrich_apartment_with_indices(apartment: Dict[str, Any]) -> Dict[str, Any]:
                     apartment['formatted_data']['baignoire'] = {
                         'main_value': 'Non',
                         'indices': "Style expo cuisine et baignoire",
-                        'confidence': None
+                        'confidence': None,
+                        'detected_photos': None
                     }
             
             # Style - toujours créer formatted_data.style (même sans scores_detaille)
@@ -245,6 +287,54 @@ def enrich_apartment_with_indices(apartment: Dict[str, Any]) -> Dict[str, Any]:
                     print(traceback.format_exc())
                     # En cas d'erreur, ne pas ajouter de données formatées
                     pass
+            
+            # Hauteur plafond - toujours créer formatted_data.hauteur_plafond (même si non analysé)
+            try:
+                hauteur_formatted = format_hauteur(apartment)
+                if 'formatted_data' not in apartment:
+                    apartment['formatted_data'] = {}
+                apartment['formatted_data']['hauteur_plafond'] = {
+                    'main_value': hauteur_formatted.get('main_value'),
+                    'indices': hauteur_formatted.get('indices'),
+                    'confidence': hauteur_formatted.get('confidence')
+                }
+            except Exception as e:
+                # Logger l'erreur pour debug
+                import traceback
+                print(f"❌ Erreur format_hauteur pour {apartment.get('id')}: {e}")
+                print(traceback.format_exc())
+                # En cas d'erreur, créer quand même avec "Non spécifié"
+                if 'formatted_data' not in apartment:
+                    apartment['formatted_data'] = {}
+                apartment['formatted_data']['hauteur_plafond'] = {
+                    'main_value': 'Non spécifié',
+                    'indices': 'Hauteur Indice:\nNon spécifié',
+                    'confidence': None
+                }
+            
+            # Pièce de vie - toujours créer formatted_data.piece_vie (même si non analysé)
+            try:
+                piece_vie_formatted = format_piece_vie(apartment)
+                if 'formatted_data' not in apartment:
+                    apartment['formatted_data'] = {}
+                apartment['formatted_data']['piece_vie'] = {
+                    'main_value': piece_vie_formatted.get('main_value'),
+                    'indices': piece_vie_formatted.get('indices'),
+                    'confidence': piece_vie_formatted.get('confidence')
+                }
+            except Exception as e:
+                # Logger l'erreur pour debug
+                import traceback
+                print(f"❌ Erreur format_piece_vie pour {apartment.get('id')}: {e}")
+                print(traceback.format_exc())
+                # En cas d'erreur, créer quand même avec "Non spécifié"
+                if 'formatted_data' not in apartment:
+                    apartment['formatted_data'] = {}
+                apartment['formatted_data']['piece_vie'] = {
+                    'main_value': 'Non spécifié',
+                    'indices': 'Pièce de vie Indice:\nNon spécifié',
+                    'confidence': None
+                }
     except Exception as e:
         # Ne pas faire échouer la requête si l'enrichissement échoue
         pass
@@ -252,178 +342,79 @@ def enrich_apartment_with_indices(apartment: Dict[str, Any]) -> Dict[str, Any]:
     return apartment
 
 def load_apartments_data(enrich: bool = True) -> List[Dict[str, Any]]:
-    """Charge les appartements scorés et fusionne avec les données scrapées
+    """Charge les appartements depuis le fichier unique data/all_apartments.json
     
     Args:
         enrich: Si True, enrichit les appartements avec les indices formatés (peut être lent)
     """
-    global _cached_apartments, _cache_timestamp
+    global _cached_apartments_enriched, _cached_apartments_raw, _cache_timestamp
     
     print("🔍 [DEBUG] load_apartments_data() appelée")
     
-    # Vérifier si le cache est encore valide (basé sur les temps de modification des fichiers)
+    # Fichier unique centralisé
+    apartments_file = 'data/all_apartments.json'
+    
+    # Vérifier si le cache est encore valide (basé sur le temps de modification du fichier)
     try:
-        scores_file = 'data/scores/all_apartments_scores.json'
-        scraped_file = 'data/scraped_apartments.json'
-        appartements_dir = 'data/appartements'
+        import time
+        print("🔍 [DEBUG] Vérification du mtime...")
+        file_mtime = os.path.getmtime(apartments_file) if os.path.exists(apartments_file) else 0
         
-        print("🔍 [DEBUG] Vérification des mtimes...")
-        scores_mtime = os.path.getmtime(scores_file) if os.path.exists(scores_file) else 0
-        scraped_mtime = os.path.getmtime(scraped_file) if os.path.exists(scraped_file) else 0
+        # Vérifier le cache approprié selon le mode d'enrichissement
+        cached_apartments = _cached_apartments_enriched if enrich else _cached_apartments_raw
         
-        # Calculer le mtime max des fichiers individuels dans data/appartements/
-        appartements_max_mtime = 0
-        if os.path.exists(appartements_dir):
-            try:
-                for filename in os.listdir(appartements_dir):
-                    if filename.endswith('.json') and filename not in ['test_001.json', 'test_no_photo.json', 'unknown.json']:
-                        filepath = os.path.join(appartements_dir, filename)
-                        if os.path.isfile(filepath):
-                            file_mtime = os.path.getmtime(filepath)
-                            appartements_max_mtime = max(appartements_max_mtime, file_mtime)
-            except Exception as e:
-                print(f"⚠️ Erreur lors du calcul du mtime de {appartements_dir}: {e}")
+        # Si le cache est encore valide, le retourner
+        if cached_apartments is not None and file_mtime <= _cache_timestamp:
+            print(f"🔍 [DEBUG] Cache valide ({'enrichi' if enrich else 'brut'}), retour de {len(cached_apartments)} appartements")
+            # #region agent log
+            with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+                import json as json_module
+                logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"apartments.py:299","message":"Cache hit - returning cached data","data":{"cache_count":len(cached_apartments),"file_mtime":file_mtime,"cache_timestamp":_cache_timestamp,"enrich":enrich},"sessionId":"debug-session","runId":"run1","hypothesisId":"D"}) + "\n")
+            # #endregion
+            return cached_apartments
         
-        max_mtime = max(scores_mtime, scraped_mtime, appartements_max_mtime)
+        print(f"🔍 [DEBUG] Cache invalide ({'enrichi' if enrich else 'brut'}), chargement des données...")
+        # #region agent log
+        with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+            import json as json_module
+            cache_is_none = (_cached_apartments_enriched is None if enrich else _cached_apartments_raw is None)
+            logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"apartments.py:303","message":"Cache miss - loading from file","data":{"file_mtime":file_mtime,"cache_timestamp":_cache_timestamp,"cache_is_none":cache_is_none,"enrich":enrich},"sessionId":"debug-session","runId":"run1","hypothesisId":"D"}) + "\n")
+        # #endregion
         
-        # Si le cache est encore valide, le retourner (même si enrich=False, on retourne le cache enrichi s'il existe)
-        if _cached_apartments is not None and max_mtime <= _cache_timestamp:
-            print(f"🔍 [DEBUG] Cache valide, retour de {len(_cached_apartments)} appartements")
-            # Si enrich=False, on peut retourner le cache même s'il est enrichi (c'est mieux que rien)
-            return _cached_apartments
-        
-        print("🔍 [DEBUG] Cache invalide, chargement des données...")
-        
-        # OPTIMISATION: Si pas d'enrichissement, charger directement depuis le fichier (beaucoup plus rapide)
-        if not enrich:
-            print(f"🔍 [DEBUG] Mode rapide (enrich=False), chargement direct depuis {scores_file}...")
+        # Charger depuis le fichier unique
+        if not os.path.exists(apartments_file):
+            print(f"❌ Fichier {apartments_file} n'existe pas")
+            # Fallback: essayer les anciens fichiers pour compatibilité
+            print("⚠️  Tentative de fallback vers les anciens fichiers...")
+            scores_file = 'data/scores/all_apartments_scores.json'
             if os.path.exists(scores_file):
                 with open(scores_file, 'r', encoding='utf-8') as f:
-                    scored_apartments = json.load(f)
-                    print(f"✅ Chargement rapide: {len(scored_apartments)} appartements")
-                    _cached_apartments = scored_apartments
-                    _cache_timestamp = max_mtime
-                    return scored_apartments
-            else:
-                print(f"❌ Fichier {scores_file} n'existe pas")
-                return []
+                    apartments = json.load(f)
+                    print(f"✅ Chargement depuis fallback: {len(apartments)} appartements")
+                    if enrich:
+                        _cached_apartments_enriched = apartments
+                    else:
+                        _cached_apartments_raw = apartments
+                    _cache_timestamp = os.path.getmtime(scores_file)
+                    return apartments
+            return []
         
-        # Charger les appartements scorés (avec gestion d'erreur)
-        # OPTIMISATION: Charger directement depuis le fichier pour éviter le blocage
-        try:
-            # Charger directement depuis le fichier JSON (plus rapide que load_scored_apartments qui fait une fusion complexe)
-            if os.path.exists(scores_file):
-                print(f"🔍 [DEBUG] Chargement direct depuis {scores_file}...")
-                with open(scores_file, 'r', encoding='utf-8') as f:
-                    scored_apartments = json.load(f)
-                    print(f"✅ Chargement direct depuis {scores_file}: {len(scored_apartments)} appartements")
-            else:
-                # Fallback: utiliser load_scored_apartments si le fichier n'existe pas
-                print("🔍 [DEBUG] Appel de load_scored_apartments()...")
-                scored_apartments = load_scored_apartments()
-                print(f"🔍 [DEBUG] load_scored_apartments() retourné {len(scored_apartments)} appartements")
-        except Exception as e:
-            print(f"⚠️ Erreur lors du chargement des appartements scorés: {e}")
-            import traceback
-            traceback.print_exc()
-            # Fallback: charger directement depuis le fichier
-            try:
-                if os.path.exists(scores_file):
-                    print(f"🔍 [DEBUG] Fallback: chargement direct depuis {scores_file}")
-                    with open(scores_file, 'r', encoding='utf-8') as f:
-                        scored_apartments = json.load(f)
-                        print(f"✅ Chargement direct depuis {scores_file}: {len(scored_apartments)} appartements")
-                else:
-                    print(f"❌ Fichier {scores_file} n'existe pas")
-                    scored_apartments = []
-            except Exception as e2:
-                print(f"❌ Erreur lors du chargement direct: {e2}")
-                # Retourner une liste vide ou utiliser le cache si disponible
-                if _cached_apartments is not None:
-                    return _cached_apartments
-                scored_apartments = []
+        # Charger depuis le fichier unique
+        print(f"🔍 [DEBUG] Chargement depuis {apartments_file}...")
+        with open(apartments_file, 'r', encoding='utf-8') as f:
+            apartments = json.load(f)
         
-        # Créer un dictionnaire indexé par ID pour fusion rapide
-        scored_by_id = {str(apt.get('id')): apt for apt in scored_apartments}
-        
-        # Charger les appartements scrapés depuis scraped_apartments.json
-        scraped_apartments = []
-        scraped_data_by_id = {}
-        if os.path.exists(scraped_file):
-            try:
-                with open(scraped_file, 'r', encoding='utf-8') as f:
-                    scraped_apartments = json.load(f)
-                    # Créer un dict par ID pour faciliter la fusion
-                    for apt in scraped_apartments:
-                        apt_id = str(apt.get('id'))
-                        if apt_id:
-                            scraped_data_by_id[apt_id] = apt
-            except Exception as e:
-                print(f"⚠️ Erreur lors du chargement de {scraped_file}: {e}")
-        
-        # Charger aussi depuis les fichiers individuels dans data/appartements/ (priorité sur scraped_apartments.json)
-        individual_apartments = {}
-        if os.path.exists(appartements_dir):
-            try:
-                for filename in os.listdir(appartements_dir):
-                    if filename.endswith('.json') and filename not in ['test_001.json', 'test_no_photo.json', 'unknown.json']:
-                        filepath = os.path.join(appartements_dir, filename)
-                        try:
-                            with open(filepath, 'r', encoding='utf-8') as f:
-                                apt_data = json.load(f)
-                                apt_id = str(apt_data.get('id'))
-                                if apt_id:
-                                    # Les fichiers individuels ont priorité sur scraped_apartments.json
-                                    # MAIS préserver l'exposition depuis scraped_apartments.json si elle existe (pour avoir visavis_distance)
-                                    if apt_id in scraped_data_by_id and 'exposition' in scraped_data_by_id[apt_id]:
-                                        scraped_expo = scraped_data_by_id[apt_id]['exposition']
-                                        if scraped_expo.get('details', {}).get('visavis_distance') is not None:
-                                            # Préserver l'exposition avec visavis_distance depuis scraped_apartments.json
-                                            if 'exposition' not in apt_data:
-                                                apt_data['exposition'] = {}
-                                            apt_data['exposition'] = scraped_expo
-                                    individual_apartments[apt_id] = apt_data
-                        except Exception as e:
-                            # Ignorer les erreurs de lecture de fichiers individuels
-                            print(f"⚠️ Erreur lecture {filepath}: {e}")
-                            pass
-            except Exception as e:
-                print(f"⚠️ Erreur lors du chargement de {appartements_dir}: {e}")
-        
-        # Fusionner : pour chaque appartement scrapé, utiliser les scores s'ils existent
-        merged_apartments = []
-        scraped_ids_processed = set()
-        
-        # D'abord, ajouter tous les appartements scorés
-        for apt in scored_apartments:
-            merged_apartments.append(apt)
-            scraped_ids_processed.add(str(apt.get('id')))
-        
-        # Ensuite, ajouter les appartements depuis les fichiers individuels (priorité)
-        for apt_id, apt_data in individual_apartments.items():
-            if apt_id not in scraped_ids_processed:
-                # Utiliser les données depuis les fichiers individuels (les plus récentes)
-                merged_apartments.append(apt_data)
-                scraped_ids_processed.add(apt_id)
-        
-        # Enfin, ajouter les appartements depuis scraped_apartments.json qui n'ont pas encore été ajoutés
-        for apt in scraped_apartments:
-            apt_id = str(apt.get('id'))
-            if apt_id not in scraped_ids_processed:
-                # Utiliser les données scrapées sans scores (ils seront scorés à la volée si nécessaire)
-                merged_apartments.append(apt)
-        
-        print(f"📊 Fusion: {len(scored_apartments)} scorés + {len(individual_apartments)} fichiers individuels + {len(scraped_apartments) - len(scored_by_id)} depuis scraped_apartments.json = {len(merged_apartments)} total")
+        print(f"✅ Chargement depuis {apartments_file}: {len(apartments)} appartements")
         
         # Enrichir chaque appartement avec les indices formatés (avec gestion d'erreur)
         # OPTIMISATION: Enrichir seulement si demandé (peut être lent avec beaucoup d'appartements)
         if enrich:
-            print(f"🔍 [DEBUG] Enrichissement de {len(merged_apartments)} appartements...")
+            print(f"🔍 [DEBUG] Enrichissement de {len(apartments)} appartements...")
             enriched_apartments = []
             
-            for i, apt in enumerate(merged_apartments):
+            for i, apt in enumerate(apartments):
                 if i % 100 == 0:
-                    print(f"🔍 [DEBUG] Enrichissement en cours: {i}/{len(merged_apartments)}")
+                    print(f"🔍 [DEBUG] Enrichissement en cours: {i}/{len(apartments)}")
                 try:
                     # Enrichir seulement les données essentielles pour éviter le blocage
                     enriched_apt = enrich_apartment_with_indices(apt)
@@ -434,15 +425,37 @@ def load_apartments_data(enrich: bool = True) -> List[Dict[str, Any]]:
                     enriched_apartments.append(apt)  # Ajouter l'appartement sans enrichissement
             
             print(f"🔍 [DEBUG] Enrichissement terminé: {len(enriched_apartments)} appartements")
+            apartments = enriched_apartments
+            # Mettre en cache les données enrichies
+            _cached_apartments_enriched = apartments
         else:
             # Pas d'enrichissement: retourner les données brutes (beaucoup plus rapide)
-            print(f"🔍 [DEBUG] Pas d'enrichissement demandé, retour de {len(merged_apartments)} appartements bruts")
-            enriched_apartments = merged_apartments
-        _cached_apartments = enriched_apartments
-        _cache_timestamp = max_mtime
+            print(f"🔍 [DEBUG] Pas d'enrichissement demandé, retour de {len(apartments)} appartements bruts")
+            # Mettre en cache les données brutes
+            _cached_apartments_raw = apartments
         
-        print(f"🔍 [DEBUG] Retour de {len(_cached_apartments)} appartements")
-        return _cached_apartments
+        _cache_timestamp = file_mtime
+        
+        # #region agent log
+        import time
+        with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+            import json as json_module
+            first_apt_id = apartments[0].get('id') if apartments else None
+            first_has_style = bool(apartments[0].get('style_analysis', {}).get('style', {}).get('type')) if apartments else False
+            # Vérifier un appartement enrichi spécifiquement
+            enriched_apt = next((apt for apt in apartments if str(apt.get('id')) in ['95589222', '94739175', '91986959', '95510819']), None)
+            enriched_id = enriched_apt.get('id') if enriched_apt else None
+            enriched_has_style = bool(enriched_apt.get('style_analysis', {}).get('style', {}).get('type')) if enriched_apt else False
+            enriched_has_formatted = bool(enriched_apt.get('formatted_data')) if enriched_apt else False
+            enriched_has_hauteur = bool(enriched_apt.get('formatted_data', {}).get('hauteur_plafond') or enriched_apt.get('formatted_data', {}).get('hauteur')) if enriched_apt else False
+            enriched_has_cuisine = bool(enriched_apt.get('formatted_data', {}).get('cuisine')) if enriched_apt else False
+            enriched_has_piece_vie = bool(enriched_apt.get('formatted_data', {}).get('piece_vie')) if enriched_apt else False
+            logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"apartments.py:362","message":"Data loaded and cached","data":{"count":len(apartments),"file_mtime":file_mtime,"cache_timestamp":_cache_timestamp,"first_id":first_apt_id,"first_has_style":first_has_style,"enrich":enrich,"enriched_id":enriched_id,"enriched_has_style":enriched_has_style,"enriched_has_formatted":enriched_has_formatted,"enriched_has_hauteur":enriched_has_hauteur,"enriched_has_cuisine":enriched_has_cuisine,"enriched_has_piece_vie":enriched_has_piece_vie},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + "\n")
+        # #endregion
+        if apartments is None or len(apartments) == 0:
+            raise HTTPException(status_code=500, detail="Erreur: aucun appartement chargé")
+        print(f"🔍 [DEBUG] Retour de {len(apartments)} appartements ({'enrichis' if enrich else 'bruts'})")
+        return apartments
     except HTTPException:
         raise
     except Exception as e:
@@ -451,9 +464,10 @@ def load_apartments_data(enrich: bool = True) -> List[Dict[str, Any]]:
         print(f"❌ Erreur dans load_apartments_data: {e}")
         print(f"   Traceback: {error_trace}")
         # Retourner le cache si disponible, sinon liste vide
-        if _cached_apartments is not None:
-            print("   ⚠️ Utilisation du cache en cas d'erreur")
-            return _cached_apartments
+        cached_apartments = _cached_apartments_enriched if enrich else _cached_apartments_raw
+        if cached_apartments is not None:
+            print(f"   ⚠️ Utilisation du cache ({'enrichi' if enrich else 'brut'}) en cas d'erreur")
+            return cached_apartments
         raise HTTPException(status_code=500, detail=f"Erreur lors du chargement des données: {str(e)}")
 
 @router.get("/apartments")
@@ -462,10 +476,52 @@ async def get_apartments(enrich: bool = Query(False, description="Enrichir les a
     Retourne la liste de tous les appartements avec leurs scores et détails
     """
     try:
+        import time
         print(f"🔍 [DEBUG] GET /api/apartments appelé avec enrich={enrich}")
-        apartments = load_apartments_data(enrich=enrich)
-        print(f"🔍 [DEBUG] Retour de {len(apartments)} appartements")
-        return apartments
+        
+        # Charger tous les appartements d'abord
+        all_apartments = load_apartments_data(enrich=False)  # Charger sans enrich pour être rapide
+        
+        # Normaliser TOUS les appartements (pas seulement 5)
+        print(f"🔍 [DEBUG] Normalisation de {len(all_apartments)} appartements...")
+        try:
+            # Import du normaliseur depuis le répertoire backend
+            backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            normalizers_path = os.path.join(backend_dir, 'normalizers')
+            if normalizers_path not in sys.path:
+                sys.path.insert(0, backend_dir)
+            
+            from normalizers.simple_normalizer import normalize_apartment
+            
+            normalized_apartments = []
+            for i, apt in enumerate(all_apartments):
+                try:
+                    apt_id = apt.get('id', 'N/A')
+                    if (i + 1) % 100 == 0:
+                        print(f"🔍 [DEBUG] Normalisation en cours: {i + 1}/{len(all_apartments)}")
+                    
+                    normalized = normalize_apartment(apt)
+                    normalized_apartments.append(normalized)
+                except Exception as e:
+                    print(f"⚠️ Erreur normalisation {apt.get('id', 'N/A')}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # En cas d'erreur, retourner l'appartement non normalisé
+                    normalized_apartments.append(apt)
+            
+            print(f"✅ {len(normalized_apartments)} appartements normalisés retournés")
+            # Log du premier appartement pour vérifier
+            if normalized_apartments:
+                first = normalized_apartments[0]
+                print(f"🔍 [DEBUG] Premier appartement normalisé: {first.get('id')}, criteria={bool(first.get('criteria'))}")
+            return normalized_apartments
+        except Exception as e:
+            print(f"⚠️ Erreur import normaliseur: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback: retourner les appartements non normalisés
+            print(f"⚠️ Fallback: retour de {len(all_apartments)} appartements non normalisés")
+            return all_apartments
     except HTTPException:
         raise
     except Exception as e:
@@ -556,8 +612,15 @@ async def get_apartment(apartment_id: str) -> Dict[str, Any]:
 
 def invalidate_cache():
     """Invalide le cache pour forcer un rechargement"""
-    global _cached_apartments, _cache_timestamp
-    _cached_apartments = None
+    import time
+    global _cached_apartments_enriched, _cached_apartments_raw, _cache_timestamp
+    # #region agent log
+    with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+        import json as json_module
+        logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"apartments.py:467","message":"invalidate_cache called","data":{"cache_enriched_was_none":_cached_apartments_enriched is None,"cache_raw_was_none":_cached_apartments_raw is None,"old_timestamp":_cache_timestamp},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
+    # #endregion
+    _cached_apartments_enriched = None
+    _cached_apartments_raw = None
     _cache_timestamp = 0
 
 @router.post("/apartments/invalidate-cache")
@@ -635,7 +698,7 @@ async def refresh_apartments() -> Dict[str, Any]:
         
         # 7. Sauvegarder
         print(f"💾 Sauvegarde des données...")
-        output_file = Path('data/scraped_apartments.json')
+        output_file = Path('data/all_apartments.json')
         output_file.parent.mkdir(parents=True, exist_ok=True)
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(merged, f, ensure_ascii=False, indent=2, default=str)
@@ -887,95 +950,175 @@ def enrich_apartment_data_only(apartment: Dict[str, Any]) -> Dict[str, Any]:
     if 'formatted_data' not in apartment:
         apartment['formatted_data'] = {}
     
-    # ÉTAPE 1: Analyser les photos si nécessaire (style, cuisine, baignoire, luminosité)
-    # Vérifier la présence de chaque critère individuellement pour éviter les ré-analyses inutiles
-    style_analysis = apartment.get('style_analysis', {})
-    baignoire_data = apartment.get('baignoire_data', {})
-    
-    has_style = bool(style_analysis.get('style'))
-    has_cuisine = bool(style_analysis.get('cuisine'))
-    has_baignoire = bool(baignoire_data.get('has_baignoire') is not None)  # Vérifier si la valeur existe (même False)
-    has_luminosite = bool(style_analysis.get('luminosite'))
-    
-    # Identifier les critères manquants
-    missing_criteria = []
-    if not has_style:
-        missing_criteria.append('style')
-    if not has_cuisine:
-        missing_criteria.append('cuisine')
-    if not has_baignoire:
-        missing_criteria.append('baignoire')
-    if not has_luminosite:
-        missing_criteria.append('luminosité')
-    
-    # Faire l'analyse si au moins un critère manque
-    needs_analysis = len(missing_criteria) > 0
+    # ÉTAPE 1: Analyser les photos (toujours analyser pour forcer la mise à jour)
+    # On force toujours l'analyse pour s'assurer que toutes les données sont à jour
+    needs_analysis = True
     
     if needs_analysis:
-        missing_str = ', '.join(missing_criteria)
-        print(f"   📸 Analyse des photos pour {apartment_id} avec Gemini Flash (manquants: {missing_str})...")
+        print(f"   📸 Analyse des photos pour {apartment_id} avec Gemini Flash (analyse complète)...")
         try:
             # Utiliser directement UnifiedApartmentAnalyzer avec Gemini Flash (plus rapide et moins cher)
             from analyze_apartment_unified import UnifiedApartmentAnalyzer
             
-            # OPTIMISATION: Utiliser seulement 2 photos au lieu de 3 (réduction de 33% des coûts)
+            # Analyse jusqu'à 7 photos pour une meilleure couverture des critères (taille pièce de vie, hauteur plafond, cuisine, baignoire, style)
             # Gemini Flash peut analyser plusieurs images en une seule requête
+            # Force la réanalyse pour toujours avoir les données à jour
             unified_analyzer = UnifiedApartmentAnalyzer()
-            unified_result = unified_analyzer.analyze_apartment_unified(apartment, max_photos=2)
+            unified_result = unified_analyzer.analyze_apartment_unified(apartment, max_photos=7, force_reanalysis=True)
             
             if unified_result:
                 # Initialiser style_analysis si nécessaire (préserver les données existantes)
                 if 'style_analysis' not in apartment:
                     apartment['style_analysis'] = {}
                 
+                # Initialiser analyses si nécessaire
+                if 'analyses' not in apartment:
+                    apartment['analyses'] = {}
+                
                 # Adapter le résultat au format attendu par les fonctions de formatage
-                # Style - seulement si manquant
-                if unified_result.get('style') and not has_style:
+                # Style - toujours mettre à jour si disponible
+                if unified_result.get('style'):
                     style_data = unified_result['style']
                     elements_detectes = style_data.get('details', {}).get('elements_detectes', []) or style_data.get('indices', []) or []
                     apartment['style_analysis']['style'] = {
                         'type': style_data.get('type', 'autre'),
                         'confidence': style_data.get('confidence', 0),
                         'justification': style_data.get('justification', ''),
-                        'details': elements_detectes if isinstance(elements_detectes, list) else []
+                        'details': {'elements_detectes': elements_detectes if isinstance(elements_detectes, list) else []}
                     }
-                    # Mettre à jour les métadonnées seulement si c'est une nouvelle analyse
-                    if 'photos_analyzed' not in apartment['style_analysis']:
-                        apartment['style_analysis']['photos_analyzed'] = unified_result.get('photos_analyzed', 0)
-                        apartment['style_analysis']['method'] = 'unified_gemini_flash'
-                        apartment['style_analysis']['model'] = 'gemini-2.5-flash'
+                    # Mettre à jour les métadonnées
+                    apartment['style_analysis']['photos_analyzed'] = unified_result.get('photos_analyzed', 0)
+                    apartment['style_analysis']['method'] = 'unified_gemini_flash'
+                    apartment['style_analysis']['model'] = 'gemini-2.5-flash'
                 
-                # Cuisine - seulement si manquante
-                if unified_result.get('cuisine') and not has_cuisine:
+                # Année de construction depuis l'image - toujours mettre à jour si disponible
+                if unified_result.get('annee_construction'):
+                    annee_data = unified_result['annee_construction']
+                    annee = annee_data.get('annee')
+                    if annee:
+                        # Stocker dans _api_data.features.year si pas déjà présent depuis l'API
+                        if '_api_data' not in apartment:
+                            apartment['_api_data'] = {}
+                        if 'features' not in apartment['_api_data']:
+                            apartment['_api_data']['features'] = {}
+                        # Ne pas écraser si déjà présent depuis l'API (priorité API > image)
+                        if not apartment['_api_data']['features'].get('year'):
+                            apartment['_api_data']['features']['year'] = annee
+                
+                # Cuisine - toujours mettre à jour si disponible
+                if unified_result.get('cuisine'):
                     cuisine_data = unified_result['cuisine']
-                    apartment['style_analysis']['cuisine'] = {
-                        'ouverte': cuisine_data.get('ouverte', False),
-                        'confidence': cuisine_data.get('confidence', 0),
-                        'detected_photos': cuisine_data.get('detected_photos', []),
-                        'justification': cuisine_data.get('justification', '')
-                    }
+                    cuisine_ouverte = cuisine_data.get('ouverte')
+                    cuisine_visible = cuisine_data.get('visible', True)  # Par défaut True si non spécifié
+                    
+                    # Si la cuisine n'est pas visible (explicitement False), ne pas mettre à jour
+                    if cuisine_visible is False:
+                        print(f"      ⚠️  Cuisine non visible dans les photos pour {apartment.get('id', 'unknown')}")
+                    # Si cuisine_ouverte est None mais visible n'est pas False, 
+                    # on met quand même à jour pour indiquer qu'elle est visible mais non déterminable
+                    elif cuisine_ouverte is None:
+                        apartment['style_analysis']['cuisine'] = {
+                            'ouverte': None,  # Non déterminable
+                            'confidence': 0,
+                            'detected_photos': cuisine_data.get('detected_photos', []),
+                            'justification': cuisine_data.get('justification', 'Cuisine visible mais statut ouverte/fermée non déterminable')
+                        }
+                        print(f"      ⚠️  Cuisine visible mais statut ouverte/fermée non déterminable pour {apartment.get('id', 'unknown')}")
+                    else:
+                        # Cuisine détectée avec statut clair (ouverte ou fermée)
+                        apartment['style_analysis']['cuisine'] = {
+                            'ouverte': cuisine_ouverte,
+                            'confidence': cuisine_data.get('confidence', 0),
+                            'detected_photos': cuisine_data.get('detected_photos', []),
+                            'justification': cuisine_data.get('justification', '')
+                        }
+                        cuisine_status = 'Ouverte' if cuisine_ouverte else 'Fermée'
+                        print(f"      ✅ Cuisine détectée: {cuisine_status} (confiance: {cuisine_data.get('confidence', 0):.0%})")
                 
-                # Baignoire - seulement si manquante
-                if unified_result.get('baignoire') and not has_baignoire:
+                # Douche - toujours mettre à jour si disponible
+                if unified_result.get('douche'):
+                    douche_data = unified_result['douche']
+                    if 'baignoire_data' not in apartment:
+                        apartment['baignoire_data'] = {}
+                    apartment['baignoire_data']['has_douche'] = douche_data.get('presente', False)
+                    if not apartment['baignoire_data'].get('has_baignoire'):
+                        # Si pas de baignoire détectée, on peut supposer qu'il y a une douche
+                        apartment['baignoire_data']['has_baignoire'] = not douche_data.get('presente', True)
+                
+                # Baignoire - toujours mettre à jour si disponible
+                if unified_result.get('baignoire'):
                     baignoire_result = unified_result['baignoire']
-                    apartment['baignoire_data'] = {
-                        'has_baignoire': baignoire_result.get('presente', False),
-                        'has_douche': not baignoire_result.get('presente', False),
-                        'confidence': baignoire_result.get('confidence', 0),
-                        'detected_photos': baignoire_result.get('detected_photos', []),
-                        'justification': baignoire_result.get('justification', '')
-                    }
+                    if 'baignoire_data' not in apartment:
+                        apartment['baignoire_data'] = {}
+                    apartment['baignoire_data']['has_baignoire'] = baignoire_result.get('presente', False)
+                    apartment['baignoire_data']['has_douche'] = not baignoire_result.get('presente', False)
+                    apartment['baignoire_data']['confidence'] = baignoire_result.get('confidence', 0)
+                    apartment['baignoire_data']['detected_photos'] = baignoire_result.get('detected_photos', [])
+                    apartment['baignoire_data']['justification'] = baignoire_result.get('justification', '')
                 
-                # Luminosité - seulement si manquante
-                if unified_result.get('luminosite') and not has_luminosite:
+                # Luminosité - toujours mettre à jour si disponible
+                if unified_result.get('luminosite'):
                     luminosite_data = unified_result['luminosite']
                     apartment['style_analysis']['luminosite'] = {
                         'type': luminosite_data.get('type', 'moyen'),
                         'confidence': luminosite_data.get('confidence', 0),
                         'justification': luminosite_data.get('justification', '')
                     }
+                    print(f"      ✅ Luminosité détectée: {luminosite_data.get('type', 'N/A')}")
                 
-                print(f"      ✅ Photos analysées avec Gemini Flash (2 photos) pour {apartment_id}")
+                # Hauteur plafond - toujours mettre à jour si disponible
+                if unified_result.get('hauteur_plafond'):
+                    hauteur_data = unified_result['hauteur_plafond']
+                    hauteur_estimee = hauteur_data.get('hauteur_estimee')
+                    if hauteur_estimee:
+                        apartment['analyses']['hauteur_plafond'] = {
+                            'hauteur_estimee': hauteur_estimee,
+                            'confiance': hauteur_data.get('confidence', 0.7),
+                            'justification': hauteur_data.get('justification', '')
+                        }
+                        print(f"      ✅ Hauteur plafond détectée: {hauteur_estimee}m")
+                
+                # Pièce de vie - toujours mettre à jour si disponible
+                if unified_result.get('piece_vie'):
+                    piece_vie_data = unified_result['piece_vie']
+                    taille_m2 = piece_vie_data.get('taille_m2')
+                    taille = piece_vie_data.get('taille', 'moyenne')
+                    apartment['piece_vie'] = {
+                        'taille': taille,
+                        'taille_m2': taille_m2,  # Estimation en m² depuis l'analyse d'image
+                        'confidence': piece_vie_data.get('confidence', 0),
+                        'justification': piece_vie_data.get('justification', '')
+                    }
+                    if taille_m2:
+                        print(f"      ✅ Pièce de vie détectée: {taille} ({taille_m2}m²)")
+                    else:
+                        print(f"      ✅ Pièce de vie détectée: {taille}")
+                
+                # Vis-à-vis - toujours mettre à jour si disponible
+                if unified_result.get('visavis'):
+                    visavis_data = unified_result['visavis']
+                    visavis_distance = visavis_data.get('distance')
+                    visavis_category = visavis_data.get('category')
+                    
+                    if visavis_distance is not None:
+                        # Initialiser exposition si nécessaire
+                        if 'exposition' not in apartment:
+                            apartment['exposition'] = {}
+                        if 'details' not in apartment['exposition']:
+                            apartment['exposition']['details'] = {}
+                        
+                        # Sauvegarder les données du vis-à-vis
+                        apartment['exposition']['details']['visavis_distance'] = visavis_distance
+                        if visavis_category:
+                            apartment['exposition']['details']['visavis_category'] = visavis_category
+                        apartment['exposition']['details']['visavis_confidence'] = visavis_data.get('confidence', 0.5)
+                        apartment['exposition']['details']['visavis_justification'] = visavis_data.get('justification', '')
+                        
+                        print(f"      ✅ Vis-à-vis détecté: {visavis_distance}m ({visavis_category or 'N/A'})")
+                
+                # Afficher le nombre réel de photos analysées
+                photos_analyzed_count = unified_result.get('photos_analyzed', 0)
+                print(f"      ✅ Photos analysées avec Gemini Flash ({photos_analyzed_count} photos) pour {apartment_id}")
             else:
                 print(f"      ⚠️ Aucun résultat d'analyse pour {apartment_id}")
         except Exception as e:
@@ -1001,7 +1144,9 @@ def enrich_apartment_data_only(apartment: Dict[str, Any]) -> Dict[str, Any]:
     try:
         cuisine_formatted = format_cuisine(apartment)
         apartment['formatted_data']['cuisine'] = {
-            'indices': cuisine_formatted.get('indices')
+            'main_value': cuisine_formatted.get('main_value'),
+            'indices': cuisine_formatted.get('indices'),
+            'confidence': cuisine_formatted.get('confidence')
         }
     except Exception as e:
         print(f"   ⚠️ Erreur format_cuisine pour {apartment_id}: {e}")
@@ -1048,12 +1193,48 @@ def enrich_apartment_data_only(apartment: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as e:
             print(f"   ⚠️ Erreur format_exposition pour {apartment_id}: {e}")
     
+    # 5. Hauteur plafond
+    # Toujours créer formatted_data.hauteur_plafond (même si non analysé, pour afficher "Non analysé")
+    try:
+        hauteur_formatted = format_hauteur(apartment)
+        apartment['formatted_data']['hauteur_plafond'] = {
+            'main_value': hauteur_formatted.get('main_value'),
+            'indices': hauteur_formatted.get('indices'),
+            'confidence': hauteur_formatted.get('confidence')
+        }
+    except Exception as e:
+        print(f"   ⚠️ Erreur format_hauteur pour {apartment_id}: {e}")
+        # En cas d'erreur, créer quand même avec "Non analysé"
+        apartment['formatted_data']['hauteur_plafond'] = {
+            'main_value': 'Non spécifié',
+            'indices': 'Hauteur Indice:\nNon spécifié',
+            'confidence': None
+        }
+    
+    # 6. Pièce de vie
+    # Toujours créer formatted_data.piece_vie (même si non analysé)
+    try:
+        piece_vie_formatted = format_piece_vie(apartment)
+        apartment['formatted_data']['piece_vie'] = {
+            'main_value': piece_vie_formatted.get('main_value'),
+            'indices': piece_vie_formatted.get('indices'),
+            'confidence': piece_vie_formatted.get('confidence')
+        }
+    except Exception as e:
+        print(f"   ⚠️ Erreur format_piece_vie pour {apartment_id}: {e}")
+        # En cas d'erreur, créer quand même avec "Non analysé"
+        apartment['formatted_data']['piece_vie'] = {
+            'main_value': 'Non spécifié',
+            'indices': 'Pièce de vie Indice:\nNon spécifié',
+            'confidence': None
+        }
+    
     return apartment
 
 
 def save_apartment_to_file(apartment: Dict[str, Any]) -> bool:
     """
-    Sauvegarde un appartement dans son fichier JSON individuel
+    Sauvegarde un appartement dans le fichier unique data/all_apartments.json
     
     Args:
         apartment: Dict avec données de l'appartement
@@ -1061,21 +1242,77 @@ def save_apartment_to_file(apartment: Dict[str, Any]) -> bool:
     Returns:
         True si sauvegarde réussie, False sinon
     """
+    import time
     apartment_id = apartment.get('id')
     if not apartment_id:
         print(f"   ⚠️ Pas d'ID pour l'appartement, skip")
         return False
     
-    apartment_file = f"data/appartements/{apartment_id}.json"
+    apartments_file = 'data/all_apartments.json'
     try:
+        # #region agent log
+        with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+            import json as json_module
+            logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"apartments.py:1092","message":"save_apartment_to_file started","data":{"apartment_id":apartment_id},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + "\n")
+        # #endregion
         from pathlib import Path
-        Path(apartment_file).parent.mkdir(parents=True, exist_ok=True)
+        Path(apartments_file).parent.mkdir(parents=True, exist_ok=True)
         
-        with open(apartment_file, 'w', encoding='utf-8') as f:
-            json.dump(apartment, f, ensure_ascii=False, indent=2, default=str)
+        # Charger tous les appartements existants
+        all_apartments = []
+        if os.path.exists(apartments_file):
+            try:
+                with open(apartments_file, 'r', encoding='utf-8') as f:
+                    all_apartments = json.load(f)
+            except Exception as e:
+                print(f"   ⚠️ Erreur lecture {apartments_file}: {e}")
+                all_apartments = []
+        
+        # Créer un dict par ID pour faciliter la mise à jour
+        apartments_by_id = {str(apt.get('id')): apt for apt in all_apartments if apt.get('id')}
+        
+        # Mettre à jour ou ajouter l'appartement
+        apartments_by_id[str(apartment_id)] = apartment
+        
+        # Convertir en liste et trier par ID
+        all_apartments = list(apartments_by_id.values())
+        all_apartments.sort(key=lambda x: str(x.get('id', '')))
+        
+        # Sauvegarder
+        save_start_time = time.time()
+        with open(apartments_file, 'w', encoding='utf-8') as f:
+            json.dump(all_apartments, f, ensure_ascii=False, indent=2, default=str)
+            # Forcer l'écriture sur disque
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except (AttributeError, OSError):
+                pass  # fsync peut ne pas être disponible sur tous les systèmes
+        save_end_time = time.time()
+        file_mtime_after = os.path.getmtime(apartments_file) if os.path.exists(apartments_file) else 0
+        # #region agent log
+        with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+            import json as json_module
+            logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"apartments.py:1123","message":"File saved to disk","data":{"apartment_id":apartment_id,"save_duration_ms":(save_end_time-save_start_time)*1000,"file_mtime":file_mtime_after},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + "\n")
+        # #endregion
+        
+        # Invalider le cache pour forcer le rechargement
+        invalidate_cache()
+        # #region agent log
+        with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+            import json as json_module
+            logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"apartments.py:1133","message":"Cache invalidated after save","data":{"apartment_id":apartment_id},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
+        # #endregion
+        
+        print(f"      💾 {apartment_id} sauvegardé dans {apartments_file}")
         return True
     except Exception as e:
         print(f"   ❌ Erreur sauvegarde {apartment_id}: {e}")
+        # #region agent log
+        with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+            import json as json_module
+            logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"apartments.py:1138","message":"Save error","data":{"apartment_id":apartment_id,"error":str(e)},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + "\n")
+        # #endregion
         return False
 
 
@@ -1103,16 +1340,17 @@ async def enrich_apartments_stream(limit: int = Query(default=5, ge=0, descripti
                 reverse=True
             )
             
-            # Identifier les appartements sans données enrichies
-            apartments_to_enrich = []
-            for apartment in apartments_sorted:
-                missing = detect_missing_enriched_data(apartment)
-                if missing:  # Si au moins un critère manque
-                    apartments_to_enrich.append(apartment)
-            
-            # Limiter le nombre d'appartements à enrichir si limit > 0
+            # MODIFICATION: Toujours prendre les N derniers (limit) pour forcer la réanalyse
+            # même s'ils sont déjà analysés
             if limit > 0:
-                apartments_to_enrich = apartments_to_enrich[:limit]
+                apartments_to_enrich = apartments_sorted[:limit]
+            else:
+                # Si limit = 0, prendre tous les appartements sans données enrichies
+                apartments_to_enrich = []
+                for apartment in apartments_sorted:
+                    missing = detect_missing_enriched_data(apartment)
+                    if missing:  # Si au moins un critère manque
+                        apartments_to_enrich.append(apartment)
             
             total = len(apartments_to_enrich)
             print(f"   📊 {total} appartement(s) à enrichir sur {len(apartments)} total")
@@ -1130,8 +1368,21 @@ async def enrich_apartments_stream(limit: int = Query(default=5, ge=0, descripti
                 yield f"data: {json.dumps({'type': 'progress', 'current': i, 'total': total, 'apartment_id': apartment_id})}\n\n"
                 
                 try:
+                    # Vérifier les données avant enrichissement pour debug
+                    before_style = apartment.get('style_analysis', {}).get('style', {}).get('type', 'N/A')
+                    before_cuisine = apartment.get('style_analysis', {}).get('cuisine', {}).get('ouverte', 'N/A')
+                    
                     # Enrichir les données formatées uniquement (sans score)
                     enriched_apartment = enrich_apartment_data_only(apartment)
+                    
+                    # Vérifier les données après enrichissement pour debug
+                    after_style = enriched_apartment.get('style_analysis', {}).get('style', {}).get('type', 'N/A')
+                    after_cuisine = enriched_apartment.get('style_analysis', {}).get('cuisine', {}).get('ouverte', 'N/A')
+                    after_luminosite = enriched_apartment.get('style_analysis', {}).get('luminosite', {}).get('type', 'N/A')
+                    after_hauteur = enriched_apartment.get('analyses', {}).get('hauteur_plafond', {}).get('hauteur_estimee', 'N/A')
+                    after_piece_vie = enriched_apartment.get('piece_vie', {}).get('taille', 'N/A')
+                    print(f"      📊 {apartment_id} - Style: {before_style} -> {after_style}, Cuisine: {before_cuisine} -> {after_cuisine}")
+                    print(f"      📊 {apartment_id} - Luminosité: {after_luminosite}, Hauteur: {after_hauteur}, Pièce de vie: {after_piece_vie}")
                     
                     # Sauvegarder l'appartement enrichi
                     if save_apartment_to_file(enriched_apartment):
@@ -1149,12 +1400,24 @@ async def enrich_apartments_stream(limit: int = Query(default=5, ge=0, descripti
                     yield f"data: {json.dumps({'type': 'error', 'message': f'Erreur enrichissement {apartment_id}: {str(e)}', 'current': i, 'total': total})}\n\n"
             
             # Invalider le cache pour forcer le rechargement
+            import time
+            # #region agent log
+            with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+                import json as json_module
+                logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"apartments.py:1225","message":"Enrichment complete, invalidating cache","data":{"enriched_count":enriched_count,"total":total},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
+            # #endregion
             invalidate_cache()
             
             print(f"✅ Enrichissement terminé: {enriched_count} appartement(s) enrichi(s)")
             
             # Envoyer le message final
-            yield f"data: {json.dumps({'type': 'complete', 'enriched_count': enriched_count, 'total': total, 'message': f'{enriched_count} appartement(s) enrichi(s) avec succès'})}\n\n"
+            complete_msg = {'type': 'complete', 'enriched_count': enriched_count, 'total': total, 'message': f'{enriched_count} appartement(s) enrichi(s) avec succès'}
+            # #region agent log
+            with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+                import json as json_module
+                logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"apartments.py:1231","message":"Sending complete event","data":complete_msg,"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + "\n")
+            # #endregion
+            yield f"data: {json.dumps(complete_msg)}\n\n"
             
         except Exception as e:
             import traceback
