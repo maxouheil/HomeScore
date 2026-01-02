@@ -309,6 +309,28 @@ async def get_alert_apartments(alert_id: str) -> List[Dict[str, Any]]:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Erreur lors du chargement des appartements: {str(e)}")
         
+        # Normaliser les appartements pour avoir les données criteria.display
+        try:
+            backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if backend_dir not in sys.path:
+                sys.path.insert(0, backend_dir)
+            from normalizers.simple_normalizer import normalize_apartment
+            
+            normalized_apartments = []
+            for apt in all_apartments:
+                try:
+                    normalized = normalize_apartment(apt)
+                    normalized_apartments.append(normalized)
+                except Exception as e:
+                    # En cas d'erreur, utiliser l'appartement non normalisé
+                    normalized_apartments.append(apt)
+            all_apartments = normalized_apartments
+        except Exception as e:
+            # Si la normalisation échoue, continuer avec les données non normalisées
+            print(f"⚠️ Erreur normalisation pour alertes: {e}")
+            import traceback
+            traceback.print_exc()
+        
         # Filtrer selon les critères de l'alerte
         try:
             filters = alert.get('filters', {})

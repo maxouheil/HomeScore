@@ -35,6 +35,7 @@ CRITERIA = [
     'calme'
 ]
 
+
 class FastCriteriaAnalyzer:
     """Analyseur ultra-optimisé pour les 10 critères avec Gemini Flash"""
     
@@ -186,6 +187,9 @@ class FastCriteriaAnalyzer:
         # Mettre en cache
         if result:
             self.cache.set("criteria_analysis", cache_key, result)
+            
+            # Sauvegarder les résultats dans un fichier JSON
+            self.save_analysis_results(apartment_id, result)
         
         return result
     

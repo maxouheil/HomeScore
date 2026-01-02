@@ -181,6 +181,53 @@
   cursor: not-allowed !important;
 }
 
+/* Dropdown wrapper pour le bouton enrichir */
+.enrich-dropdown-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.enrich-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  min-width: 220px;
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.enrich-dropdown-item {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  text-align: left;
+  background: white;
+  border: none;
+  color: #374151;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  display: block;
+}
+
+.enrich-dropdown-item:hover {
+  background: #f9fafb;
+  color: #111827;
+}
+
+.enrich-dropdown-item:first-child {
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
+
+.enrich-dropdown-item:last-child {
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
 .nav-button-refresh {
   background: white !important;
   color: #374151 !important;

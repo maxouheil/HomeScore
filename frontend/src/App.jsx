@@ -93,6 +93,8 @@ function App() {
   const [isEnriching, setIsEnriching] = useState(false)
   const [enrichMessage, setEnrichMessage] = useState(null)
   const [enrichmentProgress, setEnrichmentProgress] = useState({ current: 0, total: 0, visible: false })
+  const [enrichDropdownOpen, setEnrichDropdownOpen] = useState(false)
+  const enrichDropdownRef = useRef(null)
   
   const [apartmentsRaw, setApartmentsRaw] = useState([])
   const apartmentsRawRef = useRef([]) // Ref pour comparer les données
@@ -274,6 +276,23 @@ function App() {
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }, [currentPage])
+
+  // Fermer le dropdown enrichir quand on clique en dehors
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (enrichDropdownRef.current && !enrichDropdownRef.current.contains(event.target)) {
+        setEnrichDropdownOpen(false)
+      }
+    }
+
+    if (enrichDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [enrichDropdownOpen])
 
   useEffect(() => {
     // WebSocket pour mises à jour en temps réel (optionnel - fonctionne même si backend non démarré)
@@ -525,15 +544,16 @@ function App() {
     }
   }
 
-  const handleEnrich = async () => {
+  const handleEnrich = async (limit = 5) => {
     try {
       setIsEnriching(true)
       setEnrichMessage(null)
       setError(null)
       setEnrichmentProgress({ current: 0, total: 0, visible: true })
+      setEnrichDropdownOpen(false) // Fermer le dropdown
 
       // Utiliser l'endpoint SSE pour avoir la progression en temps réel
-      const response = await fetch('/api/apartments/enrich/stream?limit=5', {
+      const response = await fetch(`/api/apartments/enrich/stream?limit=${limit}`, {
         method: 'POST'
       })
 
@@ -659,21 +679,44 @@ function App() {
               </button>
             </div>
           )}
-          <button
-            className="nav-button nav-button-enrich"
-            onClick={handleEnrich}
-            disabled={isEnriching}
-            title="Enrichir les données des appartements sans données enrichies"
-          >
-            {isEnriching ? (
-              <>
-                <div className="spinner" style={{ width: '14px', height: '14px', borderWidth: '2px', margin: 0 }}></div>
-                <span>Enrichissement...</span>
-              </>
-            ) : (
-              <span>Enrichir</span>
+          <div className="enrich-dropdown-wrapper" ref={enrichDropdownRef}>
+            <button
+              className="nav-button nav-button-enrich"
+              onClick={() => setEnrichDropdownOpen(!enrichDropdownOpen)}
+              disabled={isEnriching}
+              title="Enrichir les données des appartements"
+            >
+              {isEnriching ? (
+                <>
+                  <div className="spinner" style={{ width: '14px', height: '14px', borderWidth: '2px', margin: 0 }}></div>
+                  <span>Enrichissement...</span>
+                </>
+              ) : (
+                <>
+                  <span>Enrichir</span>
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginLeft: '6px' }}>
+                    <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </>
+              )}
+            </button>
+            {enrichDropdownOpen && !isEnriching && (
+              <div className="enrich-dropdown-menu">
+                <button
+                  className="enrich-dropdown-item"
+                  onClick={() => handleEnrich(5)}
+                >
+                  Enrichir les 5 derniers appartements
+                </button>
+                <button
+                  className="enrich-dropdown-item"
+                  onClick={() => handleEnrich(50)}
+                >
+                  Enrichir les 50 derniers appartements
+                </button>
+              </div>
             )}
-          </button>
+          </div>
           <button
             className="nav-button nav-button-refresh"
             onClick={handleRefresh}

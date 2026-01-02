@@ -284,9 +284,17 @@ def _normalize_localisation(apartment: Dict[str, Any]) -> Dict[str, Any]:
     if api_data.get('postal_code'):
         arrondissement = api_data['postal_code']
     elif localisation_str:
-        match = re.search(r'75(\d{3})', localisation_str)
+        # Chercher un code postal au format 750XX dans la chaîne
+        match = re.search(r'(75\d{3})', localisation_str)
         if match:
-            arrondissement = f"75{match.group(1)}"
+            arrondissement = match.group(1)
+        else:
+            # Chercher un pattern comme "20e" ou "20e arrondissement" et construire 75020
+            match = re.search(r'(\d{1,2})e\s*(?:arrondissement|arr\.)?', localisation_str, re.IGNORECASE)
+            if match:
+                arr_num = match.group(1).zfill(2)
+                if int(arr_num) <= 20:
+                    arrondissement = f"75{arr_num}"
     
     # Métro
     metro = None
@@ -427,6 +435,14 @@ def _build_display_data(apartment: Dict[str, Any], criterion_name: str, score_da
         }
     
     elif criterion_name == 'prix':
+        # #region agent log
+        apt_id = apartment.get('id', 'unknown')
+        with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+            import json as json_module
+            import time
+            logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"simple_normalizer.py:prix_entry","message":"Prix debug - entry","data":{"apt_id":apt_id,"has_api_data":bool(api_data),"api_postal_code":api_data.get('postal_code', '') if api_data else None},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + "\n")
+        # #endregion
+        
         # Titre: X €/m²
         prix_m2 = _extract_prix_m2(apartment)
         if prix_m2 > 0:
@@ -434,21 +450,96 @@ def _build_display_data(apartment: Dict[str, Any], criterion_name: str, score_da
         else:
             title = 'Prix'
         
-        # Description: "20e : X €/m² en moyenne · au dessus/dessous du marché"
-        arrondissement = localisation.get('arrondissement', '')
+        # Description: "20e : X €/m² (médian: Y €/m²) · au dessus/dessous du marché"
+        # Récupérer le code postal depuis api_data en priorité
+        postal_code = api_data.get('postal_code', '')
+        if not postal_code:
+            # Fallback 1: chercher dans localisation normalisée
+            arrondissement = localisation.get('arrondissement', '')
+            if arrondissement and arrondissement.startswith('75'):
+                postal_code = arrondissement
+            else:
+                # Fallback 2: chercher directement dans la chaîne localisation brute
+                localisation_str = apartment.get('localisation', '')
+                if isinstance(localisation_str, str):
+                    # Chercher un code postal au format 750XX dans la chaîne
+                    match = re.search(r'(75\d{3})', localisation_str)
+                    if match:
+                        postal_code = match.group(1)
+                    else:
+                        # Chercher un pattern comme "20e" ou "20e arrondissement" et construire 75020
+                        match = re.search(r'(\d{1,2})e\s*(?:arrondissement|arr\.)?', localisation_str, re.IGNORECASE)
+                        if match:
+                            arr_num = match.group(1).zfill(2)
+                            if int(arr_num) <= 20:
+                                postal_code = f"75{arr_num}"
+        
+        # #region agent log
+        with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+            import json as json_module
+            import time
+            logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"simple_normalizer.py:prix_postal_code","message":"Prix debug - postal code retrieved","data":{"apt_id":apt_id,"postal_code":postal_code,"from_api_data":bool(api_data.get('postal_code', ''))},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + "\n")
+        # #endregion
+        
         arr_num = None
-        if arrondissement and arrondissement.startswith('75'):
-            arr_num = arrondissement[-2:]
+        if postal_code and postal_code.startswith('75'):
+            arr_num = postal_code[-2:]
         
-        tier = score_data.get('tier', 'tier3') if score_data else 'tier3'
-        tier_text = 'au dessus du marché' if tier == 'tier3' else 'en dessous du marché' if tier == 'tier1' else 'du marché'
+        # Récupérer le prix médian de l'arrondissement
+        median_price = None
+        if postal_code and postal_code.startswith('75'):
+            try:
+                median_price = get_arrondissement_median_price(postal_code)
+                # #region agent log
+                with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+                    import json as json_module
+                    import time
+                    logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"simple_normalizer.py:prix_median_price","message":"Prix debug - median price retrieved","data":{"apt_id":apt_id,"postal_code":postal_code,"median_price":median_price},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + "\n")
+                # #endregion
+            except Exception as e:
+                # #region agent log
+                with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+                    import json as json_module
+                    import time
+                    logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"simple_normalizer.py:prix_median_error","message":"Prix debug - error getting median price","data":{"apt_id":apt_id,"postal_code":postal_code,"error":str(e)},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + "\n")
+                # #endregion
+                pass
         
-        if arr_num and prix_m2 > 0:
-            description = f"{arr_num}e : {prix_m2:,} €/m² en moyenne · {tier_text}".replace(',', ' ')
-        elif prix_m2 > 0:
-            description = f"{prix_m2:,} €/m² en moyenne · {tier_text}".replace(',', ' ')
+        # Déterminer le tier en fonction de la différence avec le médian (±500€ = du marché)
+        tier = 'tier3'  # Par défaut: au dessus
+        if median_price and prix_m2 > 0:
+            diff = abs(prix_m2 - median_price)
+            if diff <= 500:
+                tier = 'tier2'  # Du marché si ±500€
+            elif prix_m2 > median_price:
+                tier = 'tier3'  # Au dessus
+            else:
+                tier = 'tier1'  # En dessous
+        elif score_data and score_data.get('tier'):
+            # Fallback sur score_data si pas de médian
+            tier = score_data.get('tier')
+        
+        tier_text = 'Du marché' if tier == 'tier2' else 'Au dessus du marché' if tier == 'tier3' else 'En dessous du marché'
+        
+        # Arrondir le prix/m² à 500€ près
+        prix_m2_rounded = round(prix_m2 / 500) * 500 if prix_m2 > 0 else 0
+        
+        if prix_m2 > 0:
+            if arr_num:
+                # Format: "Moyenne 20e: 8 500€ /m² · Au dessus du marché"
+                description = f"Moyenne {arr_num}e: {prix_m2_rounded:,}€ /m² · {tier_text}".replace(',', ' ')
+            else:
+                # Format sans arrondissement: "8 500€ /m² · Au dessus du marché"
+                description = f"{prix_m2_rounded:,}€ /m² · {tier_text}".replace(',', ' ')
         else:
             description = None
+        
+        # #region agent log
+        with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
+            import json as json_module
+            import time
+            logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"simple_normalizer.py:prix_final","message":"Prix debug - final description","data":{"apt_id":apt_id,"description":description,"has_median":bool(median_price)},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
+        # #endregion
         
         return {
             'title': title,
@@ -867,10 +958,12 @@ def _build_display_data(apartment: Dict[str, Any], criterion_name: str, score_da
         
         # #region agent log
         apt_id = apartment.get('id', 'unknown')
+        # Log de toutes les sources potentielles pour debugging
+        baignoire_data_for_log = apartment.get('baignoire', {}) or apartment.get('baignoire_data', {})
         with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
             import json as json_module
             import time
-            logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"simple_normalizer.py:baignoire_entry","message":"Baignoire debug - entry","data":{"apt_id":apt_id,"has_baignoire":has_baignoire,"has_douche":has_douche,"detected_photos":detected_photos},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + "\n")
+            logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"simple_normalizer.py:baignoire_entry","message":"Baignoire debug - entry","data":{"apt_id":apt_id,"has_baignoire":has_baignoire,"has_douche":has_douche,"detected_photos_from_photo_result":detected_photos,"baignoire_data_keys":list(baignoire_data_for_log.keys()) if baignoire_data_for_log else [],"baignoire_data_detected_photos":baignoire_data_for_log.get('detected_photos', []) if baignoire_data_for_log else [],"formatted_keys":list(formatted.keys()) if formatted else []},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + "\n")
         # #endregion
         
         # Priorité 1: Utiliser detected_photos si disponible
@@ -890,18 +983,20 @@ def _build_display_data(apartment: Dict[str, Any], criterion_name: str, score_da
             with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
                 import json as json_module
                 import time
-                logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"simple_normalizer.py:baignoire_formatted_indices","message":"Baignoire debug - checking formatted_data.indices","data":{"apt_id":apt_id,"formatted_indices":formatted_indices[:200] if formatted_indices else None},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + "\n")
+                logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"simple_normalizer.py:baignoire_formatted_indices","message":"Baignoire debug - checking formatted_data.indices","data":{"apt_id":apt_id,"formatted_indices":formatted_indices[:300] if formatted_indices else None,"formatted_indices_full_length":len(formatted_indices) if formatted_indices else 0},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + "\n")
             # #endregion
             if formatted_indices:
-                # Chercher "image X" ou "photo X" (numéro en chiffres)
-                img_match = re.search(r'(?:image|photo)\s+(\d+)', formatted_indices, re.IGNORECASE)
-                if img_match:
-                    photo_num = img_match.group(1)
+                # Chercher "image X" ou "photo X" (numéro en chiffres) - format: "Baignoire détectée image 1, image 3"
+                # Chercher TOUS les numéros d'images (peut y en avoir plusieurs)
+                img_matches = re.findall(r'(?:image|photo)\s+(\d+)', formatted_indices, re.IGNORECASE)
+                if img_matches:
+                    # Prendre le premier numéro trouvé
+                    photo_num = img_matches[0]
                     # #region agent log
                     with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
                         import json as json_module
                         import time
-                        logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"simple_normalizer.py:baignoire_formatted_photo_num","message":"Baignoire debug - photo_num from formatted_data.indices","data":{"apt_id":apt_id,"photo_num":photo_num},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + "\n")
+                        logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"simple_normalizer.py:baignoire_formatted_photo_num","message":"Baignoire debug - photo_num from formatted_data.indices","data":{"apt_id":apt_id,"photo_num":photo_num,"all_matches":img_matches},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + "\n")
                     # #endregion
         
         # Priorité 3: Chercher dans formatted_data.detected_photos
@@ -1004,14 +1099,6 @@ def _build_display_data(apartment: Dict[str, Any], criterion_name: str, score_da
         # Utiliser large_piece_vie si disponible, sinon score_data (pour compatibilité)
         score_data_to_use = large_piece_vie_score if large_piece_vie_score else score_data
         
-        # #region agent log
-        apt_id = apartment.get('id', 'unknown')
-        with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
-            import json as json_module
-            import time
-            logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"simple_normalizer.py:piece_vie_entry","message":"Piece vie debug - entry","data":{"apt_id":apt_id,"has_large_piece_vie":bool(large_piece_vie_score),"large_piece_vie_keys":list(large_piece_vie_score.keys()) if large_piece_vie_score else [],"details":large_piece_vie_score.get('details', {}) if large_piece_vie_score else {}},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + "\n")
-        # #endregion
-        
         tier = score_data_to_use.get('tier', 'tier3') if score_data_to_use else 'tier3'
         if tier == 'tier1':
             title = 'Grande pièce de vie'
@@ -1048,13 +1135,6 @@ def _build_display_data(apartment: Dict[str, Any], criterion_name: str, score_da
             details = large_piece_vie_score.get('details', {}) if large_piece_vie_score else {}
             pourcentage = details.get('pourcentage_salon')
             
-            # #region agent log
-            with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
-                import json as json_module
-                import time
-                logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"simple_normalizer.py:piece_vie_pourcentage_check","message":"Piece vie debug - checking pourcentage","data":{"apt_id":apt_id,"has_details":bool(details),"details_keys":list(details.keys()) if details else [],"pourcentage_salon":pourcentage},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + "\n")
-            # #endregion
-            
             # Fallback: chercher dans score_data.details (compatibilité)
             if not pourcentage and score_data:
                 details_old = score_data.get('details', {})
@@ -1067,14 +1147,25 @@ def _build_display_data(apartment: Dict[str, Any], criterion_name: str, score_da
                 details_style = piece_vie_style.get('details', {})
                 pourcentage = details_style.get('pourcentage_salon') or details_style.get('pourcentage')
             
+            # Fallback: calculer depuis piece_vie.taille_m2 et surface totale
+            if not pourcentage:
+                piece_vie_data = apartment.get('piece_vie', {})
+                taille_m2 = piece_vie_data.get('taille_m2')
+                if taille_m2:
+                    try:
+                        taille_m2_float = float(taille_m2)
+                        # Extraire la surface totale depuis apartment.surface
+                        surface = apartment.get('surface', '')
+                        surface_match = re.search(r'(\d+)', surface)
+                        if surface_match:
+                            surface_totale = float(surface_match.group(1))
+                            if surface_totale > 0:
+                                pourcentage = (taille_m2_float / surface_totale) * 100
+                    except (ValueError, TypeError):
+                        pass
+            
             if pourcentage:
                 indices = f"{pourcentage:.1f}% de la surface totale de l'appartement".replace('.', ',')
-                # #region agent log
-                with open('/Users/sou/Desktop/CURSOR/HomeScore/.cursor/debug.log', 'a') as logf:
-                    import json as json_module
-                    import time
-                    logf.write(json_module.dumps({"id":f"log_{int(time.time()*1000)}","timestamp":int(time.time()*1000),"location":"simple_normalizer.py:piece_vie_indices_created","message":"Piece vie debug - indices created","data":{"apt_id":apt_id,"pourcentage":pourcentage,"indices":indices},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + "\n")
-                # #endregion
         
         return {
             'title': title,

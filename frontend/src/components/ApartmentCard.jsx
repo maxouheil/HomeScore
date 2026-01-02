@@ -1002,7 +1002,7 @@ function formatLocalisation(apartment) {
   const title = titleParts.length > 0 ? titleParts.join(' · ') : 'Localisation'
   
   // Description: adresse exacte
-  const description = rue || null
+  const description = rue || 'adresse non trouvée'
   const descriptionClass = null
   
   return {
@@ -1058,6 +1058,39 @@ function getArrondissementNumber(postalCode) {
 }
 
 function formatPrixCriterion(apartment) {
+  console.log('[DEBUG] formatPrixCriterion CALLED for apt:', apartment.id);
+  // #region agent log
+  const logData = {location:'ApartmentCard.jsx:formatPrixCriterion_entry',message:'Prix debug - formatPrixCriterion entry',data:{aptId:apartment.id,hasCriteria:!!apartment.criteria?.prix,hasCriteriaDisplay:!!apartment.criteria?.prix?.display,hasCriteriaDescription:!!apartment.criteria?.prix?.display?.description,criteriaDescription:apartment.criteria?.prix?.display?.description},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'};
+  fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logData)}).catch(()=>{});
+  // #endregion
+  
+  // PRIORITÉ: Utiliser les données normalisées depuis le backend si disponibles
+  if (apartment.criteria?.prix?.display?.description) {
+    const normalizedData = apartment.criteria.prix.display;
+    // #region agent log
+    console.log('[DEBUG] formatPrixCriterion using normalized data:', {
+      aptId: apartment.id,
+      description: normalizedData.description,
+      title: normalizedData.title
+    });
+    fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:formatPrixCriterion_using_normalized',message:'Prix debug - using normalized data',data:{aptId:apartment.id,description:normalizedData.description,title:normalizedData.title},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+    return {
+      title: normalizedData.title || 'Prix',
+      description: normalizedData.description
+    };
+  }
+  
+  // #region agent log
+  console.log('[DEBUG] formatPrixCriterion NOT using normalized data:', {
+    aptId: apartment.id,
+    hasCriteria: !!apartment.criteria,
+    hasCriteriaPrix: !!apartment.criteria?.prix,
+    hasCriteriaPrixDisplay: !!apartment.criteria?.prix?.display,
+    hasDescription: !!apartment.criteria?.prix?.display?.description
+  });
+  // #endregion
+  
   // Vérifier si le prix a été analysé
   const prixScore = apartment.scores_detaille?.prix
   const tier = prixScore?.tier || 'tier3'
@@ -1142,15 +1175,6 @@ function formatPrixCriterion(apartment) {
   // Extraire l'arrondissement et le prix médian
   const arrondissementNum = getArrondissementNumber(postalCode)
   const medianPrice = getArrondissementMedianPrice(postalCode)
-  
-  // Debug: vérifier les valeurs
-  console.log('[formatPrixCriterion]', {
-    postalCode,
-    arrondissementNum,
-    medianPrice,
-    prixM2Rounded,
-    apartmentId: apartment.id
-  })
   
   // Formater le prix/m² avec espaces pour les milliers
   const prixM2Formatted = prixM2Rounded.toLocaleString('fr-FR')
@@ -1687,6 +1711,16 @@ function formatBaignoireCriterion(apartment) {
     const hasBaignoire = mainValue === 'Oui' || mainValue === 'Baignoire'
     const tier = hasBaignoire ? 'tier1' : 'tier3'
     let indices = baignoireFormatted.indices || null
+    let detectedPhotos = baignoireFormatted.detected_photos
+    // Si on a detected_photos, ajouter le numéro d'image aux indices (comme pour cuisine)
+    if (detectedPhotos && Array.isArray(detectedPhotos) && detectedPhotos.length > 0) {
+      const photoNum = detectedPhotos[0]
+      if (hasBaignoire) {
+        indices = `Baignoire détectée image ${photoNum}`
+      } else {
+        indices = `Douche détectée image ${photoNum}`
+      }
+    }
     const confidence = baignoireFormatted.confidence || null
     
     let title = 'Baignoire'
@@ -1966,11 +2000,6 @@ function formatCalmeCriterion(apartment) {
 }
 
 function formatLargePieceVieCriterion(apartment) {
-  // #region agent log
-  const logData = {location:'ApartmentCard.jsx:1947',message:'formatLargePieceVieCriterion entry',data:{aptId:apartment.id,hasCriteria:!!apartment.criteria?.piece_vie?.display?.indices,hasFormattedData:!!apartment.formatted_data?.piece_vie,hasScoresDetaille:!!apartment.scores_detaille?.large_piece_vie},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'};
-  console.log('[DEBUG]', logData);
-  fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(logData)}).catch(()=>{});
-  // #endregion
   // PRIORITÉ ABSOLUE: Utiliser les données normalisées depuis le backend si disponibles
   if (apartment.criteria?.piece_vie?.display?.indices) {
     let normalizedIndices = apartment.criteria.piece_vie.display.indices
@@ -2001,9 +2030,6 @@ function formatLargePieceVieCriterion(apartment) {
         }
       }
     }
-    // #region agent log
-    fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:1961',message:'Using criteria.piece_vie branch',data:{aptId:apartment.id,indices:normalizedIndices,title:normalizedTitle,hasPourcentage:normalizedIndices?.includes('%')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     return {
       title: normalizedTitle,
       description: apartment.criteria.piece_vie.display.description,
@@ -2018,17 +2044,11 @@ function formatLargePieceVieCriterion(apartment) {
   if (pieceVieFormatted && pieceVieFormatted.main_value) {
     const mainValue = pieceVieFormatted.main_value
     const indicesRaw = pieceVieFormatted.indices || ''
-    // #region agent log
-    fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:1966',message:'Using formatted_data branch',data:{aptId:apartment.id,mainValue,indicesRaw},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
     // Nettoyer les indices (retirer préfixe et garder le contenu)
     let cleanedIndices = indicesRaw
       .replace(/^Pièce de vie Indice:\s*/i, '')
       .replace(/^Pièce de vie:\s*/i, '')
       .trim()
-    // #region agent log
-    fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:1974',message:'After cleaning indices',data:{aptId:apartment.id,cleanedIndices,hasPercentInCleaned:cleanedIndices?.includes('%')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
     // Utiliser le main_value comme titre (ex: "Grande pièce de vie")
     let title = mainValue
     
@@ -2038,9 +2058,6 @@ function formatLargePieceVieCriterion(apartment) {
     
     // Chercher d'abord le pourcentage (% de la surface totale) dans les indices
     const pourcentageMatch = cleanedIndices.match(/(\d+[.,]?\d*)%\s*de\s*la\s*surface\s*totale/i)
-    // #region agent log
-    fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:1984',message:'Regex match result',data:{aptId:apartment.id,pourcentageMatch:!!pourcentageMatch,matchValue:pourcentageMatch?pourcentageMatch[0]:null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
     if (pourcentageMatch) {
       indices = `${pourcentageMatch[1]}% de la surface totale de l'appartement`
       // Garder la description complète aussi si elle contient plus d'infos
@@ -2136,9 +2153,7 @@ function formatLargePieceVieCriterion(apartment) {
     const largePieceVieScore = scoresDetaille.large_piece_vie || {}
     const tier = largePieceVieScore.tier || 'tier3'
     const score = largePieceVieScore.score || 0
-    // #region agent log
-    fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:2075',message:'Returning formatted_data result',data:{aptId:apartment.id,title,indices,description,hasPourcentage:indices?.includes('%')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
+    
     return {
       title,
       description,
@@ -2151,9 +2166,7 @@ function formatLargePieceVieCriterion(apartment) {
   // Fallback: Utiliser scores_detaille si formatted_data n'existe pas
   const scoresDetaille = apartment.scores_detaille || {}
   const largePieceVieScore = scoresDetaille.large_piece_vie || {}
-  // #region agent log
-  fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:2084',message:'Using scores_detaille fallback branch',data:{aptId:apartment.id,hasLargePieceVie:!!largePieceVieScore,keys:largePieceVieScore?Object.keys(largePieceVieScore):[]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-  // #endregion
+  
   // Si pas encore analysé, afficher "Non analysé"
   if (!largePieceVieScore || Object.keys(largePieceVieScore).length === 0) {
     return {
@@ -2167,9 +2180,7 @@ function formatLargePieceVieCriterion(apartment) {
   const tier = largePieceVieScore.tier || 'tier3'
   const justification = largePieceVieScore.justification || ''
   const details = largePieceVieScore.details || {}
-  // #region agent log
-  fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:2094',message:'scores_detaille details check',data:{aptId:apartment.id,pourcentageSalon:details.pourcentage_salon,detailsKeys:Object.keys(details)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-  // #endregion
+  
   // Titre selon le tier
   let title = 'Pièce de vie'
   if (tier === 'tier1') {
@@ -2189,9 +2200,6 @@ function formatLargePieceVieCriterion(apartment) {
     const pourcentage = details.pourcentage_salon
     if (pourcentage !== null && pourcentage !== undefined) {
       indices = `${pourcentage.toFixed(1)}% de la surface totale de l'appartement`
-      // #region agent log
-      fetch('http://127.0.0.1:7245/ingest/2c47b0d2-1884-4c79-97f0-cc01bf783507',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ApartmentCard.jsx:2107',message:'scores_detaille branch found pourcentage',data:{aptId:apartment.id,pourcentage,indices},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
     }
   }
   

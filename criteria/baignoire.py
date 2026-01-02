@@ -91,13 +91,7 @@ def format_baignoire(apartment):
     indices_parts = []
     
     # RÈGLE V2: Format "Baignoire détectée image 3" ou "Douche détectée image 3" (photos ONLY)
-    # Priorité: utiliser detected_photos depuis baignoire_data si disponible
-    if not detected_photos:
-        # Fallback: chercher dans baignoire_data
-        baignoire_data = apartment.get('baignoire_data', {})
-        detected_photos = baignoire_data.get('detected_photos', [])
-    
-    if detected_photos and len(detected_photos) > 0:
+    if detected_photos:
         photos_str = ", ".join([f"image {p}" for p in sorted(detected_photos)])
         if has_baignoire is True:
             indices_parts.append(f"Baignoire détectée {photos_str}")
